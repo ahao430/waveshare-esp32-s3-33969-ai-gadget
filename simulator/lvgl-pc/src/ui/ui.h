@@ -33,5 +33,6 @@ void ui_chat_build(lv_obj_t *screen, int app_id);
 void ui_chat_on_exit(void);
 void ui_voice_build(lv_obj_t *screen, int app_id);
 void ui_voice_on_exit(void);
+void ui_settings_build(lv_obj_t *screen, int app_id);
 
 #endif /* UI_H */

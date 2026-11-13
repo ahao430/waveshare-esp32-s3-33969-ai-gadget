@@ -39,6 +39,12 @@ static lv_obj_t *g_list;
 static lv_obj_t *g_input;
 static lv_obj_t *g_send_btn_lbl;
 static lv_obj_t *g_poll_timer;
+static lv_obj_t *g_prov_dd;
+
+/* providers 后台拉取（一次） */
+static pthread_mutex_t g_prov_mu = PTHREAD_MUTEX_INITIALIZER;
+static bool g_prov_done;
+static char g_prov_list[256];
 
 /* ---------------- 气泡渲染 ---------------- */
 
@@ -133,6 +139,18 @@ static void start_request(void)
     pthread_detach(tid);
 }
 
+static void *prov_worker(void *arg)
+{
+    (void)arg;
+    char list[256];
+    ds_chat_providers(list, sizeof(list));
+    pthread_mutex_lock(&g_prov_mu);
+    strcpy(g_prov_list, list);
+    g_prov_done = true;
+    pthread_mutex_unlock(&g_prov_mu);
+    return NULL;
+}
+
 /* ---------------- 轮询定时器 ---------------- */
 
 static void poll_timer_cb(lv_timer_t *t)
@@ -153,6 +171,19 @@ static void poll_timer_cb(lv_timer_t *t)
     done = g_req_done;
     if (done) strcpy(done_reply, g_pending_reply);
     pthread_mutex_unlock(&g_state_mu);
+
+    /* providers 拉取完成 → 填充下拉 */
+    pthread_mutex_lock(&g_prov_mu);
+    bool prov_ready = g_prov_done;
+    char prov_list[256];
+    if (prov_ready) strcpy(prov_list, g_prov_list);
+    g_prov_done = false;
+    pthread_mutex_unlock(&g_prov_mu);
+    if (prov_ready && g_prov_dd) {
+        lv_dropdown_set_options(g_prov_dd, prov_list);
+        lv_obj_set_style_text_font(g_prov_dd, &lv_font_cn_14, 0);
+        lv_obj_set_style_text_font(g_prov_dd, &lv_font_cn_14, LV_PART_INDICATOR);
+    }
 
     if (g_count > 0 && strcmp(g_history[g_count - 1].role, "pending") == 0) {
         if (newpart[0]) {
@@ -208,6 +239,14 @@ static void send_btn_cb(lv_event_t *e)
     if (g_send_btn_lbl) lv_label_set_text(g_send_btn_lbl, LV_SYMBOL_REFRESH);
 
     start_request();
+}
+
+static void prov_dd_cb(lv_event_t *e)
+{
+    lv_obj_t *dd = lv_event_get_target(e);
+    char sel[32];
+    lv_dropdown_get_selected_str(dd, sel, sizeof(sel));
+    ds_chat_set_provider(sel);
 }
 
 /* ---------------- 页面构建 ---------------- */
@@ -266,6 +305,20 @@ void ui_chat_build(lv_obj_t *scr, int app_id)
 
     rerender_history(g_list);
 
+    /* provider 选择（顶部右侧；选项后台拉取后填充） */
+    g_prov_dd = lv_dropdown_create(scr);
+    lv_dropdown_set_options(g_prov_dd, "mock");
+    lv_obj_set_size(g_prov_dd, 130, 40);
+    lv_obj_align(g_prov_dd, LV_ALIGN_TOP_RIGHT, -8, 6);
+    lv_obj_add_event_cb(g_prov_dd, prov_dd_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    static bool prov_started;
+    if (!prov_started) {
+        pthread_t tid;
+        pthread_create(&tid, NULL, prov_worker, NULL);
+        pthread_detach(tid);
+        prov_started = true;
+    }
+
     /* 结果轮询（页面销毁时由 on_exit 停止） */
     g_poll_timer = lv_timer_create(poll_timer_cb, 100, NULL);
 }
@@ -279,4 +332,5 @@ void ui_chat_on_exit(void)
     g_list = NULL;
     g_input = NULL;
     g_send_btn_lbl = NULL;
+    g_prov_dd = NULL;
 }

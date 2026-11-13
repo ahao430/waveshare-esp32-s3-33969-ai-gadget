@@ -40,6 +40,11 @@ typedef struct {
     int battery_pct;
     bool wifi_ok;
     long updated_unix; /* 额度最近一次成功刷新时间 */
+
+    /* 设备设置（模拟器/内存；真机走 device_config NVS，Phase 6） */
+    int brightness;         /* 10~100 */
+    int volume;             /* 0~100 */
+    int display_timeout_s;  /* 息屏超时（PLAN §13.1 档位） */
 } gadget_state_t;
 
 /* 初始化。source: "mock" 或 "bridge"；bridge_url 如 http://127.0.0.1:8081；
@@ -105,5 +110,17 @@ typedef enum {
 ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
                                     char *transcript, int transcript_len,
                                     char *reply, int reply_len);
+
+/* 设备设置更新（模拟器内存态；真机= PUT 设备 config API，Phase 2/6） */
+void ds_config_update(int brightness, int volume, int timeout_s);
+
+/* 聊天 provider：
+ * - ds_chat_providers 填充 "\n" 分隔的 provider id 列表（bridge=HTTP
+ *   拉取，mock 返回 "mock"）；在后台线程调用。
+ * - ds_chat_set_provider 选择发送用的 provider 前缀；ds_chat_provider()
+ *   取当前值。 */
+int ds_chat_providers(char *out, int cap);
+void ds_chat_set_provider(const char *id);
+const char *ds_chat_provider(void);
 
 #endif /* DATA_SOURCE_H */

@@ -20,6 +20,7 @@ static char g_url[256];       /* 主 provider（GADGET_BRIDGE_PROVIDER） */
 static char g_kimi_url[256];
 static char g_komari_url[256];
 static char g_prewarm_url[256];
+static char g_providers_url[256];
 static char g_voice_url[256];
 static char g_chat_url[256];
 static char g_name[96];
@@ -310,14 +311,11 @@ static ds_chat_result_t bridge_chat_stream(const ds_chat_msg_t *msgs, int n,
         cJSON_AddItemToArray(arr, m);
     }
     cJSON *req = cJSON_CreateObject();
-    /* 模型选择：GADGET_CHAT_PROVIDER（如 "zhipu"）拼接 "/dummy"；
-     * 未设置 = mock（Bridge 端 mock upstream）。TODO：providers 列表
-     * 拉取 + 设置页选择（接设备 config 存储）。 */
-    char model[64] = "mock/dummy";
-    const char *prov = getenv("GADGET_CHAT_PROVIDER");
-    if (prov && prov[0]) {
-        snprintf(model, sizeof(model), "%s/dummy", prov);
-    }
+    /* 模型选择：UI 下拉（ds_chat_provider()）→ "<provider>/dummy"；
+     * 初始值来自 GADGET_CHAT_PROVIDER。TODO：model 名从 Bridge providers
+     * 接口携带真实模型名（现各家 OpenAI 兼容端点接受占位）。 */
+    char model[64];
+    snprintf(model, sizeof(model), "%s/dummy", ds_chat_provider());
     cJSON_AddStringToObject(req, "model", model);
     cJSON_AddBoolToObject(req, "stream", true);
     cJSON_AddItemToObject(req, "messages", arr);
@@ -345,6 +343,35 @@ static ds_chat_result_t bridge_chat_stream(const ds_chat_msg_t *msgs, int n,
     return DS_CHAT_OK;
 }
 
+/* 聊天 provider 列表：GET /api/v1/chat/providers → "\n" 分隔。 */
+static int bridge_chat_providers(char *out, int cap)
+{
+    char buf[4096];
+    if (http_get(g_providers_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) {
+        snprintf(out, (size_t)cap, "mock");
+        return -1;
+    }
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) {
+        snprintf(out, (size_t)cap, "mock");
+        return -1;
+    }
+    const cJSON *arr = cJSON_GetObjectItem(root, "providers");
+    size_t used = 0;
+    out[0] = '\0';
+    const cJSON *it;
+    cJSON_ArrayForEach(it, arr) {
+        if (cJSON_IsString(it)) {
+            int n = snprintf(out + used, (size_t)(cap - (int)used), "%s%s",
+                             used ? "\n" : "", it->valuestring);
+            if (n < 0 || used + (size_t)n >= (size_t)cap) break;
+            used += (size_t)n;
+        }
+    }
+    cJSON_Delete(root);
+    return 0;
+}
+
 const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
 {
     snprintf(g_base, sizeof(g_base), "%s", bridge_url);
@@ -358,6 +385,8 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
              bridge_url);
     snprintf(g_voice_url, sizeof(g_voice_url), "%s/api/v1/voice/interact",
              bridge_url);
+    snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers",
+             bridge_url);
     snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions",
              bridge_url);
     static const ds_impl_t impl = {
@@ -367,6 +396,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .prewarm_zhipu = bridge_prewarm,
         .chat_send_stream = bridge_chat_stream,
         .voice_interact  = bridge_voice_interact,
+        .chat_providers  = bridge_chat_providers,
     };
     return &impl;
 }
@@ -401,3 +431,4 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
     }
     return DS_VOICE_OK;
 }
+

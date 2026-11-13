@@ -21,6 +21,8 @@ typedef struct {
 	ds_voice_result_t (*voice_interact)(const int16_t *pcm, int frames,
 	                                    char *transcript, int transcript_len,
 	                                    char *reply, int reply_len);
+	/* 聊天 provider 列表（"\\n" 分隔；可为 NULL，front 兜底 "mock"）。 */
+	int (*chat_providers)(char *out, int cap);
 
 } ds_impl_t;
 

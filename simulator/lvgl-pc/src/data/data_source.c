@@ -29,12 +29,30 @@ static gadget_state_t g_state = {
     .battery_pct  = 82,
     .wifi_ok      = true,
     .updated_unix = 0,
+
+    .brightness        = 80,
+    .volume            = 55,
+    .display_timeout_s = 60,
 };
 
+void ds_config_update(int brightness, int volume, int timeout_s)
+{
+    if (brightness > 0) g_state.brightness = brightness;
+    if (volume >= 0) g_state.volume = volume;
+    if (timeout_s > 0) g_state.display_timeout_s = timeout_s;
+    /* TODO(bridge 模式)：同步 PUT 设备 config API（Phase 6 设备侧就绪后） */
+}
+
 static const ds_impl_t *g_impl;
+static char g_chat_provider[32] = "mock";
 
 void ds_init(const char *source, const char *bridge_url, const char *provider)
 {
+    /* 聊天 provider 默认值：GADGET_CHAT_PROVIDER（bridge 模式有意义） */
+    if (getenv("GADGET_CHAT_PROVIDER") && getenv("GADGET_CHAT_PROVIDER")[0]) {
+        snprintf(g_chat_provider, sizeof(g_chat_provider), "%s",
+                 getenv("GADGET_CHAT_PROVIDER"));
+    }
     const char *src  = source  ? source  : getenv("GADGET_DATA_SOURCE");
     const char *url  = bridge_url ? bridge_url : getenv("GADGET_BRIDGE_URL");
     const char *prov = provider ? provider : getenv("GADGET_BRIDGE_PROVIDER");
@@ -86,6 +104,26 @@ ds_chat_result_t ds_chat_send_stream(const ds_chat_msg_t *msgs, int n,
         return DS_CHAT_UNSUPPORTED;
     }
     return g_impl->chat_send_stream(msgs, n, on_delta, user, reply_full, reply_len);
+}
+
+int ds_chat_providers(char *out, int cap)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->chat_providers) {
+        snprintf(out, (size_t)cap, "mock");
+        return 0;
+    }
+    return g_impl->chat_providers(out, cap);
+}
+
+void ds_chat_set_provider(const char *id)
+{
+    snprintf(g_chat_provider, sizeof(g_chat_provider), "%s", id ? id : "mock");
+}
+
+const char *ds_chat_provider(void)
+{
+    return g_chat_provider;
 }
 
 ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
