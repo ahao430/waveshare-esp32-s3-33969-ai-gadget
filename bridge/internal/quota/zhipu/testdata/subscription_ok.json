@@ -1,0 +1,13 @@
+{
+  "code": 200,
+  "msg": "ok",
+  "data": {
+    "list": [
+      {
+        "planName": "GLM Coding Plan (Lite)",
+        "status": "active",
+        "expireTime": 1798761600000
+      }
+    ]
+  }
+}

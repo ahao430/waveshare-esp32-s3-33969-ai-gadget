@@ -1,0 +1,106 @@
+// Package storage 提供额度快照的 SQLite 持久化（PLAN §15.3）。
+// 纯 Go 驱动（modernc.org/sqlite），无 cgo，便于交叉编译。
+// Phase 3 范围：快照缓存持久化；凭据加密存储仍为 TODO。
+package storage
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	_ "modernc.org/sqlite" // 注册 sqlite 驱动
+
+	"gadget-bridge/internal/quota"
+)
+
+const schema = `
+CREATE TABLE IF NOT EXISTS snapshot_cache (
+    provider_id  TEXT PRIMARY KEY,
+    payload      TEXT NOT NULL,            -- StoredSnapshot JSON
+    updated_at   INTEGER NOT NULL          -- 写入时间（unix 秒）
+);
+CREATE TABLE IF NOT EXISTS provider_credentials (
+    provider_id  TEXT PRIMARY KEY,
+    account_label TEXT NOT NULL DEFAULT '',
+    encrypted    TEXT NOT NULL,            -- security.Encrypt 格式
+    updated_at   INTEGER NOT NULL
+);
+`
+
+// DB 是快照持久层。
+type DB struct {
+	sql *sql.DB
+}
+
+// Open 打开（必要时创建）数据库并执行迁移。path 为空时用内存库（仅测试）。
+func Open(path string) (*DB, error) {
+	dsn := "file::memory:?cache=shared"
+	if path != "" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			return nil, fmt.Errorf("storage: mkdir: %w", err)
+		}
+		dsn = "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	}
+	sqlDB, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("storage: open: %w", err)
+	}
+	// SQLite 单写者：串行化避免 database-locked
+	sqlDB.SetMaxOpenConns(1)
+	if _, err := sqlDB.Exec(schema); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("storage: migrate: %w", err)
+	}
+	return &DB{sql: sqlDB}, nil
+}
+
+func (d *DB) Close() error { return d.sql.Close() }
+
+// SaveStored 持久化一条 StoredSnapshot（整体 JSON 覆盖写）。
+func (d *DB) SaveStored(providerID string, view quota.StoredSnapshot) error {
+	payload, err := json.Marshal(view)
+	if err != nil {
+		return fmt.Errorf("storage: marshal: %w", err)
+	}
+	_, err = d.sql.Exec(
+		`INSERT INTO snapshot_cache (provider_id, payload, updated_at) VALUES (?, ?, ?)
+		 ON CONFLICT(provider_id) DO UPDATE SET payload=excluded.payload, updated_at=excluded.updated_at`,
+		providerID, string(payload), time.Now().Unix(),
+	)
+	if err != nil {
+		return fmt.Errorf("storage: save %s: %w", providerID, err)
+	}
+	return nil
+}
+
+// LoadAll 恢复全部缓存快照。损坏的行跳过并计入 errors（不整体失败）。
+func (d *DB) LoadAll() (map[string]quota.StoredSnapshot, []error) {
+	rows, err := d.sql.Query(`SELECT provider_id, payload FROM snapshot_cache`)
+	if err != nil {
+		return nil, []error{fmt.Errorf("storage: query: %w", err)}
+	}
+	defer rows.Close()
+
+	out := make(map[string]quota.StoredSnapshot)
+	var errs []error
+	for rows.Next() {
+		var id, payload string
+		if err := rows.Scan(&id, &payload); err != nil {
+			errs = append(errs, fmt.Errorf("storage: scan: %w", err))
+			continue
+		}
+		var view quota.StoredSnapshot
+		if err := json.Unmarshal([]byte(payload), &view); err != nil {
+			errs = append(errs, fmt.Errorf("storage: unmarshal %s: %w", id, err))
+			continue
+		}
+		out[id] = view
+	}
+	if err := rows.Err(); err != nil {
+		errs = append(errs, fmt.Errorf("storage: rows: %w", err))
+	}
+	return out, errs
+}
