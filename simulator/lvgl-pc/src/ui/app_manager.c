@@ -1,0 +1,91 @@
+#include "app_manager.h"
+
+#include <stddef.h>
+
+#define APP_MAX 16
+
+static app_def_t g_apps[APP_MAX];
+static int g_count;
+
+static lv_obj_t *g_home;
+static lv_obj_t *g_current_screen;
+static const app_def_t *g_current_def;
+
+bool app_manager_register(const app_def_t *def)
+{
+    if (!def || g_count >= APP_MAX) return false;
+    g_apps[g_count++] = *def;
+    return true;
+}
+
+int app_manager_count(void) { return g_count; }
+
+const app_def_t *app_manager_get(int idx)
+{
+    if (idx < 0 || idx >= g_count) return NULL;
+    return &g_apps[idx];
+}
+
+void app_manager_set_home(lv_obj_t *home) { g_home = home; }
+
+static void exit_current_app_logic(void)
+{
+    /* 只执行 App 级清理；屏幕对象的销毁交给转场 auto_del，
+     * 避免动画进行中删除被渲染的屏幕。 */
+    if (g_current_def && g_current_def->on_exit) g_current_def->on_exit();
+}
+
+void app_manager_open(int app_id)
+{
+    const app_def_t *def = NULL;
+    for (int i = 0; i < g_count; i++) {
+        if (g_apps[i].id == app_id) { def = &g_apps[i]; break; }
+    }
+    if (!def || !g_home) return;
+
+    bool in_app = (g_current_screen != NULL);
+    exit_current_app_logic();
+
+    lv_obj_t *scr = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_all(scr, 16, 0);
+    lv_obj_set_style_border_width(scr, 0, 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+    if (def->build) def->build(scr, app_id);
+
+    /* auto_del=true：转场结束后销毁被替换的屏幕（资源释放，PLAN §4.3） */
+    lv_screen_load_anim(scr, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, in_app);
+    g_current_screen = scr;
+    g_current_def = def;
+}
+
+void app_manager_back(void)
+{
+    if (!g_current_screen) return;
+    exit_current_app_logic();
+    g_current_screen = NULL;
+    g_current_def = NULL;
+
+    /* 转场回 Home，动画结束后自动删除 App 屏幕 */
+    lv_screen_load_anim(g_home, LV_SCR_LOAD_ANIM_MOVE_RIGHT, 200, 0, true);
+}
+
+static void back_click_cb(lv_event_t *e)
+{
+    (void)e;
+    app_manager_back();
+}
+
+void app_manager_back_on_click(lv_obj_t *button)
+{
+    lv_obj_add_event_cb(button, back_click_cb, LV_EVENT_CLICKED, NULL);
+}
+
+bool app_manager_in_app(void) { return g_current_screen != NULL; }
+
+int app_manager_current_id(void)
+{
+    return g_current_def ? g_current_def->id : -1;
+}

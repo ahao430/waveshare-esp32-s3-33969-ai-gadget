@@ -1,0 +1,7 @@
+dependencies:
+  # Waveshare 33969 BSP（显示/触摸/音频/TF，见 docs/HARDWARE.md §3）
+  waveshare/esp32_s3_touch_amoled_2_16: "^2.0.1"
+  # 基线 6.0.x（ADR-004）；允许 5.5.5 以对齐官方双测试线
+  # lvgl 由 BSP 传递引入；115MB 包下载卡 CDN 时用
+  # scripts/fetch_lvgl_component.sh 预置到 managed_components/
+  idf: ">=5.5,<6.1"
