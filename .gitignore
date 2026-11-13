@@ -1,0 +1,51 @@
+# ---- Secrets / credentials (never commit) ----
+.env
+.env.*
+*.pem
+*.key
+secrets/
+bridge/configs/*.local.*
+bridge/data/
+
+# ---- macOS ----
+.DS_Store
+
+# ---- ESP-IDF firmware ----
+firmware/build/
+firmware/dependencies.lock
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/managed_components/
+firmware/dependencies.db
+firmware/third_party/
+
+# ---- Go bridge ----
+bridge/bin/
+bridge/gadget-bridge
+bridge/gadget-bridge-*
+*.sqlite3
+*.sqlite3-journal
+*.sqlite3-wal
+*.sqlite3-shm
+coverage.out
+
+# ---- Web frontend ----
+web/node_modules/
+web/dist/
+web/.vite/
+*.local
+
+# ---- LVGL PC simulator ----
+simulator/lvgl-pc/build/
+simulator/wokwi/
+
+# ---- Editors / tools ----
+.vscode/
+.idea/
+*.swp
+claude.md
+CLAUDE.local.md
+
+# ---- Local artifacts ----
+out/
+*.log
