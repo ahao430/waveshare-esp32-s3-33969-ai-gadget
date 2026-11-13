@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply bg-bg text-txt antialiased;
+  }
+  body {
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* 通用卡片：与设备 UI 玻璃拟态卡片同一套变量 */
+  .card {
+    @apply rounded-2xl border border-line bg-card p-4;
+  }
+  .btn {
+    @apply rounded-lg bg-accent px-3.5 py-2 text-sm text-white transition-colors hover:bg-accent/85 disabled:cursor-default disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply rounded-lg border border-line bg-card px-3.5 py-2 text-sm text-txt transition-colors hover:bg-cardhi disabled:opacity-50;
+  }
+  .input {
+    @apply w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm text-txt placeholder:text-dim focus:border-accent focus:outline-none;
+  }
+  .badge {
+    @apply rounded-full bg-cardhi px-2 py-0.5 text-[11px] text-dim;
+  }
+  .page-title {
+    @apply text-[22px] font-bold;
+  }
+  .page-sub {
+    @apply mb-5 text-[13px] text-dim;
+  }
+}

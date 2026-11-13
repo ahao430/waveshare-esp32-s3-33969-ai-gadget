@@ -1,0 +1,129 @@
+<script setup lang="ts">
+// 订阅额度页：Provider 账号配置（PLAN §15.3 凭据加密存储的 Web 入口）。
+// Key 只进不出：保存后不回显；Bridge 侧 AES-256-GCM 落库。
+import { onMounted, ref } from 'vue'
+
+import { request } from '@/api/client'
+
+interface CredentialInfo {
+  provider_id: string
+  account_label: string
+  updated_at: string
+}
+
+const creds = ref<CredentialInfo[]>([])
+const editKey = ref('')
+const editLabel = ref('')
+const editing = ref<string>('') // 正在编辑的 provider id
+const message = ref('')
+const saving = ref(false)
+
+const supported = ['zhipu', 'kimi'] // 恒注册的 provider
+
+onMounted(load)
+
+async function load() {
+  try {
+    const r = await request<{ credentials: CredentialInfo[] }>('/api/v1/credentials')
+    creds.value = r.credentials
+  } catch (e) {
+    message.value = `凭据列表不可用：${e instanceof Error ? e.message : e}（需 BRIDGE_MASTER_KEY）`
+  }
+}
+
+function infoOf(id: string): CredentialInfo | undefined {
+  return creds.value.find((c) => c.provider_id === id)
+}
+
+function startEdit(id: string) {
+  editing.value = id
+  editKey.value = ''
+  editLabel.value = infoOf(id)?.account_label ?? ''
+  message.value = ''
+}
+
+async function save(id: string) {
+  if (!editKey.value) return
+  saving.value = true
+  message.value = ''
+  try {
+    await request(`/api/v1/credentials/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_label: editLabel.value, api_key: editKey.value }),
+    })
+    message.value = `已保存 ${id}（下一次刷新即生效）`
+    editing.value = ''
+    editKey.value = ''
+    await load()
+  } catch (e) {
+    message.value = `保存失败：${e instanceof Error ? e.message : e}`
+  } finally {
+    saving.value = false
+  }
+}
+
+async function remove(id: string) {
+  if (!confirm(`删除 ${id} 的凭据？设备下一次刷新将无法抓取该 Provider。`)) return
+  await request(`/api/v1/credentials/${id}`, { method: 'DELETE' })
+  await load()
+}
+</script>
+
+<template>
+  <h1 class="page-title">订阅额度</h1>
+  <p class="page-sub">
+    Provider 账号配置 · API Key 经 AES-256-GCM 加密落库（需 Bridge 设置
+    <code class="text-accent2">BRIDGE_MASTER_KEY</code>），明文不回显、不入日志
+  </p>
+
+  <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') || message.includes('不可用') ? 'text-err' : 'text-ok'">
+    {{ message }}
+  </p>
+
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div v-for="p in supported" :key="p" class="card">
+      <div class="mb-3 flex items-center justify-between">
+        <h3 class="font-semibold capitalize">{{ p }}</h3>
+        <span class="badge" :class="infoOf(p) ? '!bg-ok/15 !text-ok' : ''">
+          {{ infoOf(p) ? `已配置 · ${infoOf(p)!.account_label || '未命名'}` : '未配置' }}
+        </span>
+      </div>
+
+      <div v-if="infoOf(p)" class="mb-3 text-xs text-dim">
+        更新于 {{ new Date(infoOf(p)!.updated_at).toLocaleString('zh-CN', { hour12: false }) }}
+      </div>
+
+      <template v-if="editing === p">
+        <div class="flex flex-col gap-3">
+          <input v-model="editLabel" class="input" placeholder="账号标签（可选）" />
+          <input
+            v-model="editKey"
+            class="input"
+            type="password"
+            :placeholder="infoOf(p) ? '输入新 Key 覆盖' : 'API Key'"
+          />
+          <div class="flex gap-2">
+            <button class="btn" :disabled="saving || !editKey" @click="save(p)">
+              {{ saving ? '保存中…' : '保存' }}
+            </button>
+            <button class="btn-ghost" @click="editing = ''">取消</button>
+          </div>
+        </div>
+      </template>
+      <template v-else>
+        <div class="flex gap-2">
+          <button class="btn-ghost" @click="startEdit(p)">
+            {{ infoOf(p) ? '更换 Key' : '配置 Key' }}
+          </button>
+          <button v-if="infoOf(p)" class="btn-ghost !text-err" @click="remove(p)">删除</button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="card mt-6 text-xs text-dim">
+    说明：额度抓取账号解析顺序 = 环境变量（ZHIPU_API_KEY 等）→ 此处配置的加密凭据。
+    保存后无需重启 Bridge，下一次「刷新」即生效。
+  </div>
+</template>
