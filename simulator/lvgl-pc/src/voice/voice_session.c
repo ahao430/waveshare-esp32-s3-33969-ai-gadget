@@ -13,7 +13,9 @@
  */
 #include "voice_session.h"
 
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -24,6 +26,7 @@ static vs_listener_t g_listener;
 
 static vs_state_t g_state = VS_IDLE;
 static char g_owner[32];
+static bool g_mock_capture;
 
 static long g_now_ms(void)
 {
@@ -184,6 +187,11 @@ void vs_set_mock_timing(int think_ms, int speak_ms_per_char)
     g_speak_ms_per_char = speak_ms_per_char;
 }
 
+void vs_set_mock_capture(bool enable)
+{
+    g_mock_capture = enable;
+}
+
 vs_state_t vs_state(void)
 {
     return g_state;
@@ -198,11 +206,22 @@ void vs_tick(void)
 
     switch (g_state) {
     case VS_LISTENING:
-        /* mock/real 采集由 ops 内部驱动；这里按 10ms 节奏喂假帧给 listener */
-        if (g_ops == NULL && now - g_last_capture_ms >= 100) {
+        /* 采集驱动：mock_capture 开启时喂伪语音帧（波形演示）；
+         * 真机 real ops 自带真实采集（不在 tick 里喂）。 */
+        if (g_mock_capture && now - g_last_capture_ms >= 100) {
             g_last_capture_ms = now;
             if (g_listener.on_pcm) {
-                int16_t pcm[PCM_FRAMES_PER_TICK] = {0}; /* 静音占位 */
+                /* 伪语音：双正弦叠加 + 语速包络 + 抖动 */
+                int16_t pcm[PCM_FRAMES_PER_TICK];
+                double phase = (now % 700) / 700.0 * 3.14159 * 2;
+                double env = 0.55 + 0.45 * sin(phase);
+                for (int i = 0; i < PCM_FRAMES_PER_TICK; i++) {
+                    double t = (double)((now % 1000) * 160 + i) / 16000.0;
+                    double v = env * (0.6 * sin(2 * 3.14159 * 220.0 * t) +
+                                      0.4 * sin(2 * 3.14159 * 660.0 * t)) *
+                               (0.85 + 0.15 * ((rand() % 200) - 100) / 100.0);
+                    pcm[i] = (int16_t)(v * 26000);
+                }
                 g_listener.on_pcm(pcm, PCM_FRAMES_PER_TICK, g_listener.user);
             }
         }

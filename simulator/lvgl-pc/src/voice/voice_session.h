@@ -77,4 +77,9 @@ void vs_set_listener(const vs_listener_t *l);
 /* 模拟参数（演示用；真机接入后由 real ops 决定真实节奏） */
 void vs_set_mock_timing(int think_ms, int speak_ms_per_char);
 
+/* 模拟采集开关：开启后 Listening 期间由 vs_tick 喂伪语音帧（正弦+噪声
+ * 包络，经 on_pcm 回调）——波形可视化/无音频环境演示用。真机 real ops
+ * 自带真实采集，保持关闭。 */
+void vs_set_mock_capture(bool enable);
+
 #endif /* VOICE_SESSION_H */

@@ -2,6 +2,7 @@
  * 光环动画 + PTT 按钮 + 状态文字，驱动 voice_session。
  * Xiaozhi 真机接入时复用本页模式（引擎名不同、共享同一 voice_session 租约）。
  */
+#include <math.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,12 @@
 #define CAP_MAX_FRAMES (16000 * 8)
 static int16_t g_capture[CAP_MAX_FRAMES];
 static int g_capture_frames;
+
+/* 波形可视化：32 条竖条（Listening 期间按帧 RMS 高度起伏） */
+#define WAVE_BARS 32
+static lv_obj_t *g_wave[WAVE_BARS];
+static int g_wave_amp;
+static bool g_wave_data;
 
 /* 页面控件（单前台模型：同刻只有一个实例） */
 static lv_obj_t *g_ring;      /* 光环 arc */
@@ -97,11 +104,19 @@ static void on_vs_speak(const char *visible, void *user)
 static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
 {
     (void)user;
-    /* 缓存采集帧（interact 用）；波形可视化 TODO */
+    /* 缓存采集帧（interact 用）+ RMS 供波形 */
     if (g_capture_frames + frames <= CAP_MAX_FRAMES) {
         memcpy(g_capture + g_capture_frames, pcm, (size_t)frames * 2);
         g_capture_frames += frames;
     }
+    double sum = 0;
+    for (int i = 0; i < frames; i++) {
+        sum += (double)pcm[i] * pcm[i];
+    }
+    double rms = sqrt(sum / frames) / 32768.0;
+    g_wave_amp = (int)(rms * 100 * 3);
+    if (g_wave_amp > 100) g_wave_amp = 100;
+    g_wave_data = true;
 }
 
 static const vs_listener_t g_vs_listener = {
@@ -152,6 +167,26 @@ static void poll_timer_cb(lv_timer_t *t)
         vs_notify_engine_done();
     }
 
+    /* 波形更新：Listening 用最近 RMS（条间按序号微差做"波形感"），
+     * 其他状态平滑压平 */
+    static int g_wave_disp = 0;
+    if (g_wave_data) {
+        int target = (vs_state() == VS_LISTENING) ? g_wave_amp : 0;
+        g_wave_disp += (target - g_wave_disp) / 2; /* 简单一阶平滑 */
+        for (int i = 0; i < WAVE_BARS; i++) {
+            int h = 4 + g_wave_disp * 3 / 4; /* 上限 ~79px */
+            if (h > 4) {
+                int wig = (int)(6 * (0.5 + 0.5 * sin(i * 0.7 + (double)g_wave_disp / 6)));
+                h += h > 12 ? wig : 0;
+            }
+            if (h < 4) h = 4;
+            lv_obj_set_size(g_wave[i], 8, h);
+            lv_obj_align(g_wave[i], LV_ALIGN_TOP_MID,
+                         -((WAVE_BARS / 2) * 10) + i * 10, 118 - h);
+            lv_obj_set_style_bg_opa(g_wave[i], vs_state() == VS_LISTENING ? LV_OPA_COVER : LV_OPA_40, 0);
+        }
+    }
+
     /* 光环随状态变化（无动画库调用，直接改值：低成本） */
     if (!g_ring) return;
     vs_state_t st = vs_state();
@@ -176,6 +211,7 @@ void ui_voice_build(lv_obj_t *scr, int app_id)
     if (!g_inited) {
         vs_init(audio_mock_ops());
         vs_set_listener(&g_vs_listener);
+        vs_set_mock_capture(true); /* 模拟器：伪语音帧供波形演示；真机关闭 */
         g_inited = true;
     }
 
@@ -237,6 +273,20 @@ void ui_voice_build(lv_obj_t *scr, int app_id)
     snprintf(ownerbuf, sizeof(ownerbuf), "engine: %s", g_engine);
     g_owner_lbl = ui_label(scr, ownerbuf, &lv_font_montserrat_12, UI_TEXT_DIM);
     lv_obj_align(g_owner_lbl, LV_ALIGN_TOP_RIGHT, -8, 32);
+
+    /* 波形条（Listening 时起伏；其余状态压平） */
+    for (int i = 0; i < WAVE_BARS; i++) {
+        lv_obj_t *bar = lv_obj_create(scr);
+        lv_obj_set_size(bar, 8, 4);
+        lv_obj_set_style_bg_color(bar, UI_ACCENT2, 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(bar, 3, 0);
+        lv_obj_set_style_border_width(bar, 0, 0);
+        lv_obj_set_style_shadow_width(bar, 0, 0);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_align(bar, LV_ALIGN_TOP_MID, -((WAVE_BARS / 2) * 10) + i * 10, 108);
+        g_wave[i] = bar;
+    }
 
     /* PTT 大按钮（按下=开始聆听；松开=提交） */
     g_ptt_btn = lv_button_create(scr);

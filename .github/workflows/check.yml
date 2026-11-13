@@ -1,0 +1,50 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Vet + Build + Test
+        working-directory: bridge
+        run: |
+          go vet ./...
+          go build ./...
+          go test ./... -v
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install + Typecheck + Build
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+  simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+      - name: Configure + Build
+        run: |
+          cmake -S simulator/lvgl-pc -B simulator/lvgl-pc/build
+          cmake --build simulator/lvgl-pc/build -j
+      # 冒烟：headless 环境下 SDL 需要 dummy video driver
+      - name: Smoke run (dummy video)
+        run: |
+          SDL_VIDEODRIVER=dummy timeout 3 ./simulator/lvgl-pc/build/gadget_sim && \
+            echo "simulator alive" || test $? -eq 124
