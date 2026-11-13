@@ -15,6 +15,9 @@
 /* SDL 显示/输入驱动（lv_sdl_window / lv_sdl_mouse） */
 #define LV_USE_SDL 1
 
+/* GIF 解码（Muse 吉祥物动画；固件侧按需裁剪，PLAN §8.5） */
+#define LV_USE_GIF 1
+
 /* 字体：模拟器 UI 使用的全部字号（真机按需裁剪） */
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1

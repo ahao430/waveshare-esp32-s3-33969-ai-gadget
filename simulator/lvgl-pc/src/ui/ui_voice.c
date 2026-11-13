@@ -9,6 +9,7 @@
 
 #include "app_manager.h"
 #include "audio_mock.h"
+#include "lvgl.h" /* lv_gif 经 lvgl.h 聚合引入（LV_USE_GIF=1） */
 #include "data_source.h"
 #include "voice_session.h"
 #include "ui.h"
@@ -255,8 +256,12 @@ void ui_voice_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_arc_color(g_ring, UI_CARD, LV_PART_MAIN);
     lv_obj_set_style_arc_color(g_ring, UI_CARD, LV_PART_INDICATOR);
 
-    lv_obj_t *mascot = ui_label(g_ring, LV_SYMBOL_AUDIO, &lv_font_montserrat_48, UI_ACCENT2);
+    /* 吉祥物：原创概念动画（PLAN §8.5；LVGL gif 组件，Idle 即自带呼吸）。
+     * 相对 CWD（仓库根）运行；TODO 固件侧转 RGB565 帧资源。 */
+    lv_obj_t *mascot = lv_gif_create(g_ring);
+    lv_gif_set_src(mascot, "simulator/lvgl-pc/assets/mascot.gif");
     lv_obj_center(mascot);
+    lv_obj_set_size(mascot, 120, 120);
 
     g_state_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_16, UI_TEXT);
     lv_obj_align(g_state_lbl, LV_ALIGN_CENTER, 0, 62);
