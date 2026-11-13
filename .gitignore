@@ -49,3 +49,8 @@ CLAUDE.local.md
 # ---- Local artifacts ----
 out/
 *.log
+
+# ---- Local tool plugins (user-local) ----
+.v2c/
+.video_agent/
+out/
