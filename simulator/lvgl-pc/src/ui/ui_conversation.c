@@ -38,7 +38,6 @@ static conv_msg_t g_hist[UI_APP_COUNT][CONV_MSGS];
 static int g_hist_n[UI_APP_COUNT];
 
 /* 页面控件（单前台） */
-static lv_obj_t *g_hist_area;
 static lv_obj_t *g_status_lbl;
 static lv_obj_t *g_reply_lbl;
 static lv_obj_t *g_wave[32];
@@ -207,14 +206,9 @@ static void add_bubble(lv_obj_t *parent, const char *role, const char *text)
     lv_obj_set_size(bubble, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
 }
 
+/* 历史改为按钮全屏查看后不再常驻渲染；保留空实现以兼容旧调用点 */
 static void rerender_history(void)
 {
-    if (!g_hist_area) return;
-    lv_obj_clean(g_hist_area);
-    for (int i = 0; i < g_hist_n[g_app_id]; i++) {
-        add_bubble(g_hist_area, g_hist[g_app_id][i].role, g_hist[g_app_id][i].text);
-    }
-    lv_obj_scroll_to_y(g_hist_area, LV_COORD_MAX, LV_ANIM_OFF);
 }
 
 /* ---------------- PTT / poll ---------------- */
@@ -250,8 +244,7 @@ static void poll_timer_cb(lv_timer_t *t)
             lv_label_set_text(g_reply_lbl, buf);
         }
         vs_set_reply(reply);
-        vs_notify_engine_done();
-        rerender_history(); /* transcript/reply 已入历史 */
+        vs_notify_engine_done(); /* 进行中字幕可见；历史经按钮查看 */
     }
 
     /* 波形 */
@@ -266,11 +259,63 @@ static void poll_timer_cb(lv_timer_t *t)
             if (h < 4) h = 4;
             lv_obj_set_size(g_wave[i], 6, h);
             lv_obj_align(g_wave[i], LV_ALIGN_BOTTOM_MID,
-                         -((WAVE_BARS_MAX / 2) * 8) + i * 8, 116);
+                     -((WAVE_BARS_MAX / 2) * 8) + i * 8, 122);
             lv_obj_set_style_bg_opa(g_wave[i],
                                     vs_state() == VS_LISTENING ? LV_OPA_COVER : LV_OPA_30, 0);
         }
     }
+}
+
+/* ---------------- 全屏历史模态 ---------------- */
+
+static void hist_close_cb(lv_event_t *e)
+{
+    lv_obj_t *mask = lv_event_get_user_data(e);
+    lv_obj_delete(mask);
+}
+
+static void hist_open_cb(lv_event_t *e)
+{
+    (void)e;
+    if (g_app_id < 0) return;
+
+    lv_obj_t *mask = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(mask, 480, 480);
+    lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_color(mask, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(mask, 0, 0);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *list = lv_obj_create(mask);
+    lv_obj_set_size(list, LV_PCT(100), 400);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_opa(list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(list, 0, 0);
+    lv_obj_set_style_pad_all(list, 6, 0);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(list, 8, 0);
+
+    conv_msg_t *h = g_hist[g_app_id];
+    int n = g_hist_n[g_app_id];
+    for (int i = 0; i < n; i++) {
+        add_bubble(list, h[i].role, h[i].text);
+    }
+    if (n == 0) {
+        lv_obj_t *empty = ui_label(list, "还没有对话记录", &lv_font_cn_14, UI_TEXT_DIM);
+        lv_obj_center(empty);
+    }
+    lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
+
+    lv_obj_t *close = lv_button_create(mask);
+    lv_obj_set_size(close, 160, 48);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 0, -14);
+    ui_style_card(close);
+    lv_obj_set_style_bg_color(close, UI_ACCENT, 0);
+    lv_obj_set_style_radius(close, 16, 0);
+    lv_obj_add_event_cb(close, hist_close_cb, LV_EVENT_CLICKED, mask);
+    lv_obj_t *cl = ui_label(close, "关闭", &lv_font_cn_16, UI_TEXT);
+    lv_obj_center(cl);
 }
 
 /* ---------------- 页面构建 ---------------- */
@@ -304,45 +349,52 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
     lv_obj_center(icon);
 
-    /* 历史区（滚动，占上部 180px） */
-    g_hist_area = lv_obj_create(scr);
-    lv_obj_set_size(g_hist_area, LV_PCT(100), 180);
-    lv_obj_align(g_hist_area, LV_ALIGN_TOP_MID, 0, 54);
-    lv_obj_set_style_bg_opa(g_hist_area, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(g_hist_area, 0, 0);
-    lv_obj_set_style_pad_all(g_hist_area, 2, 0);
-    lv_obj_set_flex_flow(g_hist_area, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(g_hist_area, 6, 0);
+    /* 历史不直接展示：顶部"历史"按钮 → 全屏滚动查看 */
+    lv_obj_t *hist_btn = lv_button_create(scr);
+    lv_obj_set_size(hist_btn, 56, 44);
+    lv_obj_align(hist_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
+    ui_style_card(hist_btn);
+    lv_obj_set_style_radius(hist_btn, 14, 0);
+    lv_obj_add_event_cb(hist_btn, hist_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *hicon = ui_label(hist_btn, LV_SYMBOL_LIST, &lv_font_montserrat_16, UI_TEXT);
+    lv_obj_center(hicon);
 
-    /* 形象：大肥鱼用 dsh-pet 状态动画，其余用吉祥物 GIF。
-     * dsh webm 素材自带黑底（Electron 透明在播放层实现），垫深色圆角卡展示 */
-    if (app_id == UI_APP_CHAT) {
+    /* 形象（放大）：大肥鱼=dsh 状态动画 / 小智=Q 版台湾女生（gpt-image
+     * 生成，深蓝底融合 UI）/ Muse=吉祥物 GIF */
+    if (app_id == UI_APP_XIAOZHI) {
+        g_mascot = lv_image_create(scr);
+        lv_image_set_src(g_mascot, "A:simulator/lvgl-pc/assets/xiaozhi/xiaozhi-220.png");
+        lv_obj_set_size(g_mascot, 220, 220); /* 预缩 220px，无需 zoom */
+        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 60);
+    } else if (app_id == UI_APP_CHAT) {
         lv_obj_t *stage = lv_obj_create(scr);
-        lv_obj_set_size(stage, 156, 94);
+        lv_obj_set_size(stage, 216, 130);
         lv_obj_set_style_bg_color(stage, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(stage, 12, 0);
+        lv_obj_set_style_radius(stage, 16, 0);
         lv_obj_set_style_border_width(stage, 0, 0);
         lv_obj_set_style_shadow_width(stage, 0, 0);
         lv_obj_clear_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(stage, LV_ALIGN_TOP_MID, 0, 234);
-    }
-    g_mascot = lv_gif_create(scr);
-    if (app_id == UI_APP_CHAT) {
-        lv_obj_set_size(g_mascot, 144, 82); /* dsh 素材原始尺寸 */
+        lv_obj_align(stage, LV_ALIGN_TOP_MID, 0, 80);
+
+        g_mascot = lv_gif_create(scr);
+        lv_obj_set_size(g_mascot, 200, 114);
+        lv_image_set_scale(g_mascot, (256 * 200) / 144);
         lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif");
+        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 88);
     } else {
-        lv_obj_set_size(g_mascot, 110, 110);
-        lv_image_set_scale(g_mascot, 64); /* robot gif 439×391 → 110 */
+        g_mascot = lv_gif_create(scr);
+        lv_obj_set_size(g_mascot, 150, 150);
+        lv_image_set_scale(g_mascot, (256 * 150) / 439);
         lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/mascot.gif");
+        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 90);
     }
-    lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 240);
 
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 344);
+    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 296);
 
     g_reply_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(g_reply_lbl, LV_ALIGN_TOP_MID, 0, 366);
+    lv_obj_align(g_reply_lbl, LV_ALIGN_TOP_MID, 0, 318);
     lv_label_set_long_mode(g_reply_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(g_reply_lbl, 440);
     lv_label_set_long_mode(g_reply_lbl, LV_LABEL_LONG_DOT);
@@ -357,7 +409,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         lv_obj_set_style_border_width(bar, 0, 0);
         lv_obj_set_style_shadow_width(bar, 0, 0);
         lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, -((WAVE_BARS_MAX / 2) * 8) + i * 8, 116);
+        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, -((WAVE_BARS_MAX / 2) * 8) + i * 8, 122);
         g_wave[i] = bar;
     }
 
@@ -380,13 +432,11 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     if (!g_voice_enabled) {
         lv_obj_t *hint = ui_label(scr, "ZCode 数据源待接入（PLAN §5.7）",
                                   &lv_font_cn_12, UI_TEXT_DIM);
-        lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 344);
+        lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 296);
         lv_obj_set_style_text_color(hint, UI_TEXT_DIM, 0);
         lv_obj_del(g_status_lbl);
         g_status_lbl = NULL;
     }
-
-    rerender_history();
 
     g_poll_timer = lv_timer_create(poll_timer_cb, 50, NULL);
 }
@@ -398,7 +448,6 @@ void ui_conversation_on_exit(void)
         g_poll_timer = NULL;
     }
     vs_release();
-    g_hist_area = NULL;
     g_status_lbl = NULL;
     g_reply_lbl = NULL;
     g_ptt_btn = NULL;

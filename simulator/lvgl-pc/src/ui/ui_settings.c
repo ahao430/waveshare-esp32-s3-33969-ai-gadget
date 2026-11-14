@@ -74,6 +74,16 @@ static void qr_open_fullscreen(const char *url)
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
 }
 
+static void refresh_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *dd = lv_event_get_target(e);
+    static const int vals[] = { 300, 900, 1800, 3600 };
+    int idx = (int)lv_dropdown_get_selected(dd);
+    if (idx >= 0 && idx < 4) {
+        ds_config_set_refresh_interval(vals[idx]);
+    }
+}
+
 static void qr_open_fullscreen_cb(lv_event_t *e)
 {
     qr_open_fullscreen((const char *)lv_event_get_user_data(e));
@@ -112,8 +122,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 显示卡 ---- */
     lv_obj_t *card1 = lv_obj_create(scr);
-    lv_obj_set_size(card1, LV_PCT(100), 96);
-    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_set_size(card1, LV_PCT(100), 82);
+    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 50);
     ui_style_card(card1);
     lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -138,8 +148,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 音量卡 ---- */
     lv_obj_t *card2 = lv_obj_create(scr);
-    lv_obj_set_size(card2, LV_PCT(100), 96);
-    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 158);
+    lv_obj_set_size(card2, LV_PCT(100), 82);
+    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 138);
     ui_style_card(card2);
     lv_obj_clear_flag(card2, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -162,8 +172,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 息屏卡 ---- */
     lv_obj_t *card3 = lv_obj_create(scr);
-    lv_obj_set_size(card3, LV_PCT(100), 72);
-    lv_obj_align(card3, LV_ALIGN_TOP_MID, 0, 260);
+    lv_obj_set_size(card3, LV_PCT(100), 66);
+    lv_obj_align(card3, LV_ALIGN_TOP_MID, 0, 226);
     ui_style_card(card3);
     lv_obj_clear_flag(card3, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -183,19 +193,40 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_text_font(dd, &lv_font_cn_14, 0);
     lv_obj_add_event_cb(dd, timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    /* ---- 订阅刷新间隔卡（PLAN §6.3：默认 5~15 分钟） ---- */
+    lv_obj_t *card5 = lv_obj_create(scr);
+    lv_obj_set_size(card5, LV_PCT(100), 66);
+    lv_obj_align(card5, LV_ALIGN_TOP_MID, 0, 298);
+    ui_style_card(card5);
+    lv_obj_clear_flag(card5, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_label(card5, "订阅自动刷新", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *rdd = lv_dropdown_create(card5);
+    lv_dropdown_set_options(rdd, "5 分钟\n15 分钟\n30 分钟\n60 分钟");
+    const gadget_state_t *st2 = ds_state();
+    int rsel = 1;
+    const int rvals[] = { 300, 900, 1800, 3600 };
+    for (int i = 0; i < 4; i++) {
+        if (rvals[i] == st2->sub_refresh_interval_s) rsel = i;
+    }
+    lv_dropdown_set_selected(rdd, (uint16_t)rsel);
+    lv_obj_set_size(rdd, 150, 40);
+    lv_obj_align(rdd, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_text_font(rdd, &lv_font_cn_14, LV_PART_INDICATOR);
+    lv_obj_set_style_text_font(rdd, &lv_font_cn_14, 0);
+    lv_obj_add_event_cb(rdd, refresh_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
     /* ---- 网络/配网卡（PLAN §9.3）：链接行 + 点击全屏大码 ---- */
     lv_obj_t *card4 = lv_obj_create(scr);
-    lv_obj_set_size(card4, LV_PCT(100), 134);
-    lv_obj_align(card4, LV_ALIGN_TOP_MID, 0, 338);
+    lv_obj_set_size(card4, LV_PCT(100), 106);
+    lv_obj_align(card4, LV_ALIGN_TOP_MID, 0, 370);
     ui_style_card(card4);
     lv_obj_clear_flag(card4, LV_OBJ_FLAG_SCROLLABLE);
 
-    ui_label(card4, "配网与后台", &lv_font_cn_14, UI_TEXT);
-
     /* 全屏二维码弹窗（大码可扫；点击任意处关闭） */
     lv_obj_t *row1 = lv_button_create(card4);
-    lv_obj_set_size(row1, LV_PCT(100) - 8, 40);
-    lv_obj_align(row1, LV_ALIGN_TOP_MID, 0, 30);
+    lv_obj_set_size(row1, LV_PCT(100) - 8, 30);
+    lv_obj_align(row1, LV_ALIGN_TOP_MID, 0, 4);
     ui_style_card(row1);
     lv_obj_set_style_bg_color(row1, UI_CARD_HI, 0);
     lv_obj_add_event_cb(row1, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)"http://192.168.4.1");
@@ -205,8 +236,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     lv_obj_align(r1a, LV_ALIGN_RIGHT_MID, -10, 0);
 
     lv_obj_t *row2 = lv_button_create(card4);
-    lv_obj_set_size(row2, LV_PCT(100) - 8, 40);
-    lv_obj_align(row2, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_set_size(row2, LV_PCT(100) - 8, 30);
+    lv_obj_align(row2, LV_ALIGN_TOP_MID, 0, 38);
     ui_style_card(row2);
     lv_obj_set_style_bg_color(row2, UI_CARD_HI, 0);
     lv_obj_add_event_cb(row2, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)"http://192.168.1.42");
@@ -214,6 +245,18 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     lv_obj_align(r2t, LV_ALIGN_LEFT_MID, 10, 0);
     lv_obj_t *r2a = ui_label(row2, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
     lv_obj_align(r2a, LV_ALIGN_RIGHT_MID, -10, 0);
+
+    /* 小智官方后台跳转（音色/角色提示词在官方 console 配置） */
+    lv_obj_t *row3 = lv_button_create(card4);
+    lv_obj_set_size(row3, LV_PCT(100) - 8, 30);
+    lv_obj_align(row3, LV_ALIGN_TOP_MID, 0, 72);
+    ui_style_card(row3);
+    lv_obj_set_style_bg_color(row3, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(row3, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)"https://xiaozhi.me/console");
+    lv_obj_t *r3t = ui_label(row3, "小智后台  xiaozhi.me/console", &lv_font_cn_14, UI_ACCENT2);
+    lv_obj_align(r3t, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *r3a = ui_label(row3, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(r3a, LV_ALIGN_RIGHT_MID, -10, 0);
 
     /* 演示钩子：GADGET_DEMO_QR=1 自动打开全屏二维码 */
     if (getenv("GADGET_DEMO_QR") && getenv("GADGET_DEMO_QR")[0] == '1') {

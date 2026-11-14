@@ -39,6 +39,7 @@ static gadget_state_t g_state = {
     .brightness        = 80,
     .volume            = 55,
     .display_timeout_s = 60,
+    .sub_refresh_interval_s = 900,
 };
 
 void ds_config_update(int brightness, int volume, int timeout_s)
@@ -47,6 +48,16 @@ void ds_config_update(int brightness, int volume, int timeout_s)
     if (volume >= 0) g_state.volume = volume;
     if (timeout_s > 0) g_state.display_timeout_s = timeout_s;
     /* TODO(bridge 模式)：同步 PUT 设备 config API（Phase 6 设备侧就绪后） */
+}
+
+void ds_config_set_refresh_interval(int seconds)
+{
+    if (seconds > 0) g_state.sub_refresh_interval_s = seconds;
+}
+
+int ds_config_refresh_interval(void)
+{
+    return g_state.sub_refresh_interval_s;
 }
 
 static const ds_impl_t *g_impl;

@@ -23,6 +23,9 @@
 /* 二维码组件（设置页：配网入口 / 局域网管理地址；PLAN §9.3） */
 #define LV_USE_QRCODE 1
 
+/* PNG 解码（小智 Q 版形象；固件侧转 RGB565 C 数组） */
+#define LV_USE_LODEPNG 1
+
 /* stdio 文件系统（GIF 等资源按相对 CWD 路径加载，盘符 'A'） */
 #define LV_USE_FS_STDIO 1
 #define LV_FS_STDIO_LETTER 'A'
