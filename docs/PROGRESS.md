@@ -97,4 +97,19 @@
 
 - **PC 侧可推进项：全部完成**。
 - 等待点：真机设备、真实 Provider Key、Muse/小智服务端账号。
-- 仓库存档：5 个逻辑提交（docs/bridge/simulator+firmware/web/chore）。
+- 仓库存档：30+ 逻辑提交（docs/bridge/simulator+firmware/web/chore）。
+
+## 增量交付（2026-11-14 设备到手后）
+
+| 交付 | 状态 | 位置/说明 |
+|------|------|-----------|
+| 出厂系统架构审查 | ✅ | FACTORY_REVIEW.md：出厂源码闭源；esp-brookesia 范式学习；ADR-007/008 定稿自研路线 |
+| 电源：状态栏/设备页/power_manager | ✅ | ui_statusbar 五档+充电/USB 语义；AXP2101 组件骨架（寄存器待 bring-up） |
+| 电源管理方案 | ✅ | POWER_MANAGEMENT.md（前台独占/按能力后台/功耗测试 T01-T13） |
+| 订阅实例动态配置 | ✅ | Bridge subscriptions CRUD+聚合快照；Web 配置页；设备空态/横滑 |
+| AstrBot 对接 | ✅ | 大肥鱼对话路由 bot 实例（SSE 适配层）；Web kind 下拉 |
+| 交互范式统一 | ✅ | 一屏四格横滑+页点；上滑返回；按键短按映射（ui_keys 分发）；ui_gesture 公共件 |
+| 素材管线 | ✅ | PNG 序列帧 290 帧（companions/ 规范目录）；companion 帧播放器 |
+| 语音崩溃修复 | ✅ | chunked 块 >8KB 写爆栈（read_chunked_body 分片）；GADGET_DEMO_VOICE 回归钩子 |
+| 官方教程索引 | ✅ | WAVESHARE_GUIDES.md（烧录/ESP-IDF/Arduino 对照） |
+| 重置倒计时 | ✅ | 订阅页 1s 动态倒计时（QuotaFrame 借鉴） |

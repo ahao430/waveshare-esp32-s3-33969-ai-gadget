@@ -13,6 +13,7 @@
 #include "data_source.h"
 #include "ui.h"
 #include "ui_gesture.h"
+#include "ui_keys.h"
 #include "ui_launcher.h"
 #include "ui_statusbar.h"
 #include "ui_theme.h"
@@ -58,6 +59,9 @@ void ui_init(void)
     if (getenv("GADGET_DEMO_VOICE") && getenv("GADGET_DEMO_VOICE")[0]) {
         lv_timer_create(voice_demo_begin_cb, 1000, NULL);
     }
+
+    /* 物理键自动化钩子：GADGET_DEMO_KEYS="pw@2000,boot@4000,..." */
+    ui_keys_demo_init();
 }
 
 static void voice_demo_begin_cb(lv_timer_t *t)

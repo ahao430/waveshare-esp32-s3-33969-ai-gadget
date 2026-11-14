@@ -249,9 +249,9 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
         lv_obj_set_scrollbar_mode(tile, LV_SCROLLBAR_MODE_OFF);
         detail_tile_build(tile, &s->servers[i]);
     }
-    /* 初始定位到点击的服务器 */
-    lv_obj_scroll_to_view(lv_tileview_get_tile_active(tv), LV_ANIM_OFF);
-    lv_obj_scroll_to_x(tv, g_detail * 480, LV_ANIM_OFF);
+    /* 初始定位到点击的服务器（set_tile_by_index 安全；scroll_to_view
+     * 在布局完成前调用曾崩——lv_tileview_get_tile_active 返回未就绪指针） */
+    lv_tileview_set_tile_by_index(tv, (uint32_t)g_detail, 0, LV_ANIM_OFF);
 
     ui_dots_create(scr, g_dots, UI_DOTS_MAX, s->server_count,
                    LV_ALIGN_BOTTOM_MID, -8);

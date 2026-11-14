@@ -25,6 +25,7 @@
 #include "voice_session.h"
 #include "ui.h"
 #include "ui_gesture.h"
+#include "ui_keys.h"
 #include "ui_theme.h"
 
 #define CONV_MSGS 12
@@ -202,6 +203,13 @@ static void rerender_history(void)
 
 /* ---------------- PTT / poll ---------------- */
 
+static void continuous_toggle_cb(lv_event_t *e);
+
+static void continuous_toggle_cb_void(void)
+{
+    continuous_toggle_cb(NULL);
+}
+
 static void continuous_toggle_cb(lv_event_t *e)
 {
     (void)e;
@@ -329,6 +337,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
 {
     g_app_id = app_id;
     g_voice_enabled = g_meta[app_id].voice;
+    ui_key_set_key3_handler(continuous_toggle_cb_void); /* KEY3 短按：连续对话 */
 
     if (!g_vs_inited) {
         vs_init(audio_mock_ops());

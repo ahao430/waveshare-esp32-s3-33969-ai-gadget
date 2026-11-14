@@ -47,6 +47,7 @@ add_executable(gadget_sim
   src/ui/ui_settings.c
   src/ui/ui_statusbar.c
   src/ui/ui_gesture.c
+  src/ui/ui_keys.c
   src/voice/voice_session.c
   src/voice/audio_mock.c
   src/ui/fonts/font_cn_12.c
