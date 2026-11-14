@@ -101,16 +101,45 @@
 | SYS_OUT | 16 | ✅（电源系统信号，用途待原理图复核） |
 | PWRON | PMU 按键输入 | ✅ |
 
-**I2C 从机地址清单**（除 QMI8658 外均需真机 i2cdetect 确认）：
+**I2C 从机地址清单**（2026-11-14 真机首验：骨架固件全地址扫描 0x08–0x77，
+六颗全中、无多余设备，日志见 §2.7）：
 
 | 芯片 | 地址 | 等级 |
 |------|------|------|
-| QMI8658 | 0x6B | ✅（官方 components.md 引原理图） |
-| AXP2101 | 0x34（常见默认） | ⚠️ 待验证 |
-| PCF85063 | 0x51（常见默认） | ⚠️ 待验证 |
-| ES8311 | esp_codec_dev 默认（常见 0x18） | ⚠️ 待验证 |
-| ES7210 | esp_codec_dev 默认（常见 0x40，AD 引脚可变） | ⚠️ 待验证 |
-| CST9220/9217 | cst9217 组件默认（常见 0x5A） | ⚠️ 待验证 |
+| QMI8658 | 0x6B | ✅（真机 ACK） |
+| AXP2101 | 0x34 | ✅（真机 ACK，reg00 读出 0x38） |
+| PCF85063 | 0x51 | ✅（真机 ACK） |
+| ES8311 | 0x18 | ✅（真机 ACK） |
+| ES7210 | 0x40 | ✅（真机 ACK） |
+| CST9220/9217 | 0x5A | ✅（真机 ACK；驱动识别 ChipType 0x9220 / ProjectID 0x542F / 480×480） |
+
+### 2.7 真机首验记录（2026-11-14，Phase 6 bring-up）
+
+| 项目 | 结果 |
+|------|------|
+| 芯片 | ESP32-S3 (QFN56) rev v0.2，MAC 44:bd:8d:79:ba:c4，USB-Serial/JTAG |
+| Flash | 16MB（Micron 系 JEDEC 20/4018，quad，3.3V） |
+| PSRAM | 内嵌 8MB（AP_3v3，octal——esptool chip-id 报告） |
+| I2C 扫描 | 0x08–0x77 全扫：0x18/0x34/0x40/0x51/0x5A/0x6B 全 ACK，无未知设备 |
+| 显示 | CO5300 QSPI 面板 v2.2.0 驱动点亮，LVGL 任务 + 背光正常 |
+| 触摸 | cst9217 组件识别 CST9220（IRQ 模式），480×480 |
+| 原厂备份 | `~/gadget-factory-backup-20261114.bin`（16MB 全片，sha256 见同目录 .sha256） |
+
+**原厂分区表**（从备份 0x8000 解析；本项目刷入后会替换为 `firmware/partitions.csv`，
+还原原厂时按此表 write-flash 回去）：
+
+| 分区 | 类型 | 偏移 | 大小 | 用途 |
+|------|------|------|------|------|
+| nvsfactory | data/nvs | 0x9000 | 0x32000 | 出厂 NVS |
+| nvs | data/nvs | 0x3b000 | 0xd2000 | 用户 NVS |
+| otadata | data/ota | 0x10d000 | 0x2000 | OTA 指针 |
+| phy_init | data/coredump | 0x10f000 | 0x1000 | （subtype 异常，原厂如此） |
+| model | data/efuse | 0x110000 | 0xf0000 | 原厂模型数据 |
+| factory | app/factory | 0x200000 | 0x800000 | 原厂应用（8MB） |
+| storage | data/efuse | 0xa00000 | 0x600000 | 原厂用户存储 |
+
+**bring-up 修过的坑**：`esp_timer_start_periodic` 周期单位是 **µs**，
+power_manager 按 ms 传入导致电池轮询 30s→30ms 刷屏（已修，×1000）。
 
 ## 3. BSP 与上游版本
 
@@ -135,7 +164,7 @@
 
 ## 4. 待真机验证清单（Phase 6）
 
-- [ ] i2cdetect 扫描全部 I2C 地址，确认 2.6 节 ⚠️ 项。
+- [x] i2cdetect 扫描全部 I2C 地址，确认 2.6 节 ⚠️ 项。（2026-11-14 真机全 ACK，见 §2.7）
 - [ ] 电池默认容量与 AXP2101 电池参数（充电电流/截止电压）。
 - [ ] PSRAM 显示双缓冲在 Wi-Fi+BLE+音频并发下是否稳定（对照 Muse 坑 1）。
 - [ ] KEY3(GPIO18) 触摸/按键唤醒 light sleep 的实际能力。

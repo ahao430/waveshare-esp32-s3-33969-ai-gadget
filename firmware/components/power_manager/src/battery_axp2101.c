@@ -73,6 +73,7 @@ esp_err_t battery_get_status(battery_status_t *status)
         ESP_LOGW(TAG, "read_reg: %s", esp_err_to_name(err));
         return ESP_ERR_INVALID_STATE;
     }
-    ESP_LOGI(TAG, "link ok (reg00=0x%02X); datasheet TODO pending", v);
+    /* 心跳日志降为 debug：probe ACK（init 时）已证明链路，避免周期性刷屏 */
+    ESP_LOGD(TAG, "link ok (reg00=0x%02X); datasheet TODO pending", v);
     return ESP_ERR_NOT_SUPPORTED;
 }

@@ -72,10 +72,10 @@ static void poll_timer_cb(void *arg)
         ESP_LOGD(TAG, "battery read failed; keep last snapshot");
     }
 
-    /* 充电态提高轮询频率（15s），否则 30s */
-    uint64_t period = g_last.charging ? POLL_CHARGING_MS : POLL_NORMAL_MS;
+    /* 充电态提高轮询频率（15s），否则 30s。esp_timer 周期单位是 µs。 */
+    uint64_t period_ms = g_last.charging ? POLL_CHARGING_MS : POLL_NORMAL_MS;
     esp_timer_stop(g_timer);
-    esp_timer_start_periodic(g_timer, period);
+    esp_timer_start_periodic(g_timer, period_ms * 1000ULL);
 }
 
 esp_err_t power_manager_init(void *i2c_bus)
@@ -92,7 +92,7 @@ esp_err_t power_manager_init(void *i2c_bus)
         .name = "pm_poll",
     };
     ESP_ERROR_CHECK(esp_timer_create(&args, &g_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(g_timer, POLL_NORMAL_MS));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(g_timer, POLL_NORMAL_MS * 1000ULL));
     poll_timer_cb(NULL); /* 启动即读一次 */
     g_inited = true;
     return ESP_OK;
