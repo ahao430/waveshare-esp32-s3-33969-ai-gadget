@@ -9,6 +9,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"log/slog"
@@ -130,15 +131,33 @@ func main() {
 		os.Getenv("ZHIPU_PREWARM_MODEL")) // 空=默认 glm-4-flash
 	prewarmZhipu := prewarmer.Prewarm
 
-	// Komari 监控源：KOMARI_URL 配置真实部署（C 级接口）；否则 Mock。
-	var komariSvc *komari.Service
-	if u := os.Getenv("KOMARI_URL"); u != "" {
-		komariSvc = komari.NewService(komari.NewClient(u, os.Getenv("KOMARI_TOKEN")))
-		logger.Info("komari source enabled", "url", u)
-	} else {
-		komariSvc = komari.NewService(komari.NewMockSource())
-		logger.Info("komari source = mock (set KOMARI_URL to enable real deployment)")
+	// Komari 监控源（动态解析，每次抓取现读配置）：Web 后台配置
+	// （app_settings.monitor）优先 → 环境变量 KOMARI_URL → Mock。
+	resolveKomari := func() komari.Source {
+		if db != nil && masterKey != nil {
+			if raw, err := db.GetSetting(storage.SettingKeyMonitor); err == nil {
+				var cfg struct {
+					BaseURL  string `json:"base_url"`
+					EncToken string `json:"enc_token"`
+				}
+				if json.Unmarshal([]byte(raw), &cfg) == nil && cfg.BaseURL != "" {
+					token := ""
+					if cfg.EncToken != "" {
+						if t, derr := security.Decrypt(cfg.EncToken, masterKey); derr == nil {
+							token = t
+						}
+					}
+					return komari.NewClient(cfg.BaseURL, token)
+				}
+			}
+		}
+		if u := os.Getenv("KOMARI_URL"); u != "" {
+			return komari.NewClient(u, os.Getenv("KOMARI_TOKEN"))
+		}
+		return komari.NewMockSource()
 	}
+	komariSvc := komari.NewService(komari.NewDynamicSource(resolveKomari))
+	logger.Info("komari source = dynamic (web config > KOMARI_URL > mock)")
 
 	// Bigfish Chat Model Router（PLAN §7.4）：OpenAI 兼容 upstream。
 	// 环境变量示例：CHAT_UPSTREAM_ZHIPU="https://open.bigmodel.cn/api/paas/v4,ZHIPU_KEY"
@@ -188,27 +207,24 @@ func main() {
 		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
 	}
 
-	// 大肥鱼对接 AstrBot 机器人实例（subscriptions kind=astrbot）：
+	// 大肥鱼对接 AstrBot 机器人实例（bots 表）：
 	// 每次对话请求现读配置（Web 添加/删除即时生效，无需重启）。
 	chatRouter.BotResolver = func() []ai.Upstream {
 		if db == nil || masterKey == nil {
 			return nil
 		}
-		subs, err := db.ListSubscriptions()
+		list, err := db.ListBots()
 		if err != nil {
 			return nil
 		}
 		var bots []ai.Upstream
-		for _, s := range subs {
-			if s.Kind != storage.SubKindAstrBot {
-				continue
-			}
-			_, _, baseURL, token, err := db.GetSubscription(s.ID, masterKey)
+		for _, b := range list {
+			_, baseURL, token, err := db.GetBot(b.ID, masterKey)
 			if err != nil {
 				continue
 			}
 			bots = append(bots, ai.Upstream{
-				ID: s.ID, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
+				ID: b.ID, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
 			})
 		}
 		return bots

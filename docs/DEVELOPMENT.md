@@ -702,3 +702,40 @@ bridge/run.sh                       # Bridge 开发服务器 :8081
 cd web && npm run dev               # Web 开发服务器（/api 代理到 :8081）
 ./simulator/lvgl-pc/build/gadget_sim  # 480×480 模拟器
 ```
+
+## 应用配置四域：机器人 / ZCode / 监控 / 按键（2026-11-14 第十一批）
+
+用户反馈"后台还缺少一些应用的配置"——补齐四个配置域，全部走
+Bridge 加密落库 + Web 后台 + 设备拉取的同一套范式：
+
+- **机器人（AstrBot）独立成域**：早期 kind=astrbot 混在订阅表里，
+  与"订阅=额度查看"语义冲突。新 `bots` 表（label/base_url/加密
+  token）；`storage.Open` 启动时自动迁移 astrbot 订阅（幂等，测试
+  `TestAstrBotSubscriptionMigratesToBots`）。API：`GET/POST/DELETE
+  /api/v1/bots` + `POST /api/v1/bots/probe`（对未保存的地址/Token
+  先发 ping 验证，`ai.ProbeAstrBot`）。BotResolver 改读 bots 表，
+  `/api/v1/chat/providers` 即时反映增删。
+- **Komari 监控 Web 配置化**：原只能 `KOMARI_URL` 环境变量。新增
+  `app_settings(monitor)` + `GET/POST/DELETE /api/v1/monitor/config`；
+  `komari.NewDynamicSource` 每次抓取现读配置（Web 配置 > 环境变量 >
+  Mock），保存后 `?refresh=1` 即生效。Web 页"测试连接"直接调
+  `/api/v1/komari/nodes?refresh=1` 回显节点数。
+- **ZCode 远程配置先行**（设备 App 仍为 P1 占位）：`/api/v1/zcode/
+  config` + `/api/v1/zcode/sessions`（未配置返回 mock 演示会话；
+  配置后按文档契约 `GET {base}/api/v1/sessions` 透传，宽容解析）。
+- **三按键映射**：`/api/v1/keys`（GET 返回 keymap+fixed 说明，POST
+  校验值域）。可配：PWR 短按（home/none）、BOOT 短按（back/home/
+  none）、KEY3 短按（app/back/home/none）+ 长按（ptt/none）；
+  **PWR 长按=开关机（PMU 硬件）、BOOT 长按=配网页：固定不可改**，
+  Web 页 🔒 只读展示。
+- **模拟器侧**：`ds_keys_fetch`（bridge GET /api/v1/keys，cJSON 解析
+  四槽）→ `ui_keys_apply_config`（未知值忽略）；`ui_key_dispatch_long`
+  仅 KEY3 有效；聊天 App 注册 KEY3 长按=PTT（begin→900ms→end）。
+  `GADGET_DEMO_KEYS` 支持 `key3long@ms`。
+- **验证**：`TestBotsCRUDAndProbe`（含假 AstrBot 契约校验 Bearer/
+  token 不回显）、`TestKeysConfig`、`TestMonitorConfigDynamicSource`、
+  `TestZcodeConfigAndSessions`、`TestDynamicSourceResolvesPerFetch`；
+  运行时 A/B 快照——同一二进制仅改 Web 配置（pwr_short home→none），
+  pw 键触发后桌面/聊天页 79.7% 像素差异，证明 Web 下发端到端生效。
+- **小修**：monitor/zcode config 未配置时不再返回零值 updated_at
+  （Web 曾显示"更新于 1970/1/1"）。

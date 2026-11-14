@@ -33,6 +33,8 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *reply, int reply_len);
 static int bridge_fetch_background(const char *save_path);
 static int bridge_fetch_theme(int *theme);
+static int bridge_fetch_keys(char *pwr_short, char *boot_short,
+                             char *key3_short, char *key3_long, int cap);
 
 static void bridge_init(void)
 {
@@ -490,6 +492,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .chat_providers  = bridge_chat_providers,
         .fetch_background = bridge_fetch_background,
         .fetch_theme      = bridge_fetch_theme,
+        .fetch_keys       = bridge_fetch_keys,
     };
     return &impl;
 }
@@ -515,6 +518,43 @@ static int bridge_fetch_theme(int *theme)
         if (cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint < 4) {
             if (theme) *theme = v->valueint;
             ret = 0;
+        }
+        cJSON_Delete(root);
+    }
+    return ret;
+}
+
+/* Web 下发按键映射：GET /api/v1/keys（keymap 四槽，值域 home/back/
+ * none/app/ptt；非法值由 ui_keys_apply_config 忽略） */
+static int bridge_fetch_keys(char *pwr_short, char *boot_short,
+                             char *key3_short, char *key3_long, int cap)
+{
+    static char keys_url[256];
+    if (keys_url[0] == '\0') {
+        snprintf(keys_url, sizeof(keys_url), "%s/api/v1/keys", g_base);
+    }
+    char buf[1024];
+    int status = http_get(keys_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
+    if (status != 200) return -1;
+
+    int ret = 1;
+    cJSON *root = cJSON_Parse(buf);
+    if (root) {
+        const cJSON *km = cJSON_GetObjectItem(root, "keymap");
+        if (km) {
+            const struct { const char *name; char *out; } slots[] = {
+                { "pwr_short", pwr_short }, { "boot_short", boot_short },
+                { "key3_short", key3_short }, { "key3_long", key3_long },
+            };
+            int filled = 0;
+            for (unsigned i = 0; i < sizeof(slots) / sizeof(slots[0]); i++) {
+                const cJSON *v = cJSON_GetObjectItem(km, slots[i].name);
+                if (cJSON_IsString(v) && v->valuestring && v->valuestring[0]) {
+                    snprintf(slots[i].out, (size_t)cap, "%s", v->valuestring);
+                    filled++;
+                }
+            }
+            ret = filled == 4 ? 0 : 1;
         }
         cJSON_Delete(root);
     }

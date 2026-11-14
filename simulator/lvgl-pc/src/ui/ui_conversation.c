@@ -230,6 +230,20 @@ static void ptt_pressed_cb(lv_event_t *e)
     if (g_voice_enabled) vs_ptt_begin();
 }
 
+/* KEY3 长按（Web 配置 ptt）：模拟按住说话 0.9s 后松手发出 */
+static void key3_ptt_release_cb(lv_timer_t *t)
+{
+    lv_timer_del(t);
+    vs_ptt_end();
+}
+
+static void key3_long_ptt_cb(void)
+{
+    if (!g_voice_enabled) return;
+    vs_ptt_begin();
+    lv_timer_create(key3_ptt_release_cb, 900, NULL);
+}
+
 static void ptt_released_cb(lv_event_t *e)
 {
     (void)e;
@@ -338,6 +352,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     g_app_id = app_id;
     g_voice_enabled = g_meta[app_id].voice;
     ui_key_set_key3_handler(continuous_toggle_cb_void); /* KEY3 短按：连续对话 */
+    ui_key_set_key3_long_handler(key3_long_ptt_cb);     /* KEY3 长按：语音说话 */
 
     if (!g_vs_inited) {
         vs_init(audio_mock_ops());

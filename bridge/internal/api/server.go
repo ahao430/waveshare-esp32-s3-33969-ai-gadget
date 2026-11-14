@@ -123,6 +123,12 @@ func NewHandler(d Deps) http.Handler {
 	// 订阅配置与聚合快照（Web 后台动态配置；空列表 → 设备空态文案）。
 	if d.SubscriptionsDB != nil && d.MasterKey != nil {
 		serveSubscriptions(mux, d, logger)
+		// 大肥鱼机器人（AstrBot 实例，独立于订阅）+ 应用配置 KV
+		// （ZCode 远程 / Komari 监控 / 按键映射）——同一 storage.DB。
+		serveBots(mux, d, logger)
+		serveZcode(mux, d, logger)
+		serveMonitorConfig(mux, d, logger)
+		serveKeys(mux, d, logger)
 	}
 
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。
@@ -140,12 +146,9 @@ func NewHandler(d Deps) http.Handler {
 		mux.HandleFunc("GET /api/v1/chat/providers", func(w http.ResponseWriter, r *http.Request) {
 			ids := d.ChatRouter.Providers()
 			if d.SubscriptionsDB != nil && d.MasterKey != nil {
-				subs, err := d.SubscriptionsDB.ListSubscriptions()
-				if err == nil {
-					for _, s := range subs {
-						if s.Kind == storage.SubKindAstrBot {
-							ids = append(ids, s.ID) // bot 实例 id 作路由前缀
-						}
+				if bots, err := d.SubscriptionsDB.ListBots(); err == nil {
+					for _, b := range bots {
+						ids = append(ids, b.ID) // bot 实例 id 作路由前缀
 					}
 				}
 			}

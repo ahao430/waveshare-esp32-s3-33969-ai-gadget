@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     encrypted   TEXT NOT NULL DEFAULT '',  -- token（security.Encrypt；空=无凭据）
     updated_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bots (          -- 大肥鱼机器人（AstrBot 实例）
+    id          TEXT PRIMARY KEY,          -- bot-xxxx
+    label       TEXT NOT NULL,
+    base_url    TEXT NOT NULL,             -- AstrBot 部署地址
+    encrypted   TEXT NOT NULL DEFAULT '',  -- abk_ token（加密；空=无鉴权）
+    updated_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_settings (  -- 应用配置 KV（zcode/monitor/keys）
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL,             -- JSON；密钥字段加密后存
+    updated_at  INTEGER NOT NULL
+);
 `
 
 // DB 是快照持久层。
@@ -62,6 +74,10 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("storage: migrate: %w", err)
 	}
+	if err := migrateAstrBotToBots(sqlDB); err != nil {
+		sqlDB.Close()
+		return nil, fmt.Errorf("storage: migrate astrbot->bots: %w", err)
+	}
 	return &DB{sql: sqlDB}, nil
 }
 
@@ -80,6 +96,47 @@ func (d *DB) SaveStored(providerID string, view quota.StoredSnapshot) error {
 	)
 	if err != nil {
 		return fmt.Errorf("storage: save %s: %w", providerID, err)
+	}
+	return nil
+}
+
+// migrateAstrBotToBots 一次性迁移：早期版本机器人混在 subscriptions
+// （kind='astrbot'）里；机器人独立成 bots 表后，启动时搬过去并删旧行。
+// 幂等：无 astrbot 订阅时是空操作。
+func migrateAstrBotToBots(sqlDB *sql.DB) error {
+	rows, err := sqlDB.Query(
+		`SELECT id, label, base_url, encrypted, updated_at FROM subscriptions WHERE kind = 'astrbot'`)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id, label, baseURL, enc string
+		ts                      int64
+	}
+	var todo []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.label, &r.baseURL, &r.enc, &r.ts); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range todo {
+		if _, err := sqlDB.Exec(
+			`INSERT INTO bots (id, label, base_url, encrypted, updated_at) VALUES (?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO UPDATE SET label=excluded.label, base_url=excluded.base_url,
+			   encrypted=excluded.encrypted, updated_at=excluded.updated_at`,
+			r.id, r.label, r.baseURL, r.enc, r.ts); err != nil {
+			return err
+		}
+		if _, err := sqlDB.Exec(`DELETE FROM subscriptions WHERE id = ?`, r.id); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -236,3 +236,19 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 	}
 	return b.String(), nil
 }
+
+// ProbeAstrBot 连通性测试（Web 后台"测试"按钮）：发一条 ping 并取回
+// 首段回复。只返回截断文本与脱敏错误码，不带 URL/token。
+func ProbeAstrBot(ctx context.Context, id, baseURL, token string) (string, error) {
+	reply, err := astrbotComplete(ctx, Upstream{
+		ID: id, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
+	}, []ChatMessage{{Role: "user", Content: "ping（连通性测试，请回复 pong）"}})
+	if err != nil {
+		return "", err
+	}
+	r := []rune(reply)
+	if len(r) > 60 {
+		r = r[:60]
+	}
+	return string(r), nil
+}

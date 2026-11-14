@@ -28,6 +28,10 @@ typedef struct {
 	int (*fetch_background)(const char *save_path);
 	/* Web 下发主题拉取（可为 NULL=不支持）：0=拿到 *theme / 1=默认 / -1 */
 	int (*fetch_theme)(int *theme);
+	/* Web 下发按键映射拉取（可为 NULL=不支持）：0=四槽写入（每槽 ≥8 字节）
+	 * / 1=未配置默认（不写） / -1=失败。槽值域见 /api/v1/keys。 */
+	int (*fetch_keys)(char *pwr_short, char *boot_short,
+	                  char *key3_short, char *key3_long, int cap);
 
 } ds_impl_t;
 

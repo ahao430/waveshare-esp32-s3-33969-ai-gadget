@@ -7,7 +7,11 @@ const nav = [
   { to: '/appearance', label: '外观' },
   { to: '/network', label: '网络与配网' },
   { to: '/provisioning', label: '二维码' },
+  { to: '/keys', label: '物理按键' },
   { to: '/subscriptions', label: '订阅中心' },
+  { to: '/bots', label: '聊天机器人' },
+  { to: '/zcode', label: 'ZCode 远程' },
+  { to: '/monitor', label: '服务器监控' },
 ]
 </script>
 

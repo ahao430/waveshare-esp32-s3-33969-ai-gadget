@@ -157,6 +157,11 @@ int ds_appearance_fetch(const char *save_path);
  * / 1=未配置默认 / -1=失败。bridge 模式有效。 */
 int ds_appearance_fetch_theme(int *theme);
 
+/* 拉取 Web 下发的按键映射（Bridge /api/v1/keys）：0=四槽写入（每槽 ≥8
+ * 字节）/ 1=未配置默认（不写） / -1=失败。bridge 模式有效。 */
+int ds_keys_fetch(char *pwr_short, char *boot_short,
+                  char *key3_short, char *key3_long, int cap);
+
 /* 聊天 provider：
  * - ds_chat_providers 填充 "\n" 分隔的 provider id 列表（bridge=HTTP
  *   拉取，mock 返回 "mock"）；在后台线程调用。

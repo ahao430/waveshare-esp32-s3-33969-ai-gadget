@@ -44,6 +44,14 @@ void ui_init(void)
     ui_theme_select(ds_state()->theme_idx);
     (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
 
+    /* Web 下发按键映射（三键短按 + KEY3 长按；长按电源/BOOT 固件固定） */
+    {
+        char kp[8], kb[8], k3s[8], k3l[8];
+        if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
+            ui_keys_apply_config(kp, kb, k3s, k3l);
+        }
+    }
+
     /* 顺序敏感：先注册 App（Launcher 网格按注册表构建），再建桌面 */
     register_apps();
     lv_obj_t *home = ui_launcher_screen();

@@ -13,20 +13,19 @@ import (
 )
 
 // 支持的订阅适配器类型（与 quota 包 provider 一一对应）。
+// 机器人（AstrBot）已独立为 bots 表——订阅只管额度查看。
 const (
 	SubKindZhipu    = "zhipu"
 	SubKindKimi     = "kimi"
 	SubKindOpencode = "opencode"
 	SubKindNewAPI   = "newapi"
 	SubKindMock     = "mock"
-	// SubKindAstrBot AstrBot 机器人实例（大肥鱼对话对接；2026-11-14）。
-	SubKindAstrBot = "astrbot"
 )
 
 // ValidKind 检查 kind 是否受支持。
 func ValidKind(kind string) bool {
 	switch kind {
-	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock, SubKindAstrBot:
+	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock:
 		return true
 	}
 	return false

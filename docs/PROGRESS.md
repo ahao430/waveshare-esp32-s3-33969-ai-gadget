@@ -113,3 +113,4 @@
 | 语音崩溃修复 | ✅ | chunked 块 >8KB 写爆栈（read_chunked_body 分片）；GADGET_DEMO_VOICE 回归钩子 |
 | 官方教程索引 | ✅ | WAVESHARE_GUIDES.md（烧录/ESP-IDF/Arduino 对照） |
 | 重置倒计时 | ✅ | 订阅页 1s 动态倒计时（QuotaFrame 借鉴） |
+| 应用配置四域（机器人/ZCode/监控/按键） | ✅ | Bridge bots 表+app_settings（astrbot 订阅自动迁移）；/bots CRUD+probe、/zcode config+sessions、/monitor config+动态源、/keys；Web 四配置页；模拟器按键映射拉取+KEY3 长按 PTT（A/B 快照验证 Web 下发生效） |

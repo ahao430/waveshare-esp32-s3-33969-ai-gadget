@@ -68,3 +68,30 @@ func (s *Service) Nodes(ctx context.Context, force bool) StoredView {
 		FetchedAt: s.fetched,
 	}
 }
+
+// dynamicSource 每次抓取时重新解析底层 Source（Web 后台改配置即时生效，
+// 无需重启 Bridge；PLAN §5.8 监控源可配置）。
+type dynamicSource struct {
+	resolve func() Source
+}
+
+// NewDynamicSource 把"按配置现取 Source"适配为 Source；
+// resolve 返回 nil 时回退 MockSource。
+func NewDynamicSource(resolve func() Source) Source {
+	return &dynamicSource{resolve: resolve}
+}
+
+func (d *dynamicSource) Name() string {
+	if s := d.resolve(); s != nil {
+		return s.Name()
+	}
+	return "mock"
+}
+
+func (d *dynamicSource) Fetch(ctx context.Context) (*Snapshot, error) {
+	s := d.resolve()
+	if s == nil {
+		s = NewMockSource()
+	}
+	return s.Fetch(ctx)
+}

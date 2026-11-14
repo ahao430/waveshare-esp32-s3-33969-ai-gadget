@@ -4,9 +4,13 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', name: 'dashboard', component: () => import('@/pages/Dashboard.vue') },
-    { path: '/subscriptions', name: 'subscriptions', component: () => import('@/pages/Subscriptions.vue') },
+    { path: '/appearance', name: 'appearance', component: () => import('@/pages/Appearance.vue') },
     { path: '/network', name: 'network', component: () => import('@/pages/Network.vue') },
     { path: '/provisioning', name: 'provisioning', component: () => import('@/pages/Provisioning.vue') },
-    { path: '/appearance', name: 'appearance', component: () => import('@/pages/Appearance.vue') },
+    { path: '/keys', name: 'keys', component: () => import('@/pages/Keys.vue') },
+    { path: '/subscriptions', name: 'subscriptions', component: () => import('@/pages/Subscriptions.vue') },
+    { path: '/bots', name: 'bots', component: () => import('@/pages/Bots.vue') },
+    { path: '/zcode', name: 'zcode', component: () => import('@/pages/Zcode.vue') },
+    { path: '/monitor', name: 'monitor', component: () => import('@/pages/Monitor.vue') },
   ],
 })

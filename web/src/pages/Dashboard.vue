@@ -32,13 +32,16 @@ const groups = [
       { to: '/appearance', label: '外观', desc: '主题色下发、自定义背景图' },
       { to: '/network', label: '网络与配网', desc: 'Wi-Fi 配置方式说明、设备热点' },
       { to: '/provisioning', label: '后台二维码', desc: '本后台地址全屏码（设备扫码直达）' },
+      { to: '/keys', label: '物理按键', desc: '三键短按/长按映射（长按电源/BOOT 固定）' },
     ],
   },
   {
     title: '应用配置',
     items: [
-      { to: '/subscriptions', label: '订阅中心', desc: '订阅实例增删（智谱/Kimi/OpenCode/NewAPI/Mock）' },
-      { to: '/subscriptions', label: '聊天机器人', desc: 'AstrBot 实例配置（大肥鱼对话对接）' },
+      { to: '/subscriptions', label: '订阅中心', desc: '额度订阅实例（智谱/Kimi/OpenCode/NewAPI/Mock）' },
+      { to: '/bots', label: '聊天机器人', desc: 'AstrBot 机器人创建（大肥鱼对话对接，可多个）' },
+      { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
+      { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
     ],
   },
 ]
@@ -75,8 +78,8 @@ const groups = [
     </div>
 
     <div class="card text-xs text-dim">
-      说明：订阅实例中的「聊天机器人」即 AstrBot 实例（大肥鱼对话与语音
-      经 Bridge 路由到对应机器人）；添加/删除即时生效，无需重启 Bridge。
+      说明：机器人（AstrBot）、ZCode、监控（Komari）与按键映射均由 Bridge
+      加密落库并即时生效；设备端开机联网后拉取最新配置。
     </div>
   </section>
 </template>

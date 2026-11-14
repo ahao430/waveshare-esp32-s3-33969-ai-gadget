@@ -83,7 +83,7 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			return
 		}
 		if !storage.ValidKind(body.Kind) {
-			writeErr(w, logger, http.StatusBadRequest, "bad_kind", "want zhipu|kimi|opencode|newapi|mock")
+			writeErr(w, logger, http.StatusBadRequest, "bad_kind", "want zhipu|kimi|opencode|newapi|mock（机器人请用 /api/v1/bots）")
 			return
 		}
 		id := body.ID
