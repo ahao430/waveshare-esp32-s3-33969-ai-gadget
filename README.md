@@ -3,6 +3,13 @@
 基于 [Waveshare ESP32-S3-Touch-AMOLED-2.16（SKU 33969）](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm)
 的社区定制多应用 AI Gadget。非 Waveshare 官方固件。
 
+![UI 定稿概念图](assets/ui/concepts/assistant-ui-final.png)
+
+> **UI 风格基准**（2026-11-14 定稿，不可变更）：三 AI 对话页
+> （顶栏头像+在线点 / 中央角色形象 / 中央麦克风大按钮+左右波形）+
+> 桌面 9 宫格（三 AI 形象头像 + 彩色符号磁贴）。设备端与 Web 端
+> 所有界面均以本图为准；实现对齐项见 [docs/UI_DESIGN.md](docs/UI_DESIGN.md)。
+
 > 完整规划见 [PLAN.md](PLAN.md)。硬件调研见 [docs/HARDWARE.md](docs/HARDWARE.md)，
 > 系统架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，
 > 关键决策记录见 [docs/DECISIONS.md](docs/DECISIONS.md)，

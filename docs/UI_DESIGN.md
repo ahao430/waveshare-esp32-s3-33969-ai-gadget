@@ -1,6 +1,10 @@
 # UI 设计规范与 GPT 概念稿差异清单
 
-> GPT 素材包（assets/material-pack/）提供了 480×480 定稿设计稿。
+> **风格基准（2026-11-14 用户定稿，不可变更）**：
+> [assets/ui/concepts/assistant-ui-final.png](../assets/ui/concepts/assistant-ui-final.png)
+> ——三 AI 对话页 + 桌面 9 宫格的最终设计。所有界面（设备端/Web）的
+> 布局、配色、组件形态以本图为准；下表为按图对齐的实施清单。
+>
 > 当前实现已与之一致的部分：深色主题/紫蓝强调/环形额度/卡片化监控。
 > 本清单记录**尚未对齐**的差异，作为 Phase 1 UI 精修待办。
 

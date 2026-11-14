@@ -97,6 +97,14 @@ let wsConn: EventsConnection | null = null
   <h1 class="page-title">仪表盘</h1>
   <p class="page-sub">设备总览与订阅额度（额度来自 Go Bridge，设备数据为 Mock）</p>
 
+  <!-- UI 定稿概念图（产品风格基准，2026-11-14） -->
+  <div class="card mb-5 overflow-hidden !p-0">
+    <img src="/assistant-ui-final.png" alt="UI 定稿概念图" class="w-full" />
+    <div class="border-t border-line px-4 py-2 text-xs text-dim">
+      产品 UI 风格基准（2026-11-14 定稿）——三 AI 对话页 + 桌面九宫格
+    </div>
+  </div>
+
   <!-- 设备总览（Mock） -->
   <div v-if="device" class="card mb-5 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
     <div>
