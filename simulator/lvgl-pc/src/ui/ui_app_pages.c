@@ -474,7 +474,7 @@ static void register_apps(void)
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
      * 页1 AI 三位 + 订阅｜页2 ZCode/天气/服务器/设置｜页3 音乐 */
     const app_def_t defs[] = {
-        { UI_APP_CHAT,     "chat",     "大肥鱼",  NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_CHAT,     "chat",     "AstrBot", NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_MUSE,     "muse",     "Muse",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },

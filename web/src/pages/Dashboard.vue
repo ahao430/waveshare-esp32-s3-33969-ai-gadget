@@ -40,7 +40,7 @@ const groups = [
     title: '应用配置',
     items: [
       { to: '/subscriptions', label: '订阅中心', desc: '额度订阅实例（智谱/Kimi/OpenCode/NewAPI/Mock）' },
-      { to: '/bots', label: '聊天机器人', desc: 'AstrBot 机器人创建（大肥鱼对话对接，可多个）' },
+      { to: '/bots', label: '聊天机器人', desc: 'AstrBot 机器人创建（设备端对话对接，可多个）' },
       { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
       { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
       { to: '/weather', label: '天气', desc: 'Open-Meteo 免 Key；自动 IP 定位或手动城市' },

@@ -113,7 +113,7 @@ function editBot(b: BotInfo) {
 }
 
 async function removeBot(b: BotInfo) {
-  if (!confirm(`删除机器人「${b.label}」？大肥鱼将不再路由到它。`)) return
+  if (!confirm(`删除机器人「${b.label}」？AstrBot 应用将不再路由到它。`)) return
   await request(`/api/v1/bots/${b.id}`, { method: 'DELETE' })
   say(false, `已删除「${b.label}」`)
   await load()
@@ -174,7 +174,7 @@ async function probe(id?: string) {
 <template>
   <h1 class="page-title">聊天机器人</h1>
   <p class="page-sub">
-    大肥鱼对话与语音的上游 = AstrBot 实例（可创建多个；设备端切换）。
+    设备端 AstrBot 应用（对话与语音）的上游 = AstrBot 实例（可创建多个）。
     AstrBot 侧<b>无需创建机器人/选择平台类型</b>——走 HTTP OpenAPI：
     WebUI <b>设置 → OpenAPI → 创建 API Key</b>（对话勾 <code class="text-accent2">chat</code>；
     要在下面拉配置文件再勾 <code class="text-accent2">config</code>）。

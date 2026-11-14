@@ -18,7 +18,7 @@ var launcherCatalog = []struct {
 	Key  string `json:"key"`
 	Name string `json:"name"`
 }{
-	{"chat", "大肥鱼"}, {"xiaozhi", "小智"}, {"muse", "Muse"}, {"sub", "订阅"},
+	{"chat", "AstrBot"}, {"xiaozhi", "小智"}, {"muse", "Muse"}, {"sub", "订阅"},
 	{"zcode", "ZCode"}, {"weather", "天气"}, {"monitor", "服务器"},
 	{"settings", "设置"}, {"music", "音乐"},
 }
