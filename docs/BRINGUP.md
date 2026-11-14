@@ -16,6 +16,26 @@
 
 ## 1. 首连与烧录（display-first）
 
+### 1.0 备份原厂固件（一次性、不可跳过）
+
+> 出厂固件**闭源**，刷写即覆盖且无法从官方渠道取回。先做全片备份，
+> 以后随时可以还原原厂体验（或对照其行为调试）。
+
+```bash
+# 识别 16MB flash（esptool flash_id 确认 Detection...16MB）
+cd firmware && . $HOME/esp/esp-idf-v6.0.3/export.sh
+python -m esptool -p /dev/cu.usbmodemXXX flash_id
+
+# 全片读回（约 1-2 分钟），保存到仓库外稳妥位置
+python -m esptool -p /dev/cu.usbmodemXXX read_flash 0 0x1000000 \
+    ~/gadget-factory-backup-$(date +%Y%m%d).bin
+# 校验大小 = 16777216；再复制一份到移动介质/网盘
+```
+
+- 还原（任何时候）：`write_flash 0x0 备份文件`（注意该备份含分区表与 NVS，
+  还原后设备与出厂状态一致）。
+- 若读回失败 → 换数据线 / 按住 BOOT 插 USB 再试；**不备份不刷写**。
+
 ### 1.1 串口识别
 
 ```bash
