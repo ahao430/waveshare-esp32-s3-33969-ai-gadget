@@ -152,3 +152,32 @@ UI 形态冲突）；引擎独占租约符合"一个业务 App 前台运行"的�
 
 **后果**：PC 上开发的 UI 可直接进固件；硬件差异只存在于显示驱动层
 （SDL vs CO5300 QSPI）和输入层（鼠标模拟 vs CST9217）。
+
+------------------------------------------------------------------------
+
+## ADR-007　设备固件转向「esp-brookesia 框架重建原厂体验 + 应用扩展」
+
+日期：2026-11-14　状态：已接受（设备到手实测后用户拍板）
+
+**背景**：出厂系统实测体验完整（四宫格 Launcher/左右分页/上滑退出/
+任务列表/音乐后台播放/小智集成）。官方仓库审查（见
+[FACTORY_REVIEW.md](FACTORY_REVIEW.md)）确认：出厂固件源码未公开；
+但其框架底座 esp-brookesia（Phone 系统 + App::Registry 应用注册表 +
+run/back/pause/resume 生命周期）与 Waveshare BSP 全部公开，且官方
+示例 03_esp-brookesia 与出厂系统同框架。
+
+**决策**：不再维护"从零自研 Launcher/任务管理"的自研固件路线为
+主基线；固件主体转向 **esp-brookesia Phone 框架 + Waveshare BSP +
+自研 apps（App::Registry 注册）**，复刻原厂体验并扩展我们的应用
+（宠物收藏馆/大肥鱼/订阅中心/ZCode/天气/服务器监控）。出厂固件保留
+设备恢复用。Bridge/Web/订阅/AstrBot 协议层资产全部保留（与设备 UI
+解耦）。后台策略表（POWER_MANAGEMENT.md）逐应用落到 esp-brookesia
+pause/resume 生命周期钩子。
+
+**后果**：
+- Launcher/手势/任务列表/状态栏不再是自研负担（框架现成，对齐出厂
+  观感成本低）
+- 自研固件已交付的 I2C 扫描/BSP 显示 bring-up 与全仓库检查链保留
+- 模拟器 UI 代码向 esp-brookesia App 基类移植是后续主要工程
+- 出厂系统的音乐后台/小智集成无法直接复用（源码闭源），音乐后台按
+  POWER_MANAGEMENT.md 后台策略自实现

@@ -342,6 +342,24 @@ AI 气泡逐字追加；provider 下拉来自 `/chat/providers`。
 Bridge 背景 e2e（上传→下载 md5 一致→模拟器拉取→渲染）全链路；
 check.sh 全绿。
 
+## 方向修订与出厂系统审查（2026-11-14 第八批）
+
+设备到手，出厂系统实测（四宫格 Launcher/左右分页/上滑退出/任务列表/
+音乐后台/小智）体验完整 → 用户拍板转向"扩展而非重造"。官方仓库
+（waveshareteam/ESP32-S3-Touch-AMOLED-2.16）架构审查交付
+docs/FACTORY_REVIEW.md：出厂固件源码未公开；esp-brookesia Phone
+框架 + App::Registry 应用注册表 + run/back/pause/resume 生命周期 +
+AI Agent 聊天模板（coze_chat_app）公开可得；BSP 依赖链不含 XiaoZhi
+（社区 issue 描述有误）。ADR-007：固件主体转向 esp-brookesia 框架
+重建原厂体验 + 自研 apps 注册扩展；出厂固件保留恢复用；Bridge/Web/
+Simulator 协议资产不变。PLAN 顶部加 v1.2 修订块（自研 Launcher 章节
+降级为参考设计，数据链路/后台策略表继续有效）。
+
+审查方法备查：浅克隆官方仓库 → 03_esp-brookesia 逐层读（main.cpp
+111 行 Phone 装配 + systems/base App 基类虚函数表 + Manager registry
+遍历安装）→ BSP idf_component.yml 依赖链核对（修正社区 issue 的
+"BSP 拉入 XiaoZhi"误传）→ 03 示例 IDF v6.0.3 构建验证。
+
 ## 电源管理方案文档（2026-11-14 第六批）：POWER_MANAGEMENT.md 落库
 
 用户提供电源优化与电源管理完整方案 V1.0 → `docs/POWER_MANAGEMENT.md`
