@@ -116,3 +116,30 @@ void companion_delete(void)
     }
     g_app = -1;
 }
+
+/* ---- 8 类动作接口（docs/COMPANION_ASSETS.md §1）----
+ * 逐帧资源管线（frame_NN.bin）尚未产出：本节先定义状态→动作映射与
+ * once 播放语义；资源就绪后在此表接入 manifest 驱动的逐帧播放器。 */
+void companion_set_action(int app_id, companion_action_t act)
+{
+    /* voice_session 5 态直映；扩展态当前由各资源形态降级处理：
+     * happy → speaking 动画（播放一次的语义由资源层实现），
+     * surprised/wave/sleep → idle（资源未就绪）。 */
+    switch (act) {
+    case COMPANION_ACT_LISTENING:
+    case COMPANION_ACT_THINKING:
+    case COMPANION_ACT_SPEAKING:
+    case COMPANION_ACT_IDLE:
+        companion_set_state(app_id, (vs_state_t)act);
+        break;
+    case COMPANION_ACT_HAPPY:
+        companion_set_state(app_id, VS_SPEAKING);
+        break;
+    case COMPANION_ACT_SURPRISED:
+    case COMPANION_ACT_WAVE:
+    case COMPANION_ACT_SLEEP:
+    default:
+        companion_set_state(app_id, VS_IDLE);
+        break;
+    }
+}

@@ -1,0 +1,60 @@
+{
+  "package": "Companion Sequence Assets v1",
+  "target": "Waveshare ESP32-S3-Touch-AMOLED-2.16 SKU 33969, 480x480",
+  "characters": [
+    "Muse",
+    "Bigfish",
+    "Xiaozhi"
+  ],
+  "planned_states": [
+    {
+      "id": "idle",
+      "label": "待机",
+      "playback": "loop"
+    },
+    {
+      "id": "listening",
+      "label": "聆听",
+      "playback": "loop"
+    },
+    {
+      "id": "thinking",
+      "label": "思考",
+      "playback": "loop"
+    },
+    {
+      "id": "speaking",
+      "label": "说话",
+      "playback": "loop"
+    },
+    {
+      "id": "happy",
+      "label": "开心",
+      "playback": "once"
+    },
+    {
+      "id": "surprised",
+      "label": "惊讶",
+      "playback": "once"
+    },
+    {
+      "id": "wave",
+      "label": "挥手",
+      "playback": "once"
+    },
+    {
+      "id": "sleep",
+      "label": "睡觉",
+      "playback": "loop"
+    }
+  ],
+  "status": "concept sprite atlases only; not yet split into verified frame sequences or converted to LVGL runtime format",
+  "files": [
+    "concept_atlases/characters-expression-overview.png",
+    "concept_atlases/characters-state-overview.png",
+    "concept_atlases/characters-action-overview.png",
+    "spritesheets/characters-animation-atlas.png",
+    "spritesheets/characters-full-action-atlas.png",
+    "references/muse-user-reference.png"
+  ]
+}
