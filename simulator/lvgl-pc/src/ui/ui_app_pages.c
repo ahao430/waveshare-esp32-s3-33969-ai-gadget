@@ -229,10 +229,10 @@ static void quota_build(lv_obj_t *scr, int app_id)
     quota_refs_t *r = &g_q;
     memset(r, 0, sizeof(*r));
 
-    /* 顶部：back + 左右切换 */
+    /* 顶部一行三键（back 与切换拉开 20px，均避开全局状态栏） */
     lv_obj_t *back = lv_button_create(scr);
     lv_obj_set_size(back, 56, 44);
-    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 28);
     ui_style_card(back);
     lv_obj_set_style_radius(back, 14, 0);
     app_manager_back_on_click(back);
@@ -241,7 +241,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *prev = lv_button_create(scr);
     lv_obj_set_size(prev, 44, 44);
-    lv_obj_align(prev, LV_ALIGN_TOP_LEFT, 64, 28); /* y28：避开全局状态栏 */
+    lv_obj_align(prev, LV_ALIGN_TOP_LEFT, 76, 28);
     ui_style_card(prev);
     lv_obj_set_style_radius(prev, 14, 0);
     lv_obj_add_event_cb(prev, quota_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)-1);
@@ -250,7 +250,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *next = lv_button_create(scr);
     lv_obj_set_size(next, 44, 44);
-    lv_obj_align(next, LV_ALIGN_TOP_RIGHT, 0, 28); /* y28：避开全局状态栏 */
+    lv_obj_align(next, LV_ALIGN_TOP_RIGHT, 0, 28);
     ui_style_card(next);
     lv_obj_set_style_radius(next, 14, 0);
     lv_obj_add_event_cb(next, quota_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)1);

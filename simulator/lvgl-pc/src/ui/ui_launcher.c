@@ -281,17 +281,6 @@ void ui_launcher_build(void)
         tile_add(grid, def, i);
     }
 
-    /* ---- 页面指示器（单页占位） ---- */
-    for (int i = 0; i < 3; i++) {
-        lv_obj_t *dot = lv_obj_create(g_launcher);
-        lv_obj_set_size(dot, i == 0 ? 16 : 8, 8);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, i == 0 ? UI_ACCENT : UI_CARD, 0);
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_align(dot, LV_ALIGN_BOTTOM_MID, (i - 1) * 18, -6);
-    }
-
     /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
     static lv_timer_t *clock_timer;
     if (clock_timer) lv_timer_delete(clock_timer);

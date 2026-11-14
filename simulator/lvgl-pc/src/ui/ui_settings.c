@@ -469,21 +469,18 @@ void ui_settings_build_page(lv_obj_t *scr)
         break;
     case SP_HOME:
     default: {
-        /* 首页：标题 + 右上"返回桌面"（用户反馈：缺返回入口；
-         * app_manager back 也回 Launcher，但按钮让路径显式） */
+        /* 首页：左上返回键（与其他子页统一，回 Launcher）+ 居中标题 */
         lv_obj_t *t = ui_label(scr, "系统设置", &lv_font_cn_20, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 10);
 
-        lv_obj_t *home = lv_button_create(scr);
-        lv_obj_set_size(home, 88, 40);
-        lv_obj_align(home, LV_ALIGN_TOP_RIGHT, 0, 28); /* 避开全局状态栏 */
-        ui_style_card(home);
-        lv_obj_set_style_radius(home, 12, 0);
-        lv_obj_add_event_cb(home, home_click_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_t *hi = ui_label(home, LV_SYMBOL_HOME, &lv_font_montserrat_14, UI_TEXT);
-        lv_obj_align(hi, LV_ALIGN_CENTER, -26, 0);
-        lv_obj_t *ht = ui_label(home, "桌面", &lv_font_cn_14, UI_TEXT);
-        lv_obj_align(ht, LV_ALIGN_CENTER, 14, 0);
+        lv_obj_t *back = lv_button_create(scr);
+        lv_obj_set_size(back, 56, 44);
+        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 28);
+        ui_style_card(back);
+        lv_obj_set_style_radius(back, 14, 0);
+        lv_obj_add_event_cb(back, home_click_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
+        lv_obj_center(icon);
 
         struct { int page; const char *t; const char *d; const char *s; uint32_t c; } items[] = {
             { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS, 0x7C5CFF },
@@ -494,7 +491,7 @@ void ui_settings_build_page(lv_obj_t *scr)
         for (int i = 0; i < 4; i++) {
             lv_obj_t *card = entry_card(scr, items[i].page, items[i].t,
                                         items[i].d, items[i].s, items[i].c);
-            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 76 + i * 88); /* 76：避开右上"桌面"按钮 */
+            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 86 + i * 88);
         }
 
         lv_obj_t *fw = ui_label(scr, "Gadget Firmware v0.1.0 · 运行正常",
