@@ -121,11 +121,27 @@ static void *voice_worker(void *arg)
     return NULL;
 }
 
+/* 大肥鱼素材状态动画（PC2005-cloud/dsh-pet，MIT）：按会话状态切换 */
+static void set_mascot_for_state(vs_state_t st)
+{
+    if (!g_mascot) return;
+    if (g_app_id == UI_APP_CHAT) {
+        const char *path;
+        switch (st) {
+        case VS_THINKING: path = "A:simulator/lvgl-pc/assets/dsh/dsh-typing.gif"; break;
+        case VS_SPEAKING: path = "A:simulator/lvgl-pc/assets/dsh/dsh-sparkle.gif"; break;
+        default:          path = "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif"; break;
+        }
+        lv_gif_set_src(g_mascot, path);
+    }
+}
+
 static void on_vs_state(vs_state_t st, const char *detail, void *user)
 {
     (void)user;
     if (!g_status_lbl) return;
     lv_label_set_text(g_status_lbl, state_text(st));
+    set_mascot_for_state(st);
 
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
@@ -298,12 +314,28 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_set_flex_flow(g_hist_area, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(g_hist_area, 6, 0);
 
-    /* 形象（吉祥物 GIF，96×96）+ 状态 */
+    /* 形象：大肥鱼用 dsh-pet 状态动画，其余用吉祥物 GIF。
+     * dsh webm 素材自带黑底（Electron 透明在播放层实现），垫深色圆角卡展示 */
+    if (app_id == UI_APP_CHAT) {
+        lv_obj_t *stage = lv_obj_create(scr);
+        lv_obj_set_size(stage, 156, 94);
+        lv_obj_set_style_bg_color(stage, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(stage, 12, 0);
+        lv_obj_set_style_border_width(stage, 0, 0);
+        lv_obj_set_style_shadow_width(stage, 0, 0);
+        lv_obj_clear_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_align(stage, LV_ALIGN_TOP_MID, 0, 234);
+    }
     g_mascot = lv_gif_create(scr);
-    lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/mascot.gif");
-    /* gif 原始 439×391：scale 用 256 基准 zoom（110/439 ≈ 64） */
-    lv_obj_set_size(g_mascot, 110, 110);
-    lv_image_set_scale(g_mascot, 64);
+    if (app_id == UI_APP_CHAT) {
+        lv_obj_set_size(g_mascot, 144, 82); /* dsh 素材原始尺寸 */
+        lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif");
+    } else {
+        lv_obj_set_size(g_mascot, 110, 110);
+        lv_image_set_scale(g_mascot, 64); /* robot gif 439×391 → 110 */
+        lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/mascot.gif");
+    }
     lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 240);
 
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
