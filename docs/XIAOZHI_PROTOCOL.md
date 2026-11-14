@@ -133,3 +133,25 @@ audio_manager（codec_dev）、display_manager。
 
 协议与 PLAN 语音栈的对应关系已闭合；实现顺序：先 WS+JSON 控制帧
 （无音频可打通状态机），再 opus 管线。
+
+## 4. 音色与角色提示词的实现路径（设计结论，2026-11-14）
+
+小智的音色选择与角色提示词由**服务端会话配置**管理（xiaozhi.me console
+设备详情页），设备端不持有这些参数。我们的后台（Web）要设置时有两条路径：
+
+| 路径 | 原理 | 可行性 |
+|------|------|--------|
+| A. 官方服务 | Bridge 代理调用 xiaozhi.me 的 console 内部 API（登录 token + 设备配置接口） | C 级接口：无公开 API 承诺、需用户授权 token；按 PLAN §6.2 规则做成"可选启用 + 明确标注实验性"，不承诺稳定 |
+| B. 自建服务端 | 小智支持自建 server（xiaozhi-esp32 服务端组件）；音色/提示词存自建 DB | **推荐**：Bridge/Web 直接读写自建 server 的配置（我们的数据库我们的 API），设备经 WS 连自建端点 |
+
+结论：
+- 用户用官方服务 → 我们的后台只做**跳转**（设置页已加
+  xiaozhi.me/console 全屏码）+ 提示"音色/提示词在官方后台配置"。
+- 用户自建 server → Bridge 加 `xiaozhi/` 域对接自建 server 配置 API，
+  Web 后台提供音色列表下拉 + 角色提示词编辑（数据模型：
+  per-device {voice_id, system_prompt}，下发经 server 会话建立时生效）。
+- 混合形态（官方账号 + 想在设备端快速切音色）→ 设备端 App 内不实现
+  音色切换（协议不支持设备侧设置），保持"后台管理"边界（PLAN §1.1）。
+
+设备端 App（apps/xiaozhi）的边界不变：协议客户端只管
+hello/listen/tts 帧与会话状态机，音色/提示词是服务端会话属性。
