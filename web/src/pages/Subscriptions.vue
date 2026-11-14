@@ -20,7 +20,7 @@ const saving = ref(false)
 
 const supported = ['zhipu', 'kimi'] // 恒注册的 provider
 
-onMounted(load)
+onMounted(() => { load(); loadSubs() })
 
 async function load() {
   try {
@@ -63,6 +63,63 @@ async function save(id: string) {
   }
 }
 
+
+/* ---- 订阅实例管理（动态多订阅；设备端聚合展示） ---- */
+interface SubInfo {
+  id: string
+  kind: string
+  label: string
+  base_url?: string
+  has_token: boolean
+  updated_at: string
+}
+const subs = ref<SubInfo[]>([])
+const subKinds = ['mock', 'zhipu', 'kimi', 'opencode', 'newapi']
+const subKindNames: Record<string, string> = {
+  mock: 'Mock（演示）',
+  zhipu: '智谱 Coding Plan',
+  kimi: 'Kimi Coding Plan',
+  opencode: 'OpenCode Zen',
+  newapi: 'NewAPI 中转站',
+}
+const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
+const subAdding = ref(false)
+
+async function loadSubs() {
+  try {
+    const r = await request<{ subscriptions: SubInfo[] }>('/api/v1/subscriptions')
+    subs.value = r.subscriptions
+  } catch {
+    subs.value = []
+  }
+}
+
+async function addSub() {
+  if (!subForm.value.label) return
+  subAdding.value = true
+  message.value = ''
+  try {
+    await request('/api/v1/subscriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(subForm.value),
+    })
+    message.value = `已添加订阅「${subForm.value.label}」`
+    subForm.value = { kind: subForm.value.kind, label: '', base_url: '', token: '' }
+    await loadSubs()
+  } catch (e) {
+    message.value = `添加失败：${e instanceof Error ? e.message : e}`
+  } finally {
+    subAdding.value = false
+  }
+}
+
+async function removeSub(id: string) {
+  if (!confirm('删除该订阅？设备端订阅页将不再显示它。')) return
+  await request(`/api/v1/subscriptions/${id}`, { method: 'DELETE' })
+  await loadSubs()
+}
+
 async function remove(id: string) {
   if (!confirm(`删除 ${id} 的凭据？设备下一次刷新将无法抓取该 Provider。`)) return
   await request(`/api/v1/credentials/${id}`, { method: 'DELETE' })
@@ -80,6 +137,31 @@ async function remove(id: string) {
   <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') || message.includes('不可用') ? 'text-err' : 'text-ok'">
     {{ message }}
   </p>
+
+  <div class="card">
+    <h3 class="mb-1 font-semibold">订阅实例</h3>
+    <p class="mb-3 text-xs text-dim">设备端订阅页显示这里的配置；无任何配置时设备显示"请添加订阅"。</p>
+    <div v-if="subs.length === 0" class="mb-2 text-sm text-dim">还没有订阅，添加一个：</div>
+    <div class="space-y-2">
+      <div v-for="s in subs" :key="s.id" class="flex items-center justify-between rounded border border-line px-3 py-2">
+        <div>
+          <span class="font-medium">{{ s.label }}</span>
+          <span class="ml-2 text-xs text-dim">{{ subKindNames[s.kind] ?? s.kind }}</span>
+          <span class="ml-2 badge" :class="s.has_token ? '' : '!text-warn'">{{ s.has_token ? '已配 Key' : '无 Key' }}</span>
+        </div>
+        <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
+      </div>
+    </div>
+    <div class="mt-3 flex flex-wrap items-end gap-2">
+      <select v-model="subForm.kind" class="input !w-auto">
+        <option v-for="k in subKinds" :key="k" :value="k">{{ subKindNames[k] }}</option>
+      </select>
+      <input v-model="subForm.label" class="input !w-40" placeholder="名称（如：智谱主号）" />
+      <input v-model="subForm.base_url" class="input !w-56" placeholder="Base URL（可选）" />
+      <input v-model="subForm.token" class="input !w-48" type="password" placeholder="API Key / Token（可选）" />
+      <button class="btn" :disabled="subAdding || !subForm.label" @click="addSub">添加订阅</button>
+    </div>
+  </div>
 
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
     <div v-for="p in supported" :key="p" class="card">

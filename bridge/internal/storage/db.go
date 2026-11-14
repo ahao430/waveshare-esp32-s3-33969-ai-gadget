@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS provider_credentials (
     encrypted    TEXT NOT NULL,            -- security.Encrypt 格式
     updated_at   INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id          TEXT PRIMARY KEY,          -- 订阅实例 id（user-facing）
+    kind        TEXT NOT NULL,             -- zhipu|kimi|opencode|newapi|mock
+    label       TEXT NOT NULL,
+    base_url    TEXT NOT NULL DEFAULT '',  -- 覆盖该 kind 的默认端点
+    encrypted   TEXT NOT NULL DEFAULT '',  -- token（security.Encrypt；空=无凭据）
+    updated_at  INTEGER NOT NULL
+);
 `
 
 // DB 是快照持久层。

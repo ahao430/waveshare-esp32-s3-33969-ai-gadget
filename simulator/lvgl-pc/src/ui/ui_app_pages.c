@@ -182,7 +182,12 @@ static void quota_refresh_cb(lv_event_t *e)
 {
     int app_id = (int)(uintptr_t)lv_event_get_user_data(e);
     /* Phase 1 简化：同步刷新（bridge 模式阻塞 ≤1.5s），TODO 固件换异步 */
+    int before = ds_state()->sub_count;
     ds_refresh();
+    if (ds_state()->sub_count != before) {
+        app_manager_open(app_id); /* 订阅数量变化：重建（空态↔列表） */
+        return;
+    }
     quota_update(app_id);
 }
 
@@ -257,6 +262,46 @@ static void quota_build(lv_obj_t *scr, int app_id)
     (void)app_id;
     quota_refs_t *r = &g_q;
     memset(r, 0, sizeof(*r));
+
+    /* 空态（用户 2026-11-14：无订阅配置显示"请添加订阅"） */
+    if (ds_state()->sub_count == 0) {
+        lv_obj_t *back = lv_button_create(scr);
+        lv_obj_set_size(back, 56, 44);
+        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 28);
+        ui_style_card(back);
+        lv_obj_set_style_radius(back, 14, 0);
+        app_manager_back_on_click(back);
+        lv_obj_t *bi = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
+        lv_obj_center(bi);
+
+        lv_obj_t *card = lv_obj_create(scr);
+        lv_obj_set_size(card, 320, 220);
+        lv_obj_align(card, LV_ALIGN_CENTER, 0, 10);
+        ui_style_card(card);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *ic = ui_label(card, LV_SYMBOL_PLUS, &lv_font_montserrat_28, UI_ACCENT);
+        lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 28);
+        lv_obj_t *t = ui_label(card, "还没有订阅", &lv_font_cn_16, UI_TEXT);
+        lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 74);
+        lv_obj_t *d = ui_label(card, "请添加订阅", &lv_font_cn_14, UI_ACCENT);
+        lv_obj_align(d, LV_ALIGN_TOP_MID, 0, 106);
+        lv_obj_t *h = ui_label(card, "在 Web 后台「订阅额度」页配置，\n设备端将自动显示",
+                               &lv_font_cn_12, UI_TEXT_DIM);
+        lv_obj_align(h, LV_ALIGN_TOP_MID, 0, 140);
+
+        lv_obj_t *btn = lv_button_create(scr);
+        lv_obj_set_size(btn, 180, 44);
+        lv_obj_align(btn, LV_ALIGN_CENTER, 0, 130);
+        ui_style_card(btn);
+        lv_obj_set_style_bg_color(btn, UI_ACCENT, 0);
+        lv_obj_set_style_radius(btn, 14, 0);
+        lv_obj_add_event_cb(btn, quota_refresh_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)app_id);
+        lv_obj_t *bs = ui_label(btn, LV_SYMBOL_REFRESH, &lv_font_montserrat_16, UI_TEXT);
+        lv_obj_align(bs, LV_ALIGN_CENTER, -30, 0);
+        lv_obj_t *bt = ui_label(btn, "重新检查", &lv_font_cn_14, UI_TEXT);
+        lv_obj_align(bt, LV_ALIGN_CENTER, 16, 0);
+        return;
+    }
 
     /* 顶部一行三键（back 与切换拉开 20px，均避开全局状态栏） */
     lv_obj_t *back = lv_button_create(scr);

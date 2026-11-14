@@ -45,6 +45,9 @@ type Deps struct {
 	// AppearanceDir 非空时挂外观路由（自定义背景，用户 2026-11-14 需求：
 	// Web 上传自定义背景图片）。背景存 AppearanceDir/appearance_bg.bin。
 	AppearanceDir string
+	// SubscriptionsDB 非 nil（且 MasterKey 非 nil）时挂订阅配置路由：
+	// Web 后台动态配置订阅实例（zhipu/kimi/opencode/newapi/mock）。
+	SubscriptionsDB *storage.DB
 	// Accounts 返回某 Provider 的抓取账号；Phase 0 从环境变量来，
 	// 后续换成 SQLite 加密配置（PLAN §15.3）。
 	Accounts func(providerID string) []quota.AccountRef
@@ -115,6 +118,11 @@ func NewHandler(d Deps) http.Handler {
 
 	if d.Events != nil {
 		mux.HandleFunc("GET /api/v1/events", serveEventsWS(logger, d.Events))
+	}
+
+	// 订阅配置与聚合快照（Web 后台动态配置；空列表 → 设备空态文案）。
+	if d.SubscriptionsDB != nil && d.MasterKey != nil {
+		serveSubscriptions(mux, d, logger)
 	}
 
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。

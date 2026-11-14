@@ -24,6 +24,8 @@ import (
 	"gadget-bridge/internal/quota"
 	"gadget-bridge/internal/quota/kimi"
 	"gadget-bridge/internal/quota/mock"
+	"gadget-bridge/internal/quota/newapi"
+	"gadget-bridge/internal/quota/opencode"
 	"gadget-bridge/internal/quota/zhipu"
 	"gadget-bridge/internal/security"
 	"gadget-bridge/internal/storage"
@@ -114,6 +116,14 @@ func main() {
 		logger.Error("register kimi", "err", err)
 		os.Exit(1)
 	}
+	if err := reg.Register(opencode.New(os.Getenv("OPENCODE_BASE_URL"))); err != nil {
+		logger.Error("register opencode", "err", err)
+		os.Exit(1)
+	}
+	if err := reg.Register(newapi.New()); err != nil {
+		logger.Error("register newapi", "err", err)
+		os.Exit(1)
+	}
 
 	prewarmer := zhipu.NewPrewarmer(zhipuProvider,
 		func() quota.AccountRef { return resolveAccount("zhipu") },
@@ -179,18 +189,19 @@ func main() {
 	}
 
 	handler := api.NewHandler(api.Deps{
-		Registry:      reg,
-		Store:         store,
-		Logger:        logger,
-		Token:         os.Getenv("BRIDGE_TOKEN"), // 非空即启用 Bearer 认证（PLAN §19）
-		Komari:        komariSvc,
-		AppearanceDir: appearanceDir,
-		PrewarmZhipu:  prewarmZhipu,
-		Events:        eventHub,
-		ChatRouter:    chatRouter,
-		VoiceHandler:  voiceH,
-		CredentialsDB: db,
-		MasterKey:     masterKey,
+		Registry:        reg,
+		Store:           store,
+		Logger:          logger,
+		Token:           os.Getenv("BRIDGE_TOKEN"), // 非空即启用 Bearer 认证（PLAN §19）
+		Komari:          komariSvc,
+		AppearanceDir:   appearanceDir,
+		PrewarmZhipu:    prewarmZhipu,
+		Events:          eventHub,
+		ChatRouter:      chatRouter,
+		VoiceHandler:    voiceH,
+		CredentialsDB:   db,
+		MasterKey:       masterKey,
+		SubscriptionsDB: db,
 		Accounts: func(id string) []quota.AccountRef {
 			acc := resolveAccount(id)
 			return []quota.AccountRef{acc}

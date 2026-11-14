@@ -23,6 +23,7 @@ static char g_prewarm_url[256];
 static char g_providers_url[256];
 static char g_voice_url[256];
 static char g_chat_url[256];
+static char g_subs_url[256];
 static char g_name[96];
 static char g_provider[24];
 
@@ -188,40 +189,90 @@ static void fetch_servers(gadget_state_t *st)
     cJSON_Delete(root);
 }
 
+/* 拉取订阅实例聚合快照（GET /api/v1/quota/subscriptions）：
+ * 动态填充 st->subs[]（数量由配置决定，不再写死智谱/Kimi）。
+ * 快照窗口映射：5h/weekly → 设备展示字段；credits → 余额副行。 */
+static void fetch_subscriptions(gadget_state_t *st)
+{
+    char buf[BRIDGE_BUF_SIZE];
+    if (http_get(g_subs_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS * 4) != 200) return;
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return;
+    do {
+        const cJSON *arr = cJSON_GetObjectItem(root, "subscriptions");
+        if (!cJSON_IsArray(arr)) break;
+
+        int n = 0;
+        const cJSON *it;
+        cJSON_ArrayForEach(it, arr) {
+            if (n >= DS_SUB_MAX) break;
+            const cJSON *sid = cJSON_GetObjectItem(it, "id");
+            const cJSON *label = cJSON_GetObjectItem(it, "label");
+            ds_subscription_t *s = &st->subs[n];
+            memset(s, 0, sizeof(*s));
+            if (cJSON_IsString(label) && label->valuestring[0]) {
+                strncpy(s->name, label->valuestring, sizeof(s->name) - 1);
+            } else if (cJSON_IsString(sid)) {
+                strncpy(s->name, sid->valuestring, sizeof(s->name) - 1);
+            }
+            const cJSON *snap = cJSON_GetObjectItem(it, "snapshot");
+            if (!cJSON_IsObject(snap)) {
+                s->valid = false; /* 抓取失败/无 Key：显示错误态 */
+                snprintf(s->plan, sizeof(s->plan), "抓取失败");
+                const cJSON *err = cJSON_GetObjectItem(it, "error");
+                if (cJSON_IsString(err) && err->valuestring[0]) {
+                    snprintf(s->plan, sizeof(s->plan), "%.20s", err->valuestring);
+                }
+                n++;
+                continue;
+            }
+            const cJSON *plan = cJSON_GetObjectItem(snap, "plan_name");
+            if (cJSON_IsString(plan)) {
+                strncpy(s->plan, plan->valuestring, sizeof(s->plan) - 1);
+            }
+            const cJSON *windows = cJSON_GetObjectItem(snap, "windows");
+            const cJSON *w;
+            cJSON_ArrayForEach(w, windows) {
+                const cJSON *wid = cJSON_GetObjectItem(w, "id");
+                const cJSON *up = cJSON_GetObjectItem(w, "used_percent");
+                const cJSON *rs = cJSON_GetObjectItem(w, "reset_at");
+                const cJSON *ws = cJSON_GetObjectItem(w, "window_seconds");
+                long ts = cJSON_IsString(rs) ? parse_iso8601(rs->valuestring) : 0;
+                int used = cJSON_IsNumber(up) ? (int)(up->valuedouble + 0.5) : 0;
+                int wsec = cJSON_IsNumber(ws) ? (int)ws->valuedouble : 0;
+                if (cJSON_IsString(wid) && strcmp(wid->valuestring, "5h") == 0) {
+                    s->used_5h = used; s->reset_5h = ts; s->win_5h_s = wsec;
+                } else if (cJSON_IsString(wid) && strcmp(wid->valuestring, "weekly") == 0) {
+                    s->used_week = used; s->reset_week = ts; s->week_s = wsec;
+                }
+            }
+            s->valid = true;
+            n++;
+        }
+        if (n > 0) st->sub_count = n;
+        else st->sub_count = 0; /* 明确空列表 → 设备空态 */
+        st->updated_unix = (long)time(NULL);
+    } while (0);
+    cJSON_Delete(root);
+}
+
 static bool bridge_refresh(gadget_state_t *st)
 {
-    /* 主 provider → Zhipu 页；失败返回 false（旧数据仍可用） */
-    if (!fetch_quota(g_url, &st->zhipu_used_5h, &st->zhipu_reset_5h,
-                     &st->zhipu_used_week, st->zhipu_plan,
-                     sizeof(st->zhipu_plan), &st->updated_unix,
-                     &st->subs[0].win_5h_s, &st->subs[0].week_s,
-                     &st->subs[0].reset_week)) {
-        return false;
-    }
-    /* kimi provider → Kimi 页；不可用（未配 Key）时静默保留原值 */
-    (void)fetch_quota(g_kimi_url, &st->kimi_used_5h, NULL,
-                      &st->kimi_used_week, NULL, 0, NULL,
-                      &st->subs[1].win_5h_s, &st->subs[1].week_s,
-                      &st->subs[1].reset_week);
-
-    /* 订阅列表：主 provider → subs[0]，kimi → subs[1]（名称/套餐带入）。
-     * reset_week 已由上面 fetch_quota 直写 subs[0]（zhipu_reset_week 是
-     * 从未更新的 legacy 字段，这里不可用它回写——曾把解析结果清回 0） */
-    if (st->sub_count >= 1) {
-        st->subs[0].used_5h   = st->zhipu_used_5h;
-        st->subs[0].used_week = st->zhipu_used_week;
-        st->subs[0].reset_5h  = st->zhipu_reset_5h;
-        st->zhipu_reset_week  = st->subs[0].reset_week; /* legacy 引用同步 */
-        snprintf(st->subs[0].name, sizeof(st->subs[0].name), "%s", g_provider);
-        st->subs[0].valid = true;
-    }
-    if (st->sub_count >= 2) {
-        st->subs[1].used_5h   = st->kimi_used_5h;
-        st->subs[1].used_week = st->kimi_used_week;
-        st->subs[1].valid = true;
+    /* 订阅实例聚合（动态多订阅；无配置 → sub_count=0 → 设备空态）。
+     * zhipu/kimi 兼容字段从 subs[0]（若有）派生，供旧引用使用。 */
+    fetch_subscriptions(st);
+    if (st->sub_count > 0 && st->subs[0].valid) {
+        st->zhipu_used_5h   = st->subs[0].used_5h;
+        st->zhipu_used_week = st->subs[0].used_week;
+        st->zhipu_reset_5h  = st->subs[0].reset_5h;
+        st->zhipu_reset_week = st->subs[0].reset_week;
+        if (st->zhipu_plan[0] == '\0') {
+            snprintf(st->zhipu_plan, sizeof(st->zhipu_plan), "%s", st->subs[0].plan);
+        }
     }
 
-    /* Komari 服务器 → 监控页 */
+    /* Komari 服务器 → 监控页 */    /* Komari 服务器 → 监控页 */
     fetch_servers(st);
     return true;
 }
@@ -425,6 +476,8 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
     snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers",
              bridge_url);
     snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions",
+             bridge_url);
+    snprintf(g_subs_url, sizeof(g_subs_url), "%s/api/v1/quota/subscriptions",
              bridge_url);
     static const ds_impl_t impl = {
         .name          = g_name, /* bridge_init 填充后内容稳定，指针不变 */

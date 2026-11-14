@@ -18,11 +18,8 @@ static gadget_state_t g_state = {
     .kimi_used_5h   = 12,
     .kimi_used_week = 35,
 
-    .sub_count = 2,
-    .subs = {
-        { "智谱", "GLM Coding Plan (Lite)", 42, 61, 18000, 604800, 0, 0, true },
-        { "Kimi", "Kimi Coding Plan",        12, 35, 18000, 604800, 0, 0, true },
-    },
+    .sub_count = 0,
+    .subs = {{0}},
 
     .server_count = 4,
     .servers = {
