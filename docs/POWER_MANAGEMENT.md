@@ -696,6 +696,9 @@ PMU IRQ 未接 ESP32 → 寄存器轮询）。BSP_CAPS_BUTTONS=0，三键均自�
 | KEY3 | 返回（等价上滑退出） | 语音 PTT（唤起当前 AI 助手） |
 | BOOT | 回 Launcher/首页 | 打开配网页（二维码全屏） |
 
+出厂 AIChats 另有"双击 BOOT 返回主界面"语义（WAVESHARE_GUIDES §3）：
+input 服务支持双击事件（<400ms 两次），默认映射留空、应用可申请。
+
 长按 PWRON 的开关机由 PMU 固有行为处理（运行中长按不关机、固件停转
 后长按 10s 断电，HARDWARE §2.8）；固件只读短按位实现息屏切换。
 

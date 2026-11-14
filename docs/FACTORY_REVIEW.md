@@ -91,6 +91,15 @@ JSONL）→ ESP32 固件 → 屏幕显示；协议 `usage.v1` 只发用量百分
 Clawdmeter/Codex Usage Display（通知与状态显示范式）——按需在对应
 应用开发时再调研。
 
+## 9. 出厂 App 清单（官方使用说明页确认，2026-11-14 补）
+
+brookesia 框架出厂固件预装：DrawPanel / squareline / Calculator /
+**AIChats（小智，双击 BOOT 返回主界面）** / SpecAnalyzer / Gravity
+Ball / VideoPlayer / **MusicPlayer（官方自述"界面模拟"）** / Settings
+（WiFi 扫描+扫码配网/亮度/音量/电池电压）。要点：AIChats 印证"小智
+作为 App 集成"路线；MusicPlayer 后台播放需真机复核；Settings 的
+扫码配网与 ADR-008 双路径同构。详见 WAVESHARE_GUIDES.md §3。
+
 ## 8. 澄清：出厂系统里的"小智" vs 官方 XiaoZhi 教程（2026-11-14 补）
 
 官方 [XiaoZhi_AI 教程](https://docs.waveshare.net/ESP32-S3-Touch-AMOLED-2.16/XiaoZhi_AI/)
