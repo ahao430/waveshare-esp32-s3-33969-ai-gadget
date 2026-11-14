@@ -363,7 +363,7 @@ static void register_apps(void)
         { UI_APP_MUSE,     "Muse",       LV_SYMBOL_AUDIO,         true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_XIAOZHI,  "小智",       LV_SYMBOL_VOLUME_MID,    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_MUSIC,    "音乐播放",   LV_SYMBOL_SD_CARD,       false, placeholder_build,     NULL },
-        { UI_APP_SETTINGS, "系统设置",   LV_SYMBOL_SETTINGS,      true,  ui_settings_build,     NULL },
+        { UI_APP_SETTINGS, "系统设置",   LV_SYMBOL_SETTINGS,      true,  ui_settings_build,     ui_settings_on_exit },
         { UI_APP_WEATHER,  "天气",       LV_SYMBOL_IMAGE,         false, placeholder_build,     NULL },
     };
     for (size_t i = 0; i < sizeof(defs) / sizeof(defs[0]); i++) {

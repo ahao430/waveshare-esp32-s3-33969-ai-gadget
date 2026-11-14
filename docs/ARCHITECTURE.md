@@ -106,7 +106,9 @@ internal/
     store.go                  快照缓存（保留上次成功数据 + 过期标记）
     zhipu/                    智谱 Adapter（C 级接口）+ fixture 单测
     mock/                     Mock Provider（开发/测试）
-  ai/                         Bigfish Chat 模型路由（后续）
+  ai/                         Bigfish Chat 模型路由（OpenAI 兼容透传）
+  conversations/              会话存储域（ADR-006，v0.2 实现中）
+    store.go                  profiles/conversations/messages 表 + CRUD
   komari/ zcode/              监控数据聚合（后续）
   config/                     配置与密钥管理（环境变量/加密文件）
   logger/                     脱敏日志
@@ -128,6 +130,40 @@ type QuotaProvider interface {
 - 供应商接口异常 → 保留上次成功快照，标记 `stale`，UI 显示过期时间。
 - 响应结构无法解析 → `unsupported_response` 错误，绝不显示伪造数据。
 - `UsedPercent`（已用）与 `RemainingPct`（剩余）分开存，缺失保持 `nil`。
+
+## 4a. 会话存储（ADR-006，v0.2 草案）
+
+数据模型（PRODUCT_SPEC §1.4）：
+
+```text
+AssistantProfile: profile_id / name / model_config(provider_id,model_id)
+                  / avatar_id / system_prompt / voice_id / context_config
+                  / is_default
+Conversation:     conversation_id / profile_id / title / created_at
+                  / updated_at / messages[] / summary / context_window
+                  / last_compacted_at / compact_version
+```
+
+API 草案：
+
+```text
+GET    /api/v1/chat/profiles                     # 角色预设列表
+POST   /api/v1/chat/profiles                     # 新增角色
+PUT    /api/v1/chat/profiles/{id}                # 修改（模型/提示词/形象/声音）
+DELETE /api/v1/chat/profiles/{id}
+GET    /api/v1/chat/conversations?profile_id=    # 会话列表（按更新时间）
+POST   /api/v1/chat/conversations                # 新建会话 {profile_id,title}
+PUT    /api/v1/chat/conversations/{id}           # 重命名
+DELETE /api/v1/chat/conversations/{id}           # 删除（级联消息）
+GET    /api/v1/chat/conversations/{id}/messages  # 完整历史（分页）
+POST   /api/v1/chat/completions                  # 现有透传；附带
+                                                 # conversation_id 时由
+                                                 # Bridge 追加消息并执行
+                                                 # 自动上下文压缩
+```
+
+上下文压缩（Bridge 侧自动）：窗口不足 → 摘要 + 最近 N 轮；
+完整历史不删除（PRODUCT_SPEC §3.2）。
 
 ## 5. 数据流（首期三条）
 

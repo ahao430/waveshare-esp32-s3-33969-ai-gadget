@@ -4,6 +4,33 @@
 
 ---
 
+## ADR-006 会话历史统一存 Bridge，设备端只存最近列表
+
+日期：2026-11-14　状态：已接受（用户拍板）
+
+**背景**：大肥鱼多角色多会话（PRODUCT_SPEC §1/§3）需要长期历史存储；
+设备只有 16MB Flash + TF 卡。
+
+**决策**：大肥鱼与 Muse 的历史会话**统一存储在 Gadget Bridge**
+（SQLite：conversations/messages/profiles 表）；设备端只保存最近
+会话列表和必要缓存（最近会话的消息上下文）。小智官方云端历史仍以
+官方服务为准，设备只维护当前通信状态与最近交互缓存。
+
+**理由**：
+- 16MB Flash 不承担聊天记录增长；TF 卡保留给媒体/日志。
+- 手机/网页端后续可复用同一份 Bridge 历史（多端查看）。
+- Bridge 已有 SQLite/凭据/认证基础设施，会话表增量成本小。
+
+**后果**：
+- Bridge 新增 conversations 域（API 草案见 ARCHITECTURE §4a）：
+  `GET/POST /api/v1/chat/conversations`、`/conversations/{id}/messages`、
+  profiles CRUD。
+- 设备聊天页 = 最近会话列表 + 当前会话上下文缓存（NVRAM 预算内）。
+- 上下文压缩（摘要 + 最近 N 轮）由 **Bridge 侧**执行（模型窗口管理
+  在 Bridge 的 Model Router 处最自然），设备无感。
+
+---
+
 ## ADR-005 三个独立 AI App + 共用 Assistant UI / Companion Engine
 
 日期：2026-11-14　状态：已接受（用户拍板）

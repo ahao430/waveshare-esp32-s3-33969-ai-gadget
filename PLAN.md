@@ -287,6 +287,12 @@ firmware/
 > 三个 AI App（Muse/大肥鱼/小智）共用一套 Assistant UI 与 Companion
 > Engine，服务接入各自适配（ADR-005）；音频链路统一由 Audio Manager
 > 独占管理（同一时刻仅一个助手占用，ADR-003）。
+>
+> **会话与角色（PRODUCT_SPEC v0.2，ADR-006）**：大肥鱼=多角色聊天
+> （角色预设/切换/独立会话空间）；会话历史统一存 Bridge（设备只存
+> 最近列表+缓存）；上下文压缩系统自动（摘要+最近 N 轮，不删历史）；
+> 小智第一版仅展示当前 Agent（切换待官方接口验证）。设置分层为
+> 首页+四分类（显示声音/网络连接/服务管理/设备信息）。
 
 ## 5.2 Launcher
 
@@ -1578,6 +1584,7 @@ bridge/
 │   ├── ai/
 │   │   ├── router/
 │   │   └── providers/
+│   ├── conversations/         # 会话存储域（ADR-006）
 │   ├── quota/
 │   │   ├── zhipu/
 │   │   ├── kimi/
