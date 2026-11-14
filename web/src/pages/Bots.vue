@@ -90,8 +90,9 @@ async function probe(id?: string) {
   <h1 class="page-title">聊天机器人</h1>
   <p class="page-sub">
     大肥鱼对话与语音的上游 = AstrBot 实例（可创建多个；设备端长按列表切换）。
-    在服务器部署 <a class="text-accent2" href="https://github.com/AstrBotDevs/AstrBot" target="_blank">AstrBot</a>
-    后，开启 API 并生成 <code class="text-accent2">abk_</code> Token 填入这里。
+    AstrBot 侧<b>无需创建机器人/选择平台类型</b>（那是 QQ/TG 等 IM 接入用的）——
+    我们走 HTTP OpenAPI：WebUI <b>设置 → OpenAPI → 创建 API Key</b>（勾选
+    chat 权限，需 AstrBot ≥ v4.18.0），把 <code class="text-accent2">abk_</code> Key 填到下面即可。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="messageErr ? 'text-err' : 'text-ok'">{{ message }}</p>
@@ -128,7 +129,8 @@ async function probe(id?: string) {
 
   <div class="card mt-4 text-xs text-dim">
     说明：Token 经 AES-256-GCM 加密落库（需 <code>BRIDGE_MASTER_KEY</code>），明文不回显、不入日志。
-    Bridge 按 <code>POST {地址}/api/v1/chat</code> 对接（username=gadget、session 按机器人隔离）；
-    添加/删除即时生效，无需重启。角色人设、模型与插件都在 AstrBot 侧配置。
+    Bridge 按 <code>POST {地址}/api/v1/chat</code> 对接（username=gadget、session_id=gadget-bigfish-&lt;id&gt;
+    每台机器人独立会话，记忆保留在 AstrBot 侧）；添加/删除即时生效。人设、模型、插件、
+    知识库都在 AstrBot 侧配置——多个机器人条目可指向同一 AstrBot 的不同部署端口。
   </div>
 </template>
