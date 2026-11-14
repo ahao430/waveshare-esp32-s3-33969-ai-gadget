@@ -27,6 +27,20 @@ static bool mock_ds_refresh(gadget_state_t *st)
     st->kimi_used_week = m->kimi_used_week;
     st->updated_unix   = m->updated_unix;
 
+    /* 订阅列表与旧字段同步 */
+    if (st->sub_count >= 1) {
+        st->subs[0].used_5h   = st->zhipu_used_5h;
+        st->subs[0].used_week = st->zhipu_used_week;
+        st->subs[0].reset_5h  = st->zhipu_reset_5h;
+        st->subs[0].reset_week = st->zhipu_reset_week;
+        st->subs[0].valid = true;
+    }
+    if (st->sub_count >= 2) {
+        st->subs[1].used_5h   = st->kimi_used_5h;
+        st->subs[1].used_week = st->kimi_used_week;
+        st->subs[1].valid = true;
+    }
+
     /* 服务器队列伪随机波动 */
     for (int i = 0; i < st->server_count && i < DS_SERVER_MAX; i++) {
         gadget_server_t *s = &st->servers[i];

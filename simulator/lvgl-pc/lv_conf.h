@@ -9,14 +9,24 @@
 /* 480×480 AMOLED 用 RGB565，与真机一致 */
 #define LV_COLOR_DEPTH 16
 
-/* PC 内存充裕；固件侧会显著调小并评估 PSRAM 策略（PLAN §14） */
-#define LV_MEM_SIZE (256 * 1024)
+/* PC 内存充裕：1MB 内置池（256KB 时语音页对象+GIF 解码缓冲会耗尽池，
+ * lv_obj_create 返回 NULL → 后续 style 操作 SIGSEGV——崩溃报告定位）。
+ * 固件侧按 PLAN §14 预算另配。 */
+#define LV_MEM_SIZE (1024 * 1024)
 
 /* SDL 显示/输入驱动（lv_sdl_window / lv_sdl_mouse） */
 #define LV_USE_SDL 1
 
 /* GIF 解码（Muse 吉祥物动画；固件侧按需裁剪，PLAN §8.5） */
 #define LV_USE_GIF 1
+
+/* 二维码组件（设置页：配网入口 / 局域网管理地址；PLAN §9.3） */
+#define LV_USE_QRCODE 1
+
+/* stdio 文件系统（GIF 等资源按相对 CWD 路径加载，盘符 'A'） */
+#define LV_USE_FS_STDIO 1
+#define LV_FS_STDIO_LETTER 'A'
+#define LV_FS_STDIO_PATH 
 
 /* 字体：模拟器 UI 使用的全部字号（真机按需裁剪） */
 #define LV_FONT_MONTSERRAT_12 1

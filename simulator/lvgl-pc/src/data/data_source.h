@@ -21,12 +21,29 @@ typedef struct {
     int uptime_h; /* 小时粒度，设备端够用 */
 } gadget_server_t;
 
+#define DS_SUB_MAX 8
+
+/* 一个订阅（Provider）的额度视图（PLAN §5.1：单 App 多订阅左右切换） */
 typedef struct {
-    /* 订阅额度（%） */
+    char name[24];       /* 显示名（如 "智谱" "Kimi"） */
+    char plan[48];
+    int used_5h;         /* % */
+    int used_week;       /* % */
+    long reset_5h;       /* unix 秒 */
+    long reset_week;     /* unix 秒 */
+    bool valid;
+} ds_subscription_t;
+
+typedef struct {
+    /* 订阅列表（carousel 数据源） */
+    ds_subscription_t subs[DS_SUB_MAX];
+    int sub_count;
+
+    /* 兼容旧引用（保留至 quota 页重写完成） */
     int zhipu_used_5h;
     int zhipu_used_week;
-    long zhipu_reset_5h;   /* unix 秒 */
-    long zhipu_reset_week; /* unix 秒 */
+    long zhipu_reset_5h;
+    long zhipu_reset_week;
     char zhipu_plan[48];
 
     int kimi_used_5h;

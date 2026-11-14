@@ -24,6 +24,7 @@ static char g_providers_url[256];
 static char g_voice_url[256];
 static char g_chat_url[256];
 static char g_name[96];
+static char g_provider[24];
 
 /* 前置声明：bridge_voice_interact 函数体在文件尾部（追加段） */
 static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
@@ -185,6 +186,22 @@ static bool bridge_refresh(gadget_state_t *st)
     /* kimi provider → Kimi 页；不可用（未配 Key）时静默保留原值 */
     (void)fetch_quota(g_kimi_url, &st->kimi_used_5h, NULL,
                       &st->kimi_used_week, NULL, 0, NULL);
+
+    /* 订阅列表：主 provider → subs[0]，kimi → subs[1]（名称/套餐带入） */
+    if (st->sub_count >= 1) {
+        st->subs[0].used_5h   = st->zhipu_used_5h;
+        st->subs[0].used_week = st->zhipu_used_week;
+        st->subs[0].reset_5h  = st->zhipu_reset_5h;
+        st->subs[0].reset_week = st->zhipu_reset_week;
+        snprintf(st->subs[0].name, sizeof(st->subs[0].name), "%s", g_provider);
+        st->subs[0].valid = true;
+    }
+    if (st->sub_count >= 2) {
+        st->subs[1].used_5h   = st->kimi_used_5h;
+        st->subs[1].used_week = st->kimi_used_week;
+        st->subs[1].valid = true;
+    }
+
     /* Komari 服务器 → 监控页 */
     fetch_servers(st);
     return true;
@@ -375,6 +392,7 @@ static int bridge_chat_providers(char *out, int cap)
 const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
 {
     snprintf(g_base, sizeof(g_base), "%s", bridge_url);
+    snprintf(g_provider, sizeof(g_provider), "%s", provider);
     snprintf(g_url, sizeof(g_url), "%s/api/v1/quota/%s/snapshot",
              bridge_url, provider);
     snprintf(g_kimi_url, sizeof(g_kimi_url), "%s/api/v1/quota/kimi/snapshot",

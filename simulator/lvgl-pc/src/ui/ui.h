@@ -29,10 +29,8 @@ void ui_open_app(int app_id);
 
 /* 各页面构建器（app_manager 注册用；screen 由 app_manager 预建） */
 void ui_monitor_build(lv_obj_t *screen, int app_id);
-void ui_chat_build(lv_obj_t *screen, int app_id);
-void ui_chat_on_exit(void);
-void ui_voice_build(lv_obj_t *screen, int app_id);
-void ui_voice_on_exit(void);
+void ui_conversation_build(lv_obj_t *screen, int app_id);
+void ui_conversation_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 
 #endif /* UI_H */

@@ -72,7 +72,7 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 显示卡 ---- */
     lv_obj_t *card1 = lv_obj_create(scr);
-    lv_obj_set_size(card1, LV_PCT(100), 108);
+    lv_obj_set_size(card1, LV_PCT(100), 96);
     lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 56);
     ui_style_card(card1);
     lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
@@ -98,8 +98,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 音量卡 ---- */
     lv_obj_t *card2 = lv_obj_create(scr);
-    lv_obj_set_size(card2, LV_PCT(100), 108);
-    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 172);
+    lv_obj_set_size(card2, LV_PCT(100), 96);
+    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 158);
     ui_style_card(card2);
     lv_obj_clear_flag(card2, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -122,8 +122,8 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     /* ---- 息屏卡 ---- */
     lv_obj_t *card3 = lv_obj_create(scr);
-    lv_obj_set_size(card3, LV_PCT(100), 96);
-    lv_obj_align(card3, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_set_size(card3, LV_PCT(100), 72);
+    lv_obj_align(card3, LV_ALIGN_TOP_MID, 0, 260);
     ui_style_card(card3);
     lv_obj_clear_flag(card3, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -143,7 +143,36 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_text_font(dd, &lv_font_cn_14, 0);
     lv_obj_add_event_cb(dd, timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
+    /* ---- 网络/配网卡（PLAN §9.3：屏幕显示入口，二维码只含 URL） ---- */
+    lv_obj_t *card4 = lv_obj_create(scr);
+    lv_obj_set_size(card4, LV_PCT(100), 134);
+    lv_obj_align(card4, LV_ALIGN_TOP_MID, 0, 338);
+    ui_style_card(card4);
+    lv_obj_clear_flag(card4, LV_OBJ_FLAG_SCROLLABLE);
+
+    ui_label(card4, "配网与后台", &lv_font_cn_14, UI_TEXT);
+
+    /* 配网二维码（连接设备热点后扫码打开 192.168.4.1） */
+    lv_obj_t *qr1 = lv_qrcode_create(card4);
+    lv_qrcode_update(qr1, "http://192.168.4.1", 18); /* 9.2：第三参=数据长度 */
+    lv_obj_set_size(qr1, 60, 60);
+    lv_obj_align(qr1, LV_ALIGN_LEFT_MID, 12, -4);
+    lv_obj_t *l1 = ui_label(card4, "配网入口", &lv_font_cn_12, UI_ACCENT2);
+    lv_obj_align(l1, LV_ALIGN_LEFT_MID, 84, -22);
+    lv_obj_t *l2 = ui_label(card4, "连接设备热点后\n扫码打开配网页", &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_align(l2, LV_ALIGN_LEFT_MID, 84, 8);
+
+    /* 局域网管理二维码 */
+    lv_obj_t *qr2 = lv_qrcode_create(card4);
+    lv_qrcode_update(qr2, "http://192.168.1.42", 18);
+    lv_obj_set_size(qr2, 60, 60);
+    lv_obj_align(qr2, LV_ALIGN_RIGHT_MID, -12, -4);
+    lv_obj_t *l3 = ui_label(card4, "管理后台", &lv_font_cn_12, UI_ACCENT2);
+    lv_obj_align(l3, LV_ALIGN_RIGHT_MID, -84, -22);
+    lv_obj_t *l4 = ui_label(card4, "连接家庭 Wi-Fi 后\n扫码打开管理网页", &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_align(l4, LV_ALIGN_RIGHT_MID, -84, 8);
+
     lv_obj_t *note = ui_label(scr, "设置暂存内存 · 真机写入 NVS（Phase 6）",
                               &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(note, LV_ALIGN_BOTTOM_LEFT, 8, 56);
+    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, 2);
 }
