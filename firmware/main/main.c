@@ -15,12 +15,17 @@
 #include "driver/i2c_master.h"
 #include "esp_codec_dev.h"
 #include "esp_heap_caps.h"
+#include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_netif.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "lvgl.h"
+#include "nvs_flash.h"
 #include "power_manager.h"
 
 #include <assert.h>
@@ -28,6 +33,15 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+/* bring-up Wi-Fi 凭据（gitignore，不进仓库）；缺文件则跳过联网测试 */
+#if __has_include("wifi_secret.h")
+#include "wifi_secret.h"
+#else
+#define WIFI_SSID ""
+#define WIFI_PASS ""
+#define BRIDGE_HOST ""
+#endif
 
 static const char *TAG = "gadget";
 
@@ -42,6 +56,7 @@ static const char *TAG = "gadget";
 /* 音频任务事件位 */
 #define EV_TONE_BIT BIT0
 #define EV_REC_BIT BIT1
+#define EV_NET_BIT BIT2 /* Wi-Fi 拿到 IP → 联网任务做 Bridge 探活+压力测试 */
 
 static EventGroupHandle_t g_audio_ev;
 static esp_codec_dev_handle_t g_spk;
@@ -312,6 +327,97 @@ static void probe_pmu_raw(void)
     }
 }
 
+/* ---- §2.10 Wi-Fi + Bridge 探活 + §2.1 PSRAM 压力测试 ---- */
+static int g_wifi_retry;
+
+static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
+{
+    (void)arg;
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        g_wifi_retry++;
+        ESP_LOGW(TAG, "wifi disconnected, retry #%d", g_wifi_retry);
+        if (g_wifi_retry <= 20) {
+            esp_wifi_connect();
+        } else {
+            set_status("WiFi: FAILED\n(check ssid/pass)");
+        }
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
+        set_status("WiFi: " IPSTR "\nbridge...", IP2STR(&evt->ip_info.ip));
+        xEventGroupSetBits(g_audio_ev, EV_NET_BIT);
+    }
+}
+
+static void wifi_start(void)
+{
+    if (strlen(WIFI_SSID) == 0) {
+        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi 测试");
+        return;
+    }
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+    wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_evt, NULL));
+    wifi_config_t wc = { 0 };
+    strlcpy((char *)wc.sta.ssid, WIFI_SSID, sizeof(wc.sta.ssid));
+    strlcpy((char *)wc.sta.password, WIFI_PASS, sizeof(wc.sta.password));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI(TAG, "wifi connecting to \"%s\" ...", WIFI_SSID);
+}
+
+static void net_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        xEventGroupWaitBits(g_audio_ev, EV_NET_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+
+        /* Bridge 探活（§2.10）：HTTP GET /api/v1/device/status */
+        char url[96];
+        snprintf(url, sizeof(url), "%s/api/v1/device/status", BRIDGE_HOST);
+        esp_http_client_config_t cfg = {
+            .url = url,
+            .timeout_ms = 5000,
+        };
+        esp_http_client_handle_t c = esp_http_client_init(&cfg);
+        esp_err_t err = esp_http_client_perform(c);
+        int code = (err == ESP_OK) ? esp_http_client_get_status_code(c) : 0;
+        int64_t len = (err == ESP_OK) ? esp_http_client_get_content_length(c) : 0;
+        esp_http_client_cleanup(c);
+        set_status("Bridge: HTTP %d\n(len=%d)%s", code, (int)len,
+                   code == 200 ? " OK!" : " FAIL");
+
+        /* PSRAM 全屏重绘压力测试（Muse 坑 #1，Wi-Fi 开启状态）：
+         * 30s 内每 250ms 全屏失效一次，观察花屏/crash/内存泄漏。 */
+        int frames = 0;
+        uint32_t heap0 = esp_get_free_heap_size();
+        set_status("stress 30s...");
+        for (int t = 0; t < 120; t++) {
+            bsp_display_lock(0);
+            lv_obj_invalidate(lv_screen_active());
+            bsp_display_unlock();
+            vTaskDelay(pdMS_TO_TICKS(250));
+            frames++;
+        }
+        set_status("stress done\n%d frames, heap %u->%u B\n(screen ok?)",
+                   frames, (unsigned)heap0, (unsigned)esp_get_free_heap_size());
+        ESP_LOGI(TAG, "psram stress done: %d frames, heap %u -> %u",
+                 frames, (unsigned)heap0, (unsigned)esp_get_free_heap_size());
+    }
+}
+
 static void build_ui(void)
 {
     lv_obj_t *root = lv_screen_active();
@@ -409,6 +515,8 @@ void app_main(void)
 
     g_audio_ev = xEventGroupCreate();
     xTaskCreate(audio_task, "audio_test", 4096, NULL, 5, NULL);
+    xTaskCreate(net_task, "net_test", 6144, NULL, 5, NULL);
+    wifi_start();
 
     /* KEY3（GPIO18）：外部上拉 3V3，按下接地 */
     gpio_config_t io = {
@@ -428,5 +536,5 @@ void app_main(void)
     build_ui();
     bsp_display_unlock();
 
-    ESP_LOGI(TAG, "bringup3 ready: 触摸/滑条/TONE/REC；KEY3=TONE");
+    ESP_LOGI(TAG, "bringup4 ready: 触摸/滑条/TONE/REC + WiFi/Bridge/stress");
 }

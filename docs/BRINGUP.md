@@ -96,9 +96,11 @@ monitor 里按顺序确认：
       （滑条 10-100% 实时生效）
 - [x] 旋转：`bsp_display_rotation_set` 四方向目测。（MADCTL 通道工作，
       但与 LVGL 帧缓冲不同步→残影；运行时旋转弃用，见上方说明）
-- [ ] **PSRAM 缓冲压力测试**（Muse 坑 #1）：Wi-Fi 启用后连续刷新
+- [x] **PSRAM 缓冲压力测试**（Muse 坑 #1）：Wi-Fi 启用后连续刷新
       30s 无花屏/无 crash。失败 → 显示缓冲迁内部 RAM 分行绘制
       （参考 Muse `muse_lcd_bands.c` 思路）。
+      （2026-11-14 Wi-Fi 连接态 30s×120 帧全屏重绘，无 crash，
+      堆漂移仅 1.7KB。Muse 坑 #1 基础场景关闭；花屏目视待用户确认）
 
 ### 2.2 触摸 — ✅ 2026-11-14 通过
 
@@ -159,11 +161,13 @@ monitor 里按顺序确认：
 - [ ] light sleep 进入/退出；KEY3 唤醒。
 - [ ] 电流实测（见 §3 记录模板）。
 
-### 2.10 Wi-Fi
+### 2.10 Wi-Fi — ✅ 2026-11-14 连通
 
-- [ ] 连接家庭 AP；RSSI 合理。
-- [ ] HTTP GET Bridge `/api/v1/device/status` 通。
-- [ ] 连续 30 分钟无断连重连风暴。
+- [x] 连接家庭 AP；RSSI 合理。（SSID 6-2-3401，5.7s 拿 IP 192.168.50.211）
+- [x] HTTP GET Bridge `/api/v1/device/status` 通。（HTTP 200；Bridge 日志
+      收到 GET，往返 1.5ms。凭据走 gitignore 的 main/wifi_secret.h，
+      正式产品换配网流程）
+- [ ] 连续 30 分钟无断连重连风暴。（长时烤机待后续 UI 移植阶段顺带做）
 
 ## 3. 性能与功耗记录模板（PLAN §14.3）
 

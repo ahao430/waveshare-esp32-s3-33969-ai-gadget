@@ -54,3 +54,6 @@ out/
 .v2c/
 .video_agent/
 out/
+
+# bring-up Wi-Fi 凭据（不进仓库）
+firmware/main/wifi_secret.h
