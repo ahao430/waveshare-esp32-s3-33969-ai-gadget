@@ -307,6 +307,16 @@ AI 气泡逐字追加；provider 下拉来自 `/chat/providers`。
   规则触发 "prefixed in the build directory" 生成错误），改挂
   gadget_sim PRIVATE；且必须在 `add_executable` 之后。
 
+## 电源管理方案文档（2026-11-14 第六批）：POWER_MANAGEMENT.md 落库
+
+用户提供电源优化与电源管理完整方案 V1.0 → `docs/POWER_MANAGEMENT.md`
+（原文入库，头部加"与仓库现状对齐"注记表：app_manager 前台独占✓ /
+voice_session 音频独占✓ / power_manager 组件骨架🔶 / 显示四态与
+Network Manager⏳待真机等）。PLAN §13 挂指针改为摘要+决策。
+方案核心原则：前台独占、无后台服务、按需联网、退出即释放；
+实施顺序（文末附录）：先退出清理/真休眠/音频关闭/按需联网，
+Deep Sleep 最后；板到手先测四场景功耗基线。
+
 ## 电源与电池（2026-11-14 第五批）：全局状态栏 + 设备信息电源卡 + power_manager
 
 **全局状态栏**（ui_statusbar.c，lv_layer_top overlay 点击穿透）：所有屏幕

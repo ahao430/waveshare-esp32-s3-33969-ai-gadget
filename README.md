@@ -13,6 +13,7 @@
 > 完整规划见 [PLAN.md](PLAN.md)。硬件调研见 [docs/HARDWARE.md](docs/HARDWARE.md)，
 > 系统架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，
 > 关键决策记录见 [docs/DECISIONS.md](docs/DECISIONS.md)，
+> 电源管理方案见 [docs/POWER_MANAGEMENT.md](docs/POWER_MANAGEMENT.md)，
 > 真机到手后按 [docs/BRINGUP.md](docs/BRINGUP.md) 执行 Phase 6。
 
 ## 仓库结构
