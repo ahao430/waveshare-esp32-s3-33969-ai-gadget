@@ -3,6 +3,9 @@
  * （真机走 device_config NVS + 设备 config API，Phase 6）。
  */
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <string.h>
 
 #include "app_manager.h"
 #include "data_source.h"
@@ -37,6 +40,43 @@ static void slider_changed_cb(lv_event_t *e)
         snprintf(buf, sizeof(buf), "%d%%", v);
         lv_label_set_text(g_settings_vol_val, buf);
     }
+}
+
+/* 全屏二维码：模态遮罩 + 白底大码 + URL 文字；点击遮罩关闭 */
+static void qr_close_cb(lv_event_t *e)
+{
+    lv_obj_t *mask = lv_event_get_user_data(e);
+    lv_obj_delete(mask);
+}
+
+static void qr_open_fullscreen(const char *url)
+{
+    lv_obj_t *mask = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(mask, 480, 480);
+    lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_color(mask, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(mask, 0, 0);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(mask, qr_close_cb, LV_EVENT_CLICKED, mask);
+
+    lv_obj_t *qr = lv_qrcode_create(mask);
+    lv_qrcode_update(qr, url, (uint32_t)strlen(url));
+    lv_obj_set_size(qr, 320, 320);
+    lv_obj_align(qr, LV_ALIGN_TOP_MID, 0, 50);
+
+    char shown[96];
+    snprintf(shown, sizeof(shown), "%s", url);
+    lv_obj_t *lbl = ui_label(mask, shown, &lv_font_montserrat_16, UI_TEXT);
+    lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 396);
+
+    lv_obj_t *hint = ui_label(mask, "点击任意处关闭", &lv_font_cn_14, UI_TEXT_DIM);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -20);
+}
+
+static void qr_open_fullscreen_cb(lv_event_t *e)
+{
+    qr_open_fullscreen((const char *)lv_event_get_user_data(e));
 }
 
 static void timeout_changed_cb(lv_event_t *e)
@@ -143,7 +183,7 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_text_font(dd, &lv_font_cn_14, 0);
     lv_obj_add_event_cb(dd, timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    /* ---- 网络/配网卡（PLAN §9.3：屏幕显示入口，二维码只含 URL） ---- */
+    /* ---- 网络/配网卡（PLAN §9.3）：链接行 + 点击全屏大码 ---- */
     lv_obj_t *card4 = lv_obj_create(scr);
     lv_obj_set_size(card4, LV_PCT(100), 134);
     lv_obj_align(card4, LV_ALIGN_TOP_MID, 0, 338);
@@ -152,27 +192,33 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
 
     ui_label(card4, "配网与后台", &lv_font_cn_14, UI_TEXT);
 
-    /* 配网二维码（连接设备热点后扫码打开 192.168.4.1） */
-    lv_obj_t *qr1 = lv_qrcode_create(card4);
-    lv_qrcode_update(qr1, "http://192.168.4.1", 18); /* 9.2：第三参=数据长度 */
-    lv_obj_set_size(qr1, 60, 60);
-    lv_obj_align(qr1, LV_ALIGN_LEFT_MID, 12, -4);
-    lv_obj_t *l1 = ui_label(card4, "配网入口", &lv_font_cn_12, UI_ACCENT2);
-    lv_obj_align(l1, LV_ALIGN_LEFT_MID, 84, -22);
-    lv_obj_t *l2 = ui_label(card4, "连接设备热点后\n扫码打开配网页", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(l2, LV_ALIGN_LEFT_MID, 84, 8);
+    /* 全屏二维码弹窗（大码可扫；点击任意处关闭） */
+    lv_obj_t *row1 = lv_button_create(card4);
+    lv_obj_set_size(row1, LV_PCT(100) - 8, 40);
+    lv_obj_align(row1, LV_ALIGN_TOP_MID, 0, 30);
+    ui_style_card(row1);
+    lv_obj_set_style_bg_color(row1, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(row1, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)"http://192.168.4.1");
+    lv_obj_t *r1t = ui_label(row1, "配网页  http://192.168.4.1", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(r1t, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *r1a = ui_label(row1, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(r1a, LV_ALIGN_RIGHT_MID, -10, 0);
 
-    /* 局域网管理二维码 */
-    lv_obj_t *qr2 = lv_qrcode_create(card4);
-    lv_qrcode_update(qr2, "http://192.168.1.42", 18);
-    lv_obj_set_size(qr2, 60, 60);
-    lv_obj_align(qr2, LV_ALIGN_RIGHT_MID, -12, -4);
-    lv_obj_t *l3 = ui_label(card4, "管理后台", &lv_font_cn_12, UI_ACCENT2);
-    lv_obj_align(l3, LV_ALIGN_RIGHT_MID, -84, -22);
-    lv_obj_t *l4 = ui_label(card4, "连接家庭 Wi-Fi 后\n扫码打开管理网页", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(l4, LV_ALIGN_RIGHT_MID, -84, 8);
+    lv_obj_t *row2 = lv_button_create(card4);
+    lv_obj_set_size(row2, LV_PCT(100) - 8, 40);
+    lv_obj_align(row2, LV_ALIGN_BOTTOM_MID, 0, -4);
+    ui_style_card(row2);
+    lv_obj_set_style_bg_color(row2, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(row2, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)"http://192.168.1.42");
+    lv_obj_t *r2t = ui_label(row2, "管理后台  http://192.168.1.42", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(r2t, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *r2a = ui_label(row2, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(r2a, LV_ALIGN_RIGHT_MID, -10, 0);
 
-    lv_obj_t *note = ui_label(scr, "设置暂存内存 · 真机写入 NVS（Phase 6）",
-                              &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, 2);
+    /* 演示钩子：GADGET_DEMO_QR=1 自动打开全屏二维码 */
+    if (getenv("GADGET_DEMO_QR") && getenv("GADGET_DEMO_QR")[0] == '1') {
+        qr_open_fullscreen("http://192.168.4.1");
+    }
+
+
 }
