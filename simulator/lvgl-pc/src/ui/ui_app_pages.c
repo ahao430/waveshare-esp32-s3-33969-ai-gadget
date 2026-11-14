@@ -23,6 +23,11 @@ void ui_init(void)
     /* 数据源先于 UI 初始化：环境变量决定 mock/bridge（ADR-001） */
     ds_init(NULL, NULL, NULL);
 
+    /* 主题先于任何 UI 构建（UI_ACCENT 变量生效）；bridge 模式顺手
+     * 拉一次自定义背景缓存（无则回退内置波浪） */
+    ui_theme_select(ds_state()->theme_idx);
+    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+
     /* 顺序敏感：先注册 App（Launcher 网格按注册表构建），再建桌面 */
     register_apps();
     lv_obj_t *home = ui_launcher_screen();

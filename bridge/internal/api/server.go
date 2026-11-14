@@ -42,6 +42,9 @@ type Deps struct {
 	// Credentials：nil 或 MasterKey nil 时不挂凭据路由（fail-safe）。
 	CredentialsDB *storage.DB
 	MasterKey     []byte
+	// AppearanceDir 非空时挂外观路由（自定义背景，用户 2026-11-14 需求：
+	// Web 上传自定义背景图片）。背景存 AppearanceDir/appearance_bg.bin。
+	AppearanceDir string
 	// Accounts 返回某 Provider 的抓取账号；Phase 0 从环境变量来，
 	// 后续换成 SQLite 加密配置（PLAN §15.3）。
 	Accounts func(providerID string) []quota.AccountRef
@@ -112,6 +115,14 @@ func NewHandler(d Deps) http.Handler {
 
 	if d.Events != nil {
 		mux.HandleFunc("GET /api/v1/events", serveEventsWS(logger, d.Events))
+	}
+
+	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。
+	if d.AppearanceDir != "" {
+		mux.Handle("GET /api/v1/appearance", appearanceInfo(d, logger))
+		mux.Handle("GET /api/v1/appearance/background", appearanceGetBG(d, logger))
+		mux.Handle("POST /api/v1/appearance/background", appearancePutBG(d, logger))
+		mux.Handle("DELETE /api/v1/appearance/background", appearanceDelBG(d, logger))
 	}
 
 	// Bigfish Chat：OpenAI 兼容透传（model = "<provider>/<model>"）。

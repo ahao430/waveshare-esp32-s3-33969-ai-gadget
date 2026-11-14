@@ -307,6 +307,41 @@ AI 气泡逐字追加；provider 下拉来自 `/chat/providers`。
   规则触发 "prefixed in the build directory" 生成错误），改挂
   gadget_sim PRIVATE；且必须在 `add_executable` 之后。
 
+## UI 反馈修复（2026-11-14 第七批）：主题/透明素材/监控重构/外观 API
+
+用户六条反馈逐项落地：
+
+- **主题系统**：`ui_theme` 四预设（星云紫/极光青/落日橙/蔷薇粉），
+  UI_ACCENT/UI_ACCENT2 改全局变量宏（引用点零改动），设置→显示与声音
+  顶部主题行 ‹› 切换 + `ui_launcher_rebuild()` 即时生效；
+  `GADGET_DEMO_THEME=n` 演示钩子。桌面波浪/光晕颜色随主题。
+- **自定义背景**：Bridge `POST/GET/DELETE /api/v1/appearance/background`
+  （魔数判 PNG/JPEG、256KB 上限、显式 Content-Length——Go 对 >2KB
+  响应默认 chunked，模拟器极简客户端不解）；Web 新增"个性化"页
+  （canvas 压 480×480 JPEG ≤256KB 上传）；模拟器启动 `ds_appearance_fetch`
+  缓存到 assets/custom-bg.png，Launcher 优先显示（GADGET_BG=wave 强制内置）。
+- **素材透明化**：chroma-key 去大肥鱼（纯黑）/小智（深藏青）底色；
+  gifdec 调色板透明两次渲染成绿色 → 全面切 **PNG 序列帧**
+  （`scripts/companion_gif2frames.sh` → companions/<char>/<action>/
+  frame_NN.png，290 帧，对齐 COMPANION_ASSETS §2 规范），companion.c
+  重写为帧驱动播放器（8fps timer 换帧，GIF 仅作缺失回退）；三对话页
+  形象边缘与页面底像素级一致（黑块问题根治）。
+- **监控页重构**：列表 = 紧凑行卡（6 台内一屏无滚动）+ 点击进详情 =
+  单服务器大卡（CPU/内存/磁盘横向条 + 网络纯数值行）+ ‹›轮播；
+  `GADGET_DEMO_MONITOR_DETAIL=n` 钩子。
+- **设置**：首页右上"桌面"按钮（用户要求显式返回入口）+ 入口卡下移
+  避让；显示页加主题行。
+- **豆腐根治**：gen_cn_font.sh 升级双字体源（Noto Sans SC + lvgl 自带
+  FontAwesome5 woff），LV_SYMBOL 全集并入 cn 字体——下拉箭头等
+  symbol 与中文混排处不再缺字形。
+- **RGB565 打包 bug**：`rgb565_pack` 的 G 通道误写 `<<7`（应 `<<5`）
+  侵入 R 区，波浪颜色污染；旧紫青主题下不显眼，橙系主题暴露。
+  字节级插桩（打包前/混合前/最终值三点打印）定位。
+
+验收：三对话页/监控两态/设置两页/主题切换像素级或目视全过；
+Bridge 背景 e2e（上传→下载 md5 一致→模拟器拉取→渲染）全链路；
+check.sh 全绿。
+
 ## 电源管理方案文档（2026-11-14 第六批）：POWER_MANAGEMENT.md 落库
 
 用户提供电源优化与电源管理完整方案 V1.0 → `docs/POWER_MANAGEMENT.md`

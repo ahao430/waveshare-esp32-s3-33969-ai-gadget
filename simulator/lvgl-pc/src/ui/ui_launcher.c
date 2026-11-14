@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "app_manager.h"
@@ -24,16 +25,21 @@ static void tile_click_cb(lv_event_t *e);
 
 /* ---------------- 波浪渐变背景（canvas 预渲染） ----------------
  * 480×480 RGB565 直写像素（一次性，启动几 ms）：
- * 基底纵向渐变 + 顶部径向光晕 + 底部两层半透明正弦波（定稿图波浪）。 */
+ * 基底纵向渐变 + 顶部径向光晕 + 底部两层半透明正弦波（定稿图波浪）。
+ * 波浪/光晕颜色取自当前主题（k_ui_themes），自定义背景优先于波浪。 */
 
 #define BG_W 480
 #define BG_H 480
+
+#define CUSTOM_BG_PATH "simulator/lvgl-pc/assets/custom-bg.png"
 
 static uint16_t rgb565_pack(int r, int g, int b)
 {
     if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
     if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
-    return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 7) | (b >> 3));
+    /* RGB565：R5=bit11-15，G6=bit5-10（<<5，曾误写 <<7 侵入 R 区，
+     * G/R 互相污染——橙系主题下暴露为整体偏绿） */
+    return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
 }
 
 /* RGB565 低位深渐变会出色带：4×4 Bayer 抖动 ±2 消带（目视验收抓出） */
@@ -50,12 +56,22 @@ static uint16_t rgb565_dither(int r, int g, int b, int x, int y)
     return rgb565_pack(r + d, g + d, b + d);
 }
 
+static void split_rgb(uint32_t hex, int out[3])
+{
+    out[0] = (int)((hex >> 16) & 0xFF);
+    out[1] = (int)((hex >> 8) & 0xFF);
+    out[2] = (int)(hex & 0xFF);
+}
+
 static void bg_render(uint16_t *px)
 {
-    /* 基底：上深蓝 → 下更暗；顶部中心光晕提亮（定稿图氛围） */
+    const ui_theme_def_t *th = &k_ui_themes[ui_theme_current()];
+
+    /* 基底：上深蓝 → 下更暗；顶部中心光晕提亮（主题色） */
     const int top[3]    = { 14, 20, 40 };  /* #0E1428 */
     const int bottom[3] = { 7, 10, 22 };   /* #070A16 */
-    const int glow[3]   = { 42, 56, 98 };  /* 光晕目标色 #2A3862 */
+    int glow[3];
+    split_rgb(th->glow, glow);
 
     for (int y = 0; y < BG_H; y++) {
         float ty = (float)y / (BG_H - 1);
@@ -78,21 +94,22 @@ static void bg_render(uint16_t *px)
         }
     }
 
-    /* 底部两层波浪：波峰下方 alpha 渐入（软边），前层更靠下 */
+    /* 底部两层波浪：颜色取主题 wave[2] */
     const struct {
         int base_y;     /* 波浪中线 */
         int amp;        /* 振幅 */
         int period;     /* 周期 px */
         float phase;
-        int col[3];
         int alpha;      /* 最大不透明度 0~255 */
         int ramp;       /* 软边高度 px */
     } waves[] = {
-        { BG_H - 118, 16, 470, 0.0f,          { 96, 76, 200 }, 70, 56 },  /* 紫 #604CC8 */
-        { BG_H - 80,  20, 540, 2.2f,          { 36, 130, 170 }, 60, 48 }, /* 青 #2482AA */
+        { BG_H - 118, 16, 470, 0.0f, 70, 56 },
+        { BG_H - 80,  20, 540, 2.2f, 60, 48 },
     };
 
     for (int w = 0; w < 2; w++) {
+        int col[3];
+        split_rgb(th->wave[w], col);
         for (int x = 0; x < BG_W; x++) {
             int wy = waves[w].base_y +
                      (int)(waves[w].amp * sinf(2.0f * (float)M_PI * x / waves[w].period +
@@ -102,11 +119,11 @@ static void bg_render(uint16_t *px)
                 if (a > 1) a = 1;
                 a *= (float)waves[w].alpha / 255.0f;
                 uint16_t c = px[y * BG_W + x];
-                int r = (c >> 11) & 0x1F, g = (c >> 7) & 0x3F, b = (c >> 3) & 0x1F;
+                int r = (c >> 11) & 0x1F, g = (c >> 5) & 0x3F, b = c & 0x1F;
                 r = r * 8; g = g * 4; b = b * 8;
-                r += (int)((waves[w].col[0] - r) * a);
-                g += (int)((waves[w].col[1] - g) * a);
-                b += (int)((waves[w].col[2] - b) * a);
+                r += (int)((col[0] - r) * a);
+                g += (int)((col[1] - g) * a);
+                b += (int)((col[2] - b) * a);
                 px[y * BG_W + x] = rgb565_dither(r, g, b, x, y);
             }
         }
@@ -115,6 +132,21 @@ static void bg_render(uint16_t *px)
 
 static void bg_attach(lv_obj_t *parent)
 {
+    /* 自定义背景优先（Web 上传到 Bridge，ds_appearance_fetch 缓存到本地）；
+     * GADGET_BG=wave 强制内置波浪（验收用） */
+    const char *force_wave = getenv("GADGET_BG");
+    if ((!force_wave || strcmp(force_wave, "wave") != 0)) {
+        FILE *f = fopen(CUSTOM_BG_PATH, "rb");
+        if (f) {
+            fclose(f);
+            lv_obj_t *img = lv_image_create(parent);
+            lv_image_set_src(img, "A:" CUSTOM_BG_PATH);
+            lv_obj_center(img);
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+            return;
+        }
+    }
+
     void *buf = malloc(BG_W * BG_H * 2);
     if (!buf) return; /* 内存不足时退回纯色底（不阻塞桌面） */
 
@@ -260,7 +292,10 @@ void ui_launcher_build(void)
         lv_obj_align(dot, LV_ALIGN_BOTTOM_MID, (i - 1) * 18, -6);
     }
 
-    lv_timer_create(clock_timer_cb, 1000, NULL);
+    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
+    static lv_timer_t *clock_timer;
+    if (clock_timer) lv_timer_delete(clock_timer);
+    clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(NULL);
 }
 
@@ -291,4 +326,17 @@ lv_obj_t *ui_launcher_screen(void)
 {
     ui_launcher_build();
     return g_launcher;
+}
+
+void ui_launcher_rebuild(void)
+{
+    if (!g_launcher) return;
+    bool active = (lv_screen_active() == g_launcher);
+
+    lv_obj_delete(g_launcher);
+    g_launcher = NULL; /* 时钟定时器在 build 内自删自建 */
+
+    ui_launcher_build();
+    app_manager_set_home(g_launcher);
+    if (active) lv_screen_load(g_launcher);
 }

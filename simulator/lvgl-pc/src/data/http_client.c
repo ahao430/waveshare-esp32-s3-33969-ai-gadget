@@ -48,16 +48,24 @@ static void set_timeouts(int fd, int timeout_ms)
 }
 
 static int http_request(const char *method, const char *url, const char *json_body,
-                        char *out, size_t out_len, int timeout_ms);
+                        char *out, size_t out_len, int timeout_ms, size_t *body_len_out);
 
 int http_get(const char *url, char *out, size_t out_len, int timeout_ms)
 {
-    return http_request("GET", url, NULL, out, out_len, timeout_ms);
+    return http_request("GET", url, NULL, out, out_len, timeout_ms, NULL);
+}
+
+/* 二进制安全 GET：真实 body 字节数写 *body_len（不可为 NULL）。
+ * out 不以 NUL 终止语义消费（仍会写终止符，但二进制中含 0x00）。 */
+int http_get_bin(const char *url, char *out, size_t out_len, size_t *body_len,
+                 int timeout_ms)
+{
+    return http_request("GET", url, NULL, out, out_len, timeout_ms, body_len);
 }
 
 int http_post_json(const char *url, const char *body, char *out, size_t out_len, int timeout_ms)
 {
-    return http_request("POST", url, body, out, out_len, timeout_ms);
+    return http_request("POST", url, body, out, out_len, timeout_ms, NULL);
 }
 
 /* ---- 流式 POST（SSE 用） ---- */
@@ -187,7 +195,7 @@ int http_post_json_stream(const char *url, const char *body,
 }
 
 static int http_request(const char *method, const char *url, const char *json_body,
-                        char *out, size_t out_len, int timeout_ms)
+                        char *out, size_t out_len, int timeout_ms, size_t *body_len_out)
 {
     char host[128], path[256];
     int port;
@@ -250,13 +258,16 @@ static int http_request(const char *method, const char *url, const char *json_bo
     close(fd);
     out[total] = '\0';
 
-    /* 解析状态行 + 去 header */
+    /* 解析状态行 + 去 header（二进制安全：按长度 memmove，不用 strlen） */
     if (total < 12 || strncmp(out, "HTTP/1.", 7) != 0) return -6;
     int status = atoi(out + 9);
     char *resp_body = strstr(out, "\r\n\r\n");
     if (!resp_body) return -7;
     resp_body += 4;
-    if (resp_body != out) memmove(out, resp_body, strlen(resp_body) + 1);
+    size_t resp_len = total - (size_t)(resp_body - out);
+    if (resp_body != out) memmove(out, resp_body, resp_len);
+    out[resp_len] = '\0'; /* 文本调用方兼容；二进制按 *body_len_out 消费 */
+    if (body_len_out) *body_len_out = resp_len;
     return status;
 }
 

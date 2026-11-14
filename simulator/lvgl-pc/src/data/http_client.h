@@ -12,6 +12,11 @@
  * timeout_ms 同时作用于连接、读、写。 */
 int http_get(const char *url, char *out, size_t out_len, int timeout_ms);
 
+/* 二进制安全 GET：真实 body 字节数写 *body_len。调用方按长度消费 out
+ * （body 内可能含 0x00，不可当 C 字符串）。 */
+int http_get_bin(const char *url, char *out, size_t out_len, size_t *body_len,
+                 int timeout_ms);
+
 /* POST JSON。body 为请求体（调用方保证是合法 JSON）；其余同 http_get。 */
 int http_post_json(const char *url, const char *body, char *out, size_t out_len, int timeout_ms);
 

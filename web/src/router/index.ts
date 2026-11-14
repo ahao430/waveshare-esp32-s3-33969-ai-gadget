@@ -9,5 +9,6 @@ export const router = createRouter({
     { path: '/provisioning', name: 'provisioning', component: () => import('@/pages/Provisioning.vue') },
     { path: '/chat', name: 'chat', component: () => import('@/pages/Chat.vue') },
     { path: '/monitoring', name: 'monitoring', component: () => import('@/pages/Monitoring.vue') },
+    { path: '/appearance', name: 'appearance', component: () => import('@/pages/Appearance.vue') },
   ],
 })

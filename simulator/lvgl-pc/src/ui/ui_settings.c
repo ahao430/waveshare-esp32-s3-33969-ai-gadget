@@ -10,6 +10,7 @@
 #include "app_manager.h"
 #include "data_source.h"
 #include "ui.h"
+#include "ui_launcher.h"
 #include "ui_theme.h"
 
 /* 子页 id */
@@ -74,6 +75,12 @@ static void back_home_cb(lv_event_t *e)
     g_page = SP_HOME;
     lv_obj_clean(g_root);
     ui_settings_build_page(g_root);
+}
+
+static void home_click_cb(lv_event_t *e)
+{
+    (void)e;
+    app_manager_back(); /* 回 Launcher */
 }
 
 static void back_btn_add(lv_obj_t *scr)
@@ -153,6 +160,20 @@ static lv_obj_t *entry_card(lv_obj_t *scr, int page, const char *title,
 
 /* ---------------- 页面：显示与声音 ---------------- */
 
+/* 主题切换：存档 + 改变量 + 重建 Launcher（波浪/磁贴配色）与当前页 */
+static void theme_switch_cb(lv_event_t *e)
+{
+    int dir = (int)(uintptr_t)lv_event_get_user_data(e);
+    int idx = (ui_theme_current() + dir + UI_THEME_COUNT) % UI_THEME_COUNT;
+    ds_config_set_theme(idx);
+    ui_theme_select(idx);
+    ui_launcher_rebuild();
+
+    g_page = SP_DISPLAY; /* 重建当前子页（配色即时生效） */
+    lv_obj_clean(g_root);
+    ui_settings_build_page(g_root);
+}
+
 static void page_display(lv_obj_t *scr)
 {
     page_title(scr, "显示与声音");
@@ -160,9 +181,40 @@ static void page_display(lv_obj_t *scr)
     const gadget_state_t *s = ds_state();
     char buf[16];
 
+    /* 主题色（用户 2026-11-14 需求：多主题可换） */
+    lv_obj_t *card0 = lv_obj_create(scr);
+    lv_obj_set_size(card0, LV_PCT(100), 64);
+    lv_obj_align(card0, LV_ALIGN_TOP_MID, 0, 50);
+    ui_style_card(card0);
+    lv_obj_clear_flag(card0, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *tl = ui_label(card0, "主题色", &lv_font_cn_14, UI_TEXT_DIM);
+    lv_obj_align(tl, LV_ALIGN_LEFT_MID, 4, 0);
+
+    lv_obj_t *tp = lv_button_create(card0);
+    lv_obj_set_size(tp, 40, 40);
+    lv_obj_align(tp, LV_ALIGN_RIGHT_MID, -96, 0);
+    ui_style_card(tp);
+    lv_obj_set_style_radius(tp, 12, 0);
+    lv_obj_add_event_cb(tp, theme_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)-1);
+    lv_obj_t *tpi = ui_label(tp, LV_SYMBOL_LEFT, &lv_font_montserrat_14, UI_TEXT);
+    lv_obj_center(tpi);
+
+    lv_obj_t *tn = ui_label(card0, k_ui_themes[ui_theme_current()].name,
+                            &lv_font_cn_16, UI_ACCENT);
+    lv_obj_align(tn, LV_ALIGN_RIGHT_MID, -48, 0);
+
+    lv_obj_t *tnx = lv_button_create(card0);
+    lv_obj_set_size(tnx, 40, 40);
+    lv_obj_align(tnx, LV_ALIGN_RIGHT_MID, 0, 0);
+    ui_style_card(tnx);
+    lv_obj_set_style_radius(tnx, 12, 0);
+    lv_obj_add_event_cb(tnx, theme_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)1);
+    lv_obj_t *tni = ui_label(tnx, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT);
+    lv_obj_center(tni);
+
     lv_obj_t *card1 = lv_obj_create(scr);
-    lv_obj_set_size(card1, LV_PCT(100), 116);
-    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_set_size(card1, LV_PCT(100), 104);
+    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 122);
     ui_style_card(card1);
     lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
     ui_label(card1, "屏幕亮度", &lv_font_cn_14, UI_TEXT);
@@ -181,8 +233,8 @@ static void page_display(lv_obj_t *scr)
     lv_obj_add_event_cb(bs, slider_changed_cb, LV_EVENT_VALUE_CHANGED, (void *)"b");
 
     lv_obj_t *card2 = lv_obj_create(scr);
-    lv_obj_set_size(card2, LV_PCT(100), 116);
-    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 180);
+    lv_obj_set_size(card2, LV_PCT(100), 104);
+    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 236);
     ui_style_card(card2);
     lv_obj_clear_flag(card2, LV_OBJ_FLAG_SCROLLABLE);
     ui_label(card2, "扬声器音量", &lv_font_cn_14, UI_TEXT);
@@ -201,8 +253,8 @@ static void page_display(lv_obj_t *scr)
     lv_obj_add_event_cb(vs, slider_changed_cb, LV_EVENT_VALUE_CHANGED, (void *)"v");
 
     lv_obj_t *card3 = lv_obj_create(scr);
-    lv_obj_set_size(card3, LV_PCT(100), 116);
-    lv_obj_align(card3, LV_ALIGN_TOP_MID, 0, 304);
+    lv_obj_set_size(card3, LV_PCT(100), 104);
+    lv_obj_align(card3, LV_ALIGN_TOP_MID, 0, 348);
     ui_style_card(card3);
     lv_obj_clear_flag(card3, LV_OBJ_FLAG_SCROLLABLE);
     ui_label(card3, "自动息屏", &lv_font_cn_14, UI_TEXT);
@@ -417,9 +469,21 @@ void ui_settings_build_page(lv_obj_t *scr)
         break;
     case SP_HOME:
     default: {
-        /* 首页：无 back（app_manager back → Launcher） */
+        /* 首页：标题 + 右上"返回桌面"（用户反馈：缺返回入口；
+         * app_manager back 也回 Launcher，但按钮让路径显式） */
         lv_obj_t *t = ui_label(scr, "系统设置", &lv_font_cn_20, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 10);
+
+        lv_obj_t *home = lv_button_create(scr);
+        lv_obj_set_size(home, 88, 40);
+        lv_obj_align(home, LV_ALIGN_TOP_RIGHT, 0, 28); /* 避开全局状态栏 */
+        ui_style_card(home);
+        lv_obj_set_style_radius(home, 12, 0);
+        lv_obj_add_event_cb(home, home_click_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *hi = ui_label(home, LV_SYMBOL_HOME, &lv_font_montserrat_14, UI_TEXT);
+        lv_obj_align(hi, LV_ALIGN_CENTER, -26, 0);
+        lv_obj_t *ht = ui_label(home, "桌面", &lv_font_cn_14, UI_TEXT);
+        lv_obj_align(ht, LV_ALIGN_CENTER, 14, 0);
 
         struct { int page; const char *t; const char *d; const char *s; uint32_t c; } items[] = {
             { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS, 0x7C5CFF },
@@ -430,7 +494,7 @@ void ui_settings_build_page(lv_obj_t *scr)
         for (int i = 0; i < 4; i++) {
             lv_obj_t *card = entry_card(scr, items[i].page, items[i].t,
                                         items[i].d, items[i].s, items[i].c);
-            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 46 + i * 88);
+            lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 76 + i * 88); /* 76：避开右上"桌面"按钮 */
         }
 
         lv_obj_t *fw = ui_label(scr, "Gadget Firmware v0.1.0 · 运行正常",

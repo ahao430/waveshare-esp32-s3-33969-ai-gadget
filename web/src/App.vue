@@ -8,6 +8,7 @@ const nav = [
   { to: '/monitoring', label: '监控' },
   { to: '/network', label: '网络' },
   { to: '/provisioning', label: '配网' },
+  { to: '/appearance', label: '个性化' },
 ]
 </script>
 

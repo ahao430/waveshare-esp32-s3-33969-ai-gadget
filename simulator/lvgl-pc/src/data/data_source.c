@@ -47,9 +47,16 @@ static gadget_state_t g_state = {
 };
 
 /* GADGET_DEMO_BATTERY="pct,mv,state"（state: idle|charging|usb|none）
- * —— 状态栏/设备信息页的电源场景演示钩子 */
+ * —— 状态栏/设备信息页的电源场景演示钩子；
+ * GADGET_DEMO_THEME=n —— 主题演示钩子（ui_theme k_ui_themes 下标） */
 static void demo_battery_apply(void)
 {
+    const char *th = getenv("GADGET_DEMO_THEME");
+    if (th && th[0]) {
+        int idx = atoi(th);
+        if (idx >= 0 && idx < 4) g_state.theme_idx = idx;
+    }
+
     const char *v = getenv("GADGET_DEMO_BATTERY");
     if (!v || !v[0]) return;
 
@@ -95,6 +102,11 @@ void ds_config_set_refresh_interval(int seconds)
 int ds_config_refresh_interval(void)
 {
     return g_state.sub_refresh_interval_s;
+}
+
+void ds_config_set_theme(int idx)
+{
+    g_state.theme_idx = idx;
 }
 
 static const ds_impl_t *g_impl;
@@ -191,4 +203,11 @@ ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
         return DS_VOICE_UNSUPPORTED;
     }
     return g_impl->voice_interact(pcm, frames, transcript, transcript_len, reply, reply_len);
+}
+
+int ds_appearance_fetch(const char *save_path)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->fetch_background) return 1; /* 当前数据源不支持（mock 等） */
+    return g_impl->fetch_background(save_path);
 }

@@ -12,7 +12,9 @@
 /* PC 内存充裕：1MB 内置池（256KB 时语音页对象+GIF 解码缓冲会耗尽池，
  * lv_obj_create 返回 NULL → 后续 style 操作 SIGSEGV——崩溃报告定位）。
  * 固件侧按 PLAN §14 预算另配。 */
-#define LV_MEM_SIZE (1024 * 1024)
+/* 4MB：480×480 PNG 背景解码需 ~921KB RGBA + 绘制缓存（1MB 池下
+ * 自定义背景解码失败表现为静默空白——目视+像素验收定位） */
+#define LV_MEM_SIZE (4 * 1024 * 1024)
 
 /* SDL 显示/输入驱动（lv_sdl_window / lv_sdl_mouse） */
 #define LV_USE_SDL 1

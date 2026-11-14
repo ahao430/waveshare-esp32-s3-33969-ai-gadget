@@ -26,10 +26,11 @@ static char g_chat_url[256];
 static char g_name[96];
 static char g_provider[24];
 
-/* 前置声明：bridge_voice_interact 函数体在文件尾部（追加段） */
+/* 前置声明：bridge_voice_interact / bridge_fetch_background 函数体在文件尾部 */
 static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
+static int bridge_fetch_background(const char *save_path);
 
 static void bridge_init(void)
 {
@@ -433,8 +434,31 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .chat_send_stream = bridge_chat_stream,
         .voice_interact  = bridge_voice_interact,
         .chat_providers  = bridge_chat_providers,
+        .fetch_background = bridge_fetch_background,
     };
     return &impl;
+}
+
+/* 自定义背景：GET /api/v1/appearance/background（≤256KB，Web 端已压到
+ * 480×480）。404=未设置（返回 1，保留本地旧文件）；成功写盘返回 0。 */
+static int bridge_fetch_background(const char *save_path)
+{
+    static char bg_url[256];
+    if (bg_url[0] == '\0') {
+        snprintf(bg_url, sizeof(bg_url), "%s/api/v1/appearance/background", g_base);
+    }
+
+    static char buf[256 * 1024];
+    size_t len = 0;
+    int status = http_get_bin(bg_url, buf, sizeof(buf), &len, BRIDGE_TIMEOUT_MS);
+    if (status == 404) return 1;
+    if (status != 200 || len == 0) return -1;
+
+    FILE *f = fopen(save_path, "wb");
+    if (!f) return -1;
+    fwrite(buf, 1, len, f);
+    fclose(f);
+    return 0;
 }
 
 /* 语音一步式交互（PLAN §5.3）：POST 原始 PCM（audio/l16;rate=16000），

@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"gadget-bridge/internal/ai"
@@ -171,12 +172,19 @@ func main() {
 	voiceMock.SetRouter(chatRouter)
 	voiceH := voice.NewHandler(voiceMock)
 
+	// 外观（自定义背景）目录：默认 db 同目录 appearance/；-db 空则 data/
+	appearanceDir := envOr("BRIDGE_APPEARANCE_DIR", filepath.Join(filepath.Dir(*dbPath), "appearance"))
+	if *dbPath == "" {
+		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
+	}
+
 	handler := api.NewHandler(api.Deps{
 		Registry:      reg,
 		Store:         store,
 		Logger:        logger,
 		Token:         os.Getenv("BRIDGE_TOKEN"), // 非空即启用 Bearer 认证（PLAN §19）
 		Komari:        komariSvc,
+		AppearanceDir: appearanceDir,
 		PrewarmZhipu:  prewarmZhipu,
 		Events:        eventHub,
 		ChatRouter:    chatRouter,

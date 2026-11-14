@@ -2,6 +2,30 @@
 
 #include <time.h>
 
+/* ---- 主题（用户 2026-11-14：主题色可换；0 号 = 定稿图基准） ---- */
+const ui_theme_def_t k_ui_themes[UI_THEME_COUNT] = {
+    { "星云紫", 0x7C5CFF, 0x4F8CFF, { 0x604CC8, 0x2482AA }, 0x2A3862 },
+    { "极光青", 0x2EC4B6, 0x4F8CFF, { 0x1D7F8C, 0x2B5FA8 }, 0x1B3A46 },
+    { "落日橙", 0xFF8A3D, 0xFF5D7A, { 0xA85A2E, 0x8C3A50 }, 0x3A2A30 },
+    { "蔷薇粉", 0xFF6FA5, 0xB28DFF, { 0x9C4A78, 0x5A4A9C }, 0x33264A },
+};
+
+/* 零初始化：ui_init 会先 ui_theme_select(存档主题) 再建 UI */
+lv_color_t g_ui_accent;
+lv_color_t g_ui_accent2;
+
+static int g_theme_idx;
+
+void ui_theme_select(int idx)
+{
+    if (idx < 0 || idx >= UI_THEME_COUNT) idx = 0;
+    g_theme_idx = idx;
+    g_ui_accent  = lv_color_hex(k_ui_themes[idx].accent);
+    g_ui_accent2 = lv_color_hex(k_ui_themes[idx].accent2);
+}
+
+int ui_theme_current(void) { return g_theme_idx; }
+
 void ui_style_card(lv_obj_t *obj)
 {
     lv_obj_set_style_bg_color(obj, UI_CARD, 0);

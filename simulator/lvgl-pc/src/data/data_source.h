@@ -75,6 +75,7 @@ typedef struct {
     int volume;             /* 0~100 */
     int display_timeout_s;      /* 息屏超时（PLAN §13.1 档位） */
     int sub_refresh_interval_s; /* 订阅自动刷新间隔（PLAN §6.3：5~60 分钟） */
+    int theme_idx;          /* UI 主题（ui_theme k_ui_themes 下标） */
 } gadget_state_t;
 
 /* 初始化。source: "mock" 或 "bridge"；bridge_url 如 http://127.0.0.1:8081；
@@ -145,6 +146,12 @@ ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
 void ds_config_update(int brightness, int volume, int timeout_s);
 void ds_config_set_refresh_interval(int seconds); /* 订阅自动刷新间隔 */
 int ds_config_refresh_interval(void);
+void ds_config_set_theme(int idx);                /* UI 主题 */
+
+/* 自定义背景（Web 上传到 Bridge，PLAN §8 外观）：
+ * 尝试拉取 Bridge 背景并写入 save_path（建议 simulator 相对路径）。
+ * 返回 0=已写入新文件；1=无自定义背景（保留旧文件）；-1=网络失败。 */
+int ds_appearance_fetch(const char *save_path);
 
 /* 聊天 provider：
  * - ds_chat_providers 填充 "\n" 分隔的 provider id 列表（bridge=HTTP
