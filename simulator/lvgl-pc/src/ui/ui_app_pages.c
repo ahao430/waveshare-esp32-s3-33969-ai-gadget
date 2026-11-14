@@ -13,10 +13,13 @@
 #include "ui_launcher.h"
 #include "ui_statusbar.h"
 #include "ui_theme.h"
+#include "voice_session.h"
 
 /* ---------------- 公共入口 ---------------- */
 
 static void register_apps(void);
+static void voice_demo_begin_cb(lv_timer_t *t);
+static void voice_demo_end_cb(lv_timer_t *t);
 
 void ui_init(void)
 {
@@ -42,6 +45,32 @@ void ui_init(void)
     if (demo && demo[0]) {
         ui_open_app(atoi(demo));
     }
+
+    /* 语音链路自动化回归钩子：GADGET_DEMO_VOICE=1 → 进入 App 1s 后
+     * 自动按下 PTT，4s 后松开（LISTENING→THINKING→worker→SPEAKING
+     * 全链路）；配合 GADGET_DEMO_APP=<对话 App> 使用 */
+    if (getenv("GADGET_DEMO_VOICE") && getenv("GADGET_DEMO_VOICE")[0]) {
+        static lv_timer_t *vt;
+        vt = lv_timer_create(voice_demo_begin_cb, 1000, NULL);
+        (void)vt;
+    }
+}
+
+static void voice_demo_begin_cb(lv_timer_t *t)
+{
+    lv_timer_del(t);
+    vs_ptt_begin();
+
+    static lv_timer_t *end_timer;
+    end_timer = lv_timer_create(voice_demo_end_cb, 4000, NULL);
+    (void)end_timer;
+}
+
+static void voice_demo_end_cb(lv_timer_t *t)
+{
+    lv_timer_del(t);
+    vs_ptt_end();
+    fprintf(stderr, "[voice-demo] ptt released\n");
 }
 
 void ui_show_launcher(void) { app_manager_back(); }

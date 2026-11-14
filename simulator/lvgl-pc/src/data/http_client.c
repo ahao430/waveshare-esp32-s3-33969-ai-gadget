@@ -146,6 +146,33 @@ static ssize_t read_exact(int fd, char *buf, size_t n)
     return (ssize_t)got;
 }
 
+/* chunked 块读取：声明长度可达任意值（服务端决定），必须分片进 8KB
+ * 栈缓冲再回调——曾直接 read_exact(fd, chunk[8192], sz) 写爆栈
+ * （SIGSEGV，voice/chat 流式路径崩溃的根因） */
+static int read_chunked_body(int fd, http_stream_cb_t on_data, void *user)
+{
+    for (;;) {
+        char szline[32];
+        if (read_line(fd, szline, sizeof(szline)) <= 0) break;
+        unsigned long sz = strtoul(szline, NULL, 16);
+        if (sz == 0) break; /* 终止块 */
+        if (sz > 64UL * 1024 * 1024) { /* 防恶意/异常声明 */
+            return -8;
+        }
+
+        char chunk[8192];
+        while (sz > 0) {
+            size_t take = sz < sizeof(chunk) ? sz : sizeof(chunk);
+            if (read_exact(fd, chunk, take) < 0) return -7;
+            if (on_data) on_data(chunk, take, user);
+            sz -= take;
+        }
+        char crlf[2];
+        if (read_exact(fd, crlf, 2) < 0) return -7;
+    }
+    return 0;
+}
+
 int http_post_json_stream(const char *url, const char *body,
                           http_stream_cb_t on_data, void *user, int timeout_ms)
 {
@@ -172,17 +199,8 @@ int http_post_json_stream(const char *url, const char *body,
     }
 
     if (chunked) {
-        for (;;) {
-            char szline[32];
-            if (read_line(fd, szline, sizeof(szline)) <= 0) break;
-            size_t sz = (size_t)strtol(szline, NULL, 16);
-            if (sz == 0) break; /* 终止块 */
-            char chunk[8192];
-            if (read_exact(fd, chunk, sz) < 0) { close(fd); return -7; }
-            char crlf[2];
-            if (read_exact(fd, crlf, 2) < 0) { close(fd); return -7; }
-            if (on_data) on_data(chunk, sz, user);
-        }
+        int rc = read_chunked_body(fd, on_data, user);
+        if (rc != 0) { close(fd); return rc; }
     } else {
         char buf[8192];
         ssize_t n;
@@ -353,17 +371,8 @@ int http_post_raw_stream(const char *url, const char *content_type,
     }
 
     if (chunked) {
-        for (;;) {
-            char szline[32];
-            if (read_line(fd, szline, sizeof(szline)) <= 0) break;
-            size_t sz = (size_t)strtol(szline, NULL, 16);
-            if (sz == 0) break;
-            char chunk[8192];
-            if (read_exact(fd, chunk, sz) < 0) { close(fd); return -7; }
-            char crlf[2];
-            if (read_exact(fd, crlf, 2) < 0) { close(fd); return -7; }
-            if (on_data) on_data(chunk, sz, user);
-        }
+        int rc = read_chunked_body(fd, on_data, user);
+        if (rc != 0) { close(fd); return rc; }
     } else {
         char buf[8192];
         ssize_t n;
