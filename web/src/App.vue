@@ -12,6 +12,7 @@ const nav = [
   { to: '/bots', label: '聊天机器人' },
   { to: '/zcode', label: 'ZCode 远程' },
   { to: '/monitor', label: '服务器监控' },
+  { to: '/weather', label: '天气' },
 ]
 </script>
 

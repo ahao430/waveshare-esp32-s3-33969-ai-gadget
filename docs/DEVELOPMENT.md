@@ -739,3 +739,24 @@ Bridge 加密落库 + Web 后台 + 设备拉取的同一套范式：
   pw 键触发后桌面/聊天页 79.7% 像素差异，证明 Web 下发端到端生效。
 - **小修**：monitor/zcode config 未配置时不再返回零值 updated_at
   （Web 曾显示"更新于 1970/1/1"）。
+
+## 天气 App 全链路（2026-11-14 第十二批）
+
+- **Bridge `internal/weather`**：Open-Meteo（免费无 Key）——`LocateByIP`
+  （ip-api.com 主 + ipwho.is 回退；实测两家字段名均为 latitude/longitude，
+  短名 lat/lon 会被忽略，全量响应最稳）+ `LocateByCity`（Geocoding 中文
+  名）+ `Forecast`（current + 5 日 daily，WMO code → 中文描述/分类）。
+  Service 缓存 10min + 后台保温 goroutine（设备拉取永远命中缓存），
+  forecast 失败立即重试一次（跨境抖动）。API：`GET /api/v1/weather`
+  （?refresh=1 强刷）+ `GET/POST /api/v1/weather/config`（auto|manual+city）。
+- **踩坑**：首版解析用 lat/lon 短名 → 定位到 (0°,114°) 赤道；真网络
+  e2e 暴露后改全量解析 + pickName（city/region 优先取中文名）。
+- **Web**：天气配置页（自动 IP/手动城市单选 + 当前定位预览 + 立即刷新）。
+- **模拟器**：`ds_weather_t` + `ds_weather_fetch`（bridge cJSON 解析 /
+  mock 演示数据）+ `ui_weather.c`（worker 线程取数 + 200ms 轮询回填，
+  10min 自动刷新，日期→今天/明天/后天/周X）；天气 App 置灰→启用。
+- **字体子集治理（重要）**：源码字符集提取方案无法覆盖**服务器下发的
+  动态中文**（城市名/天气描述）→ gen_cn_font.sh 补天气描述字典 +
+  **GB2312 一级字库 3755 字**（覆盖中国城市/行政区名）+ `°`（0xB0 不在
+  ASCII range）。字体 .c 增至 2-4.5MB/号；固件阶段若 flash 紧张，
+  可只给 16/20px 两号上全集、12/14px 维持源码集。

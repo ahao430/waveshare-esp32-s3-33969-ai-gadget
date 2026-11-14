@@ -20,6 +20,7 @@ import (
 	"gadget-bridge/internal/quota/zhipu"
 	"gadget-bridge/internal/storage"
 	"gadget-bridge/internal/voice"
+	"gadget-bridge/internal/weather"
 )
 
 // Deps 是装配 Server 所需依赖。
@@ -48,6 +49,8 @@ type Deps struct {
 	// SubscriptionsDB 非 nil（且 MasterKey 非 nil）时挂订阅配置路由：
 	// Web 后台动态配置订阅实例（zhipu/kimi/opencode/newapi/mock）。
 	SubscriptionsDB *storage.DB
+	// Weather 非 nil 时挂天气路由（Open-Meteo，免 Key）。
+	Weather *weather.Service
 	// Accounts 返回某 Provider 的抓取账号；Phase 0 从环境变量来，
 	// 后续换成 SQLite 加密配置（PLAN §15.3）。
 	Accounts func(providerID string) []quota.AccountRef
@@ -129,6 +132,7 @@ func NewHandler(d Deps) http.Handler {
 		serveZcode(mux, d, logger)
 		serveMonitorConfig(mux, d, logger)
 		serveKeys(mux, d, logger)
+		serveWeather(mux, d, logger)
 	}
 
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。

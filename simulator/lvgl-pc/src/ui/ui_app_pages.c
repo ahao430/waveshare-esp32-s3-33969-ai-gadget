@@ -479,7 +479,7 @@ static void register_apps(void)
         { UI_APP_MUSE,     "Muse",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",      true,  quota_build,           quota_on_exit },
         { UI_APP_ZCODE,    "ZCode",   LV_SYMBOL_KEYBOARD, 0x3A6FF7, "A:simulator/lvgl-pc/assets/icons/zcode.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_WEATHER,  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",  false, placeholder_build,     NULL },
+        { UI_APP_WEATHER,  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",  true,  ui_weather_build,      ui_weather_on_exit },
         { UI_APP_MONITOR,  "服务器",  LV_SYMBOL_EYE_OPEN, 0x9B5DE5, "A:simulator/lvgl-pc/assets/icons/server.png",   true,  ui_monitor_build,      NULL },
         { UI_APP_SETTINGS, "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png", true,  ui_settings_build,     ui_settings_on_exit },
         { UI_APP_MUSIC,    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",    false, placeholder_build,     NULL },

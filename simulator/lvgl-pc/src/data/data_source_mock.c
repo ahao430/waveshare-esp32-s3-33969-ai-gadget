@@ -126,6 +126,28 @@ static ds_voice_result_t mock_voice_interact(const int16_t *pcm, int frames,
     return DS_VOICE_OK;
 }
 
+/* 天气：固定演示数据（深圳 晴） */
+static int mock_fetch_weather(ds_weather_t *out)
+{
+    if (!out) return -1;
+    memset(out, 0, sizeof(*out));
+    out->valid = true;
+    snprintf(out->location, sizeof(out->location), "深圳");
+    snprintf(out->desc, sizeof(out->desc), "晴");
+    snprintf(out->category, sizeof(out->category), "sun");
+    out->temp_c = 26; out->feels_c = 27; out->humidity = 58; out->wind_kmh = 9;
+    out->updated_unix = 1770000000;
+    out->day_n = 5;
+    const char *descs[] = {"晴", "多云", "小雨", "小雪", "雷阵雨"};
+    for (int i = 0; i < 5; i++) {
+        snprintf(out->days[i].date, sizeof(out->days[i].date), "2026-11-1%d", i);
+        snprintf(out->days[i].desc, sizeof(out->days[i].desc), "%s", descs[i]);
+        out->days[i].tmax = 24 + i;
+        out->days[i].tmin = 15 + i;
+    }
+    return 0;
+}
+
 const ds_impl_t *ds_mock_impl(void)
 {
     static const ds_impl_t impl = {
@@ -135,6 +157,7 @@ const ds_impl_t *ds_mock_impl(void)
         .prewarm_zhipu   = mock_prewarm,
         .chat_send_stream = mock_chat_stream,
         .voice_interact  = mock_voice_interact,
+        .fetch_weather   = mock_fetch_weather,
     };
     return &impl;
 }

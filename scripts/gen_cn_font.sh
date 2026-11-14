@@ -42,7 +42,22 @@ for path in glob.glob("simulator/lvgl-pc/src/ui/*.c") + glob.glob("simulator/lvg
                 chars.add(ch)
 
 # 保险冗余：数字/常用标点已在 ASCII range；全角括号与间隔号常见于格式化字符串
-chars |= set("（）【】·％、，。：；！？")
+chars |= set("（）【】·％、，。：；！？°")
+
+# 天气描述字典（bridge internal/weather codeTable 全集——服务器下发的
+# 动态描述必须提前入集，否则设备豆腐）
+chars |= set("晴间少云局部阴有雾冻毛毛雨浓小中大雪粒阵强雷伴冰雹雨"
+             "体感湿度风更新获取失败服务未连接或定位可达点重试天气")
+
+# GB2312 一级字库（3755 常用汉字）：覆盖城市/行政区名（服务器下发、
+# 源码里不会出现的动态中文）。区位 16-55 区即汉字一级区。
+for hi in range(0xB0, 0xD8):
+    for lo in range(0xA1, 0xFF):
+        try:
+            ch = bytes([hi, lo]).decode("gb2312")
+            chars.add(ch)
+        except UnicodeDecodeError:
+            pass
 sys.stdout.write("".join(sorted(chars)))
 PYEOF
 )

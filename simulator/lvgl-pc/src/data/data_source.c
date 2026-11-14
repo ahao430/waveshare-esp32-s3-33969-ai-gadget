@@ -216,6 +216,16 @@ int ds_appearance_fetch_theme(int *theme)
     return g_impl->fetch_theme(theme);
 }
 
+int ds_weather_fetch(ds_weather_t *out)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->fetch_weather) {
+        if (out) out->valid = false;
+        return 1;
+    }
+    return g_impl->fetch_weather(out);
+}
+
 int ds_keys_fetch(char *pwr_short, char *boot_short,
                   char *key3_short, char *key3_long, int cap)
 {

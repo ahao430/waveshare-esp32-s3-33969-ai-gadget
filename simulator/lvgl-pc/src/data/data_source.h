@@ -157,6 +157,27 @@ int ds_appearance_fetch(const char *save_path);
  * / 1=未配置默认 / -1=失败。bridge 模式有效。 */
 int ds_appearance_fetch_theme(int *theme);
 
+/* 天气快照（Bridge /api/v1/weather → Open-Meteo；mock 固定演示数据） */
+typedef struct {
+    char date[12]; /* YYYY-MM-DD */
+    char desc[12];
+    int tmax, tmin;
+} ds_weather_day_t;
+
+typedef struct {
+    bool valid;
+    char location[32];
+    char desc[24];
+    char category[8]; /* sun|cloud|fog|rain|snow|thunder（UI 配色） */
+    int temp_c, feels_c, humidity, wind_kmh;
+    long updated_unix;
+    int day_n;
+    ds_weather_day_t days[5];
+} ds_weather_t;
+
+/* 拉取天气：0=成功写 *out / 1=数据源不支持 / -1=失败（*out.valid=false） */
+int ds_weather_fetch(ds_weather_t *out);
+
 /* 拉取 Web 下发的按键映射（Bridge /api/v1/keys）：0=四槽写入（每槽 ≥8
  * 字节）/ 1=未配置默认（不写） / -1=失败。bridge 模式有效。 */
 int ds_keys_fetch(char *pwr_short, char *boot_short,

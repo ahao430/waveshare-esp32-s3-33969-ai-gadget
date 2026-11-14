@@ -34,6 +34,13 @@ func newTestMasterKey(t *testing.T) []byte {
 // newConfigServer 装配带 storage.DB 的 API（内存库）。
 func newConfigServer(t *testing.T, masterKey []byte) (*httptest.Server, *storage.DB) {
 	t.Helper()
+	srv, db := newConfigServerWith(t, masterKey, nil)
+	return srv, db
+}
+
+// newConfigServerWith 额外注入 Deps（如 Weather）。
+func newConfigServerWith(t *testing.T, masterKey []byte, extra func(*Deps)) (*httptest.Server, *storage.DB) {
+	t.Helper()
 	db, err := storage.Open("")
 	if err != nil {
 		t.Fatal(err)
@@ -43,13 +50,16 @@ func newConfigServer(t *testing.T, masterKey []byte) (*httptest.Server, *storage
 	if err := reg.Register(mock.New()); err != nil {
 		t.Fatal(err)
 	}
-	h := NewHandler(Deps{
+	d := Deps{
 		Registry:        reg,
 		Store:           quota.NewStore(),
 		SubscriptionsDB: db,
 		MasterKey:       masterKey,
-	})
-	srv := httptest.NewServer(h)
+	}
+	if extra != nil {
+		extra(&d)
+	}
+	srv := httptest.NewServer(NewHandler(d))
 	t.Cleanup(srv.Close)
 	return srv, db
 }

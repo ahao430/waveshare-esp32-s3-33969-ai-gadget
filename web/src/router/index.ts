@@ -12,5 +12,6 @@ export const router = createRouter({
     { path: '/bots', name: 'bots', component: () => import('@/pages/Bots.vue') },
     { path: '/zcode', name: 'zcode', component: () => import('@/pages/Zcode.vue') },
     { path: '/monitor', name: 'monitor', component: () => import('@/pages/Monitor.vue') },
+    { path: '/weather', name: 'weather', component: () => import('@/pages/Weather.vue') },
   ],
 })

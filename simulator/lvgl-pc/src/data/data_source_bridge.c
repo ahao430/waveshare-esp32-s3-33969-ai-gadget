@@ -32,6 +32,7 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
 static int bridge_fetch_background(const char *save_path);
+static int bridge_fetch_weather(ds_weather_t *out);
 static int bridge_fetch_theme(int *theme);
 static int bridge_fetch_keys(char *pwr_short, char *boot_short,
                              char *key3_short, char *key3_long, int cap);
@@ -493,6 +494,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .fetch_background = bridge_fetch_background,
         .fetch_theme      = bridge_fetch_theme,
         .fetch_keys       = bridge_fetch_keys,
+        .fetch_weather    = bridge_fetch_weather,
     };
     return &impl;
 }
@@ -521,6 +523,69 @@ static int bridge_fetch_theme(int *theme)
         }
         cJSON_Delete(root);
     }
+    return ret;
+}
+
+/* 天气：GET /api/v1/weather（Bridge 缓存命中即回，Open-Meteo 上游） */
+static int bridge_fetch_weather(ds_weather_t *out)
+{
+    static char wx_url[256];
+    if (wx_url[0] == '\0') {
+        snprintf(wx_url, sizeof(wx_url), "%s/api/v1/weather", g_base);
+    }
+    char buf[8192];
+    int status = http_get(wx_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
+    if (status != 200) {
+        if (out) out->valid = false;
+        return -1;
+    }
+    if (!out) return -1;
+    memset(out, 0, sizeof(*out));
+
+    int ret = -1;
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return -1;
+    const cJSON *snap = cJSON_GetObjectItem(root, "snapshot");
+    if (snap) {
+        const cJSON *v;
+        if ((v = cJSON_GetObjectItem(snap, "location")) && cJSON_IsString(v))
+            snprintf(out->location, sizeof(out->location), "%s", v->valuestring);
+        const cJSON *cur = cJSON_GetObjectItem(snap, "current");
+        if (cur) {
+            if ((v = cJSON_GetObjectItem(cur, "temp_c")) && cJSON_IsNumber(v))
+                out->temp_c = (int)(v->valuedouble + (v->valuedouble >= 0 ? 0.5 : -0.5));
+            if ((v = cJSON_GetObjectItem(cur, "feels_c")) && cJSON_IsNumber(v))
+                out->feels_c = (int)(v->valuedouble + (v->valuedouble >= 0 ? 0.5 : -0.5));
+            if ((v = cJSON_GetObjectItem(cur, "humidity")) && cJSON_IsNumber(v))
+                out->humidity = v->valueint;
+            if ((v = cJSON_GetObjectItem(cur, "wind_kmh")) && cJSON_IsNumber(v))
+                out->wind_kmh = v->valueint;
+            if ((v = cJSON_GetObjectItem(cur, "desc")) && cJSON_IsString(v))
+                snprintf(out->desc, sizeof(out->desc), "%s", v->valuestring);
+            if ((v = cJSON_GetObjectItem(cur, "category")) && cJSON_IsString(v))
+                snprintf(out->category, sizeof(out->category), "%s", v->valuestring);
+        }
+        const cJSON *daily = cJSON_GetObjectItem(snap, "daily");
+        if (cJSON_IsArray(daily)) {
+            const cJSON *it;
+            cJSON_ArrayForEach(it, daily) {
+                if (out->day_n >= 5) break;
+                ds_weather_day_t *d = &out->days[out->day_n];
+                if ((v = cJSON_GetObjectItem(it, "date")) && cJSON_IsString(v))
+                    snprintf(d->date, sizeof(d->date), "%s", v->valuestring);
+                if ((v = cJSON_GetObjectItem(it, "desc")) && cJSON_IsString(v))
+                    snprintf(d->desc, sizeof(d->desc), "%s", v->valuestring);
+                if ((v = cJSON_GetObjectItem(it, "t_max")) && cJSON_IsNumber(v))
+                    d->tmax = (int)(v->valuedouble + (v->valuedouble >= 0 ? 0.5 : -0.5));
+                if ((v = cJSON_GetObjectItem(it, "t_min")) && cJSON_IsNumber(v))
+                    d->tmin = (int)(v->valuedouble + (v->valuedouble >= 0 ? 0.5 : -0.5));
+                out->day_n++;
+            }
+        }
+        out->valid = out->desc[0] != '\0';
+        ret = out->valid ? 0 : -1;
+    }
+    cJSON_Delete(root);
     return ret;
 }
 

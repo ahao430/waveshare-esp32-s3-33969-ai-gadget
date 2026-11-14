@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -31,6 +32,7 @@ import (
 	"gadget-bridge/internal/security"
 	"gadget-bridge/internal/storage"
 	"gadget-bridge/internal/voice"
+	"gadget-bridge/internal/weather"
 )
 
 func main() {
@@ -230,6 +232,25 @@ func main() {
 		return bots
 	}
 
+	// 天气（Open-Meteo 免费无 Key）：配置每次抓取现读（Web 改城市
+	// TTL 内收敛），启动即预热 + 每 10 分钟保温。
+	weatherSvc := weather.NewService(weather.NewClient(), func() weather.ResolveConfig {
+		cfg := weather.ResolveConfig{Mode: "auto"}
+		if db != nil {
+			if raw, err := db.GetSetting(storage.SettingKeyWeather); err == nil {
+				var c struct {
+					Mode string `json:"mode"`
+					City string `json:"city"`
+				}
+				if json.Unmarshal([]byte(raw), &c) == nil && (c.Mode == "auto" || c.Mode == "manual") {
+					cfg = weather.ResolveConfig{Mode: c.Mode, City: c.City}
+				}
+			}
+		}
+		return cfg
+	}, logger)
+	weatherSvc.Warm(context.Background())
+
 	handler := api.NewHandler(api.Deps{
 		Registry:        reg,
 		Store:           store,
@@ -244,6 +265,7 @@ func main() {
 		CredentialsDB:   db,
 		MasterKey:       masterKey,
 		SubscriptionsDB: db,
+		Weather:         weatherSvc,
 		Accounts: func(id string) []quota.AccountRef {
 			acc := resolveAccount(id)
 			return []quota.AccountRef{acc}
