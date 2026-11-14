@@ -14,6 +14,7 @@
 #include "data_source.h"
 #include "ui.h"
 #include "ui_launcher.h"
+#include "ui_gesture.h"
 #include "ui_theme.h"
 
 static lv_obj_t *g_launcher;
@@ -21,6 +22,7 @@ static lv_obj_t *g_lbl_clock;
 static lv_obj_t *g_lbl_date;
 
 static void clock_timer_cb(lv_timer_t *t);
+static void tileview_scroll_cb(lv_event_t *e);
 static void tile_click_cb(lv_event_t *e);
 
 /* ---------------- 波浪渐变背景（canvas 预渲染） ----------------
@@ -253,39 +255,116 @@ void ui_launcher_build(void)
 
     /* Wi-Fi/电池由全局状态栏 overlay 统一显示（ui_statusbar），此处不再重复 */
 
-    /* ---- App 磁贴网格（3×3，条目来自 app_manager 注册表） ---- */
-    static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+    /* ---- App 分页（原厂范式：一屏 4 个 2×2，左右滑动翻页 + 底部页点） ---- */
+    static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+    static lv_coord_t row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
 
+    lv_obj_t *tv = lv_tileview_create(g_launcher);
+    lv_obj_set_size(tv, LV_PCT(100), 360);
+    lv_obj_align(tv, LV_ALIGN_CENTER, 0, 8);
+    lv_obj_set_style_bg_opa(tv, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(tv, 0, 0);
+    lv_obj_set_style_pad_all(tv, 0, 0);
+    lv_obj_set_style_pad_gap(tv, 0, 0);
+    lv_obj_set_scrollbar_mode(tv, LV_SCROLLBAR_MODE_OFF);
+
+    lv_obj_t *dots[UI_DOTS_MAX];
     int count = app_manager_count();
-    int rows = (count + 2) / 3;
-    /* LVGL grid 只保存 dsc 指针：数组必须 static（栈数组出函数即失效，
-     * 表现为整个网格不渲染——目视验收抓出的 bug） */
-    static lv_coord_t row_dsc[4];
-    row_dsc[0] = row_dsc[1] = row_dsc[2] = LV_GRID_FR(1);
-    row_dsc[rows > 3 ? 3 : rows] = LV_GRID_TEMPLATE_LAST;
+    int pages = (count + 3) / 4;
 
-    lv_obj_t *grid = lv_obj_create(g_launcher);
-    lv_obj_set_size(grid, LV_PCT(100), 328);
-    lv_obj_align(grid, LV_ALIGN_CENTER, 0, 14);
-    lv_obj_set_layout(grid, LV_LAYOUT_GRID);
-    lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
-    lv_obj_set_style_pad_all(grid, 6, 0);
-    lv_obj_set_style_pad_gap(grid, 14, 0);
-    lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(grid, 0, 0);
-    lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+    for (int pg = 0; pg < pages; pg++) {
+        lv_obj_t *tile = lv_tileview_add_tile(tv, pg, 0, LV_DIR_HOR);
+        lv_obj_set_style_pad_all(tile, 8, 0);
+        lv_obj_set_style_bg_opa(tile, LV_OPA_TRANSP, 0);
+        lv_obj_set_scrollbar_mode(tile, LV_SCROLLBAR_MODE_OFF);
 
-    for (int i = 0; i < count; i++) {
-        const app_def_t *def = app_manager_get(i);
-        if (!def) break;
-        tile_add(grid, def, i);
+        lv_obj_t *grid = lv_obj_create(tile);
+        lv_obj_set_size(grid, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_layout(grid, LV_LAYOUT_GRID);
+        lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
+        lv_obj_set_style_pad_all(grid, 0, 0);
+        lv_obj_set_style_pad_gap(grid, 12, 0);
+        lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 2);
+        lv_obj_set_style_bg_opa(grid, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(grid, 0, 0);
+        lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
+
+        for (int k = 0; k < 4; k++) {
+            int idx = pg * 4 + k;
+            if (idx >= count) break;
+            const app_def_t *def = app_manager_get(idx);
+            if (!def) break;
+            lv_obj_t *tile_btn = lv_button_create(grid);
+            lv_obj_set_grid_cell(tile_btn, LV_GRID_ALIGN_STRETCH, k % 2, 1,
+                                 LV_GRID_ALIGN_STRETCH, k / 2, 1);
+            lv_obj_set_style_bg_color(tile_btn, lv_color_hex(0x141B30), 0);
+            lv_obj_set_style_bg_opa(tile_btn, def->enabled ? LV_OPA_80 : LV_OPA_40, 0);
+            lv_obj_set_style_border_width(tile_btn, 0, 0);
+            lv_obj_set_style_radius(tile_btn, 24, 0);
+            lv_obj_set_style_shadow_width(tile_btn, 12, 0);
+            lv_obj_set_style_shadow_opa(tile_btn, LV_OPA_20, 3);
+            lv_obj_set_style_shadow_opa(tile_btn, LV_OPA_20, 0);
+            lv_obj_set_style_pad_all(tile_btn, 0, 0);
+            lv_obj_add_event_cb(tile_btn, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
+
+            if (def->avatar) {
+                lv_obj_t *holder = lv_obj_create(tile_btn);
+                lv_obj_set_size(holder, 84, 84);
+                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 14);
+                lv_obj_set_style_radius(holder, 22, 0);
+                lv_obj_set_style_bg_color(holder, UI_CARD, 0);
+                lv_obj_set_style_bg_opa(holder, LV_OPA_COVER, 0);
+                lv_obj_set_style_border_width(holder, 0, 0);
+                lv_obj_set_style_pad_all(holder, 0, 0);
+                lv_obj_set_style_clip_corner(holder, true, 0);
+                lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_t *img = lv_image_create(holder);
+                lv_image_set_src(img, def->avatar);
+                lv_obj_set_size(img, 84, 84);
+                lv_image_set_scale(img, (256 * 84) / 88);
+                lv_obj_center(img);
+            } else {
+                lv_obj_t *holder = lv_obj_create(tile_btn);
+                lv_obj_set_size(holder, 84, 84);
+                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 14);
+                lv_obj_set_style_radius(holder, 22, 0);
+                lv_obj_set_style_bg_color(holder, lv_color_hex(def->tile_color), 0);
+                lv_obj_set_style_bg_opa(holder, def->enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+                lv_obj_set_style_border_width(holder, 0, 0);
+                lv_obj_set_style_pad_all(holder, 0, 0);
+                lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_t *sym = ui_label(holder, def->symbol, &lv_font_montserrat_28, lv_color_hex(0xFFFFFF));
+                lv_obj_center(sym);
+            }
+            lv_obj_t *name = ui_label(tile_btn, def->name, &lv_font_cn_14,
+                                      def->enabled ? UI_TEXT : UI_TEXT_DIM);
+            lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -12);
+        }
     }
 
-    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
+    /* 页点（tileview 滚动联动） */
+    static lv_obj_t *g_page_dots[UI_DOTS_MAX];
+    ui_dots_create(g_launcher, g_page_dots, UI_DOTS_MAX, pages, LV_ALIGN_BOTTOM_MID, -8);
+    lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);
+
+        /* 时钟定时器：rebuild 时先删旧    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
     static lv_timer_t *clock_timer;
     if (clock_timer) lv_timer_delete(clock_timer);
     clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(NULL);
+}
+
+static void tileview_scroll_cb(lv_event_t *e)
+{
+    lv_obj_t *tv = lv_event_get_target(e);
+    lv_obj_t **dots = (lv_obj_t **)lv_event_get_user_data(e);
+    int pages = (app_manager_count() + 3) / 4;
+    int cur = ui_page_of_scroll(tv, 480); /* tile 宽 = 屏宽 */
+    if (cur < 0) cur = 0;
+    if (cur >= pages) cur = pages - 1;
+    ui_dots_update(dots, pages, cur);
 }
 
 static void tile_click_cb(lv_event_t *e)

@@ -360,6 +360,27 @@ Simulator 协议资产不变。PLAN 顶部加 v1.2 修订块（自研 Launcher �
 遍历安装）→ BSP idf_component.yml 依赖链核对（修正社区 issue 的
 "BSP 拉入 XiaoZhi"误传）→ 03 示例 IDF v6.0.3 构建验证。
 
+## 交互范式统一（2026-11-14 第十批）：对齐原厂操作方式
+
+用户拍板（对齐原厂交互）：桌面一屏 4 个（2×2）左右滑动翻页 + 底部
+页点；二级页去返回按钮（上滑返回）；二级页多实例切换（多订阅/多
+监控详情）统一左右滑动 + 页点；按键只改短按（PWR 短按回首页/
+BOOT 短按返回/KEY3 短按应用自定义——聊天=开关连续对话），长按
+不动（PWR 长按开关机/KEY3 长按 PTT/BOOT 长按配网）。
+
+实现：
+- ui_gesture 公共件：LV_EVENT_GESTURE 上滑返回（默认 app_manager_back
+  / 可自定义回调——设置子页上滑回设置首页的层级返回、监控详情上滑
+  回列表）+ ui_dots 页点组件 + ui_page_of_scroll 页码计算
+- 桌面/订阅页/监控详情三处 tileview 横滑（tile 透明背景 + 关滚动条
+  ——tile 默认白底曾盖住深色页面，目视验收抓出）；订阅页 refs 数组
+  化（g_q[DS_SUB_MAX] 每.tile 一份，倒计时 timer 更新全部）
+- 对话页：去 back、连续对话开关（KEY3 短按语义，模拟器按钮呈现）
+- 重写教训：ui_app_pages.c 多轮 python 锚点手术累积损坏（scr/tile
+  改名遗漏、段截断），git checkout 回 HEAD 后按变更集一次性 heredoc
+  重写更稳——手术超过 3 轮就应整体重写
+- 注册表顺序调整：页1 = 大肥鱼/小智/Muse/订阅（AI 优先）
+
 ## 固件路线定稿与 QuotaFrame 落地（2026-11-14 第九批）
 
 ADR-008（修订 ADR-007）：固件基线**回到自研**，esp-brookesia/出厂

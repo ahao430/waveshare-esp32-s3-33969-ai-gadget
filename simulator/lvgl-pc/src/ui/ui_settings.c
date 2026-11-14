@@ -10,6 +10,7 @@
 #include "app_manager.h"
 #include "data_source.h"
 #include "ui.h"
+#include "ui_gesture.h"
 #include "ui_launcher.h"
 #include "ui_theme.h"
 
@@ -77,22 +78,21 @@ static void back_home_cb(lv_event_t *e)
     ui_settings_build_page(g_root);
 }
 
-static void home_click_cb(lv_event_t *e)
+/* 子页上滑 = 回设置首页（层级返回；非退出 App） */
+static void swipe_home_cb(void *unused)
 {
-    (void)e;
-    app_manager_back(); /* 回 Launcher */
+    (void)unused;
+    g_page = SP_HOME;
+    lv_obj_clean(g_root);
+    ui_settings_build_page(g_root);
 }
 
-static void back_btn_add(lv_obj_t *scr)
+
+
+/* 子页：上滑回设置首页（无返回按钮，ADR-008 范式） */
+static void subpage_gesture_add(lv_obj_t *scr)
 {
-    lv_obj_t *back = lv_button_create(scr);
-    lv_obj_set_size(back, 56, 44);
-    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 0);
-    ui_style_card(back);
-    lv_obj_set_style_radius(back, 14, 0);
-    lv_obj_add_event_cb(back, back_home_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
-    lv_obj_center(icon);
+    ui_gesture_back_add_ex(scr, swipe_home_cb, NULL);
 }
 
 /* 子页标题：居中，与 back 同行（原实现未 align 会与 back 叠位） */
@@ -452,19 +452,19 @@ void ui_settings_build_page(lv_obj_t *scr)
 
     switch (g_page) {
     case SP_DISPLAY:
-        back_btn_add(scr);
+        subpage_gesture_add(scr);
         page_display(scr);
         break;
     case SP_NETWORK:
-        back_btn_add(scr);
+        subpage_gesture_add(scr);
         page_network(scr);
         break;
     case SP_SERVICE:
-        back_btn_add(scr);
+        subpage_gesture_add(scr);
         page_service(scr);
         break;
     case SP_DEVICE:
-        back_btn_add(scr);
+        subpage_gesture_add(scr);
         page_device(scr);
         break;
     case SP_HOME:
@@ -473,14 +473,7 @@ void ui_settings_build_page(lv_obj_t *scr)
         lv_obj_t *t = ui_label(scr, "系统设置", &lv_font_cn_20, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 10);
 
-        lv_obj_t *back = lv_button_create(scr);
-        lv_obj_set_size(back, 56, 44);
-        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 28);
-        ui_style_card(back);
-        lv_obj_set_style_radius(back, 14, 0);
-        lv_obj_add_event_cb(back, home_click_cb, LV_EVENT_CLICKED, NULL);
-        lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
-        lv_obj_center(icon);
+        ui_gesture_back_add(scr); /* 上滑退出设置 App */
 
         struct { int page; const char *t; const char *d; const char *s; uint32_t c; } items[] = {
             { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS, 0x7C5CFF },

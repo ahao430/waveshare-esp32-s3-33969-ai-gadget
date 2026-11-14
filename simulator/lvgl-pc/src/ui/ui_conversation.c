@@ -24,6 +24,7 @@
 #include "data_source.h"
 #include "voice_session.h"
 #include "ui.h"
+#include "ui_gesture.h"
 #include "ui_theme.h"
 
 #define CONV_MSGS 12
@@ -44,9 +45,11 @@ static lv_obj_t *g_status_lbl;
 static lv_obj_t *g_reply_lbl;
 static lv_obj_t *g_wave[32];
 static lv_obj_t *g_ptt_btn;
+static lv_obj_t *g_cont_lbl;
 static lv_obj_t *g_poll_timer;
 static int g_app_id = -1;
 static bool g_voice_enabled;
+static bool g_continuous; /* 连续对话（KEY3 短按切换；聊天应用自定义语义） */
 
 /* voice_session 状态（从 ui_voice 移植） */
 static bool g_vs_inited;
@@ -198,6 +201,20 @@ static void rerender_history(void)
 }
 
 /* ---------------- PTT / poll ---------------- */
+
+static void continuous_toggle_cb(lv_event_t *e)
+{
+    (void)e;
+    g_continuous = !g_continuous;
+    lv_obj_set_style_text_color(g_cont_lbl,
+                                g_continuous ? UI_OK : UI_TEXT_DIM, 0);
+    if (g_status_lbl) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%s（连续对话%s）", state_text(VS_IDLE),
+                 g_continuous ? "开" : "关");
+        lv_label_set_text(g_status_lbl, buf);
+    }
+}
 
 static void ptt_pressed_cb(lv_event_t *e)
 {
@@ -353,14 +370,18 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_t *title_lbl = ui_label(scr, g_meta[app_id].title, &lv_font_cn_20, UI_TEXT);
     lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
 
-    lv_obj_t *back = lv_button_create(scr);
-    lv_obj_set_size(back, 56, 44);
-    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 0, 0);
-    ui_style_card(back);
-    lv_obj_set_style_radius(back, 14, 0);
-    app_manager_back_on_click(back);
-    lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
-    lv_obj_center(icon);
+    ui_gesture_back_add(scr); /* 上滑退出（无返回按钮，ADR-008 范式） */
+
+    /* 连续对话开关（设备端 KEY3 短按同语义；模拟器按钮呈现） */
+    lv_obj_t *cont = lv_button_create(scr);
+    lv_obj_set_size(cont, 56, 44);
+    lv_obj_align(cont, LV_ALIGN_TOP_LEFT, 0, 28);
+    ui_style_card(cont);
+    lv_obj_set_style_radius(cont, 14, 0);
+    lv_obj_add_event_cb(cont, continuous_toggle_cb, LV_EVENT_CLICKED, NULL);
+    g_cont_lbl = ui_label(cont, LV_SYMBOL_LOOP, &lv_font_montserrat_16,
+                          g_continuous ? UI_OK : UI_TEXT_DIM);
+    lv_obj_center(g_cont_lbl);
 
     /* 历史不直接展示：顶部"历史"按钮 → 全屏滚动查看
      * （y28：避开全局状态栏 overlay，PLAN §13.3） */
