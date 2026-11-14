@@ -377,6 +377,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
 
     ui_dots_create(scr, g_q_dots, UI_DOTS_MAX, s->sub_count,
                    LV_ALIGN_BOTTOM_MID, -10);
+    ui_dots_update(g_q_dots, s->sub_count, 0); /* 初始高亮 */
     lv_obj_add_event_cb(g_q_tv, quota_tile_scroll_cb, LV_EVENT_SCROLL, NULL);
     quota_update_all();
 

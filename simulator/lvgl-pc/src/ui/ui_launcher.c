@@ -364,6 +364,7 @@ void ui_launcher_build(void)
     /* 页点（tileview 滚动联动） */
     static lv_obj_t *g_page_dots[UI_DOTS_MAX];
     ui_dots_create(g_launcher, g_page_dots, UI_DOTS_MAX, pages, LV_ALIGN_BOTTOM_MID, -8);
+    ui_dots_update(g_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
     lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);
 
         /* 时钟定时器：rebuild 时先删旧    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
@@ -371,6 +372,13 @@ void ui_launcher_build(void)
     if (clock_timer) lv_timer_delete(clock_timer);
     clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(NULL);
+
+    /* GADGET_DEMO_PAGE=n：启动即翻到第 n 页（headless 页点回归/截图） */
+    const char *dpg = getenv("GADGET_DEMO_PAGE");
+    if (dpg && dpg[0]) {
+        int pi = atoi(dpg);
+        if (pi > 0) lv_tileview_set_tile_by_index(tv, pi, 0, LV_ANIM_OFF);
+    }
 }
 
 static void tileview_scroll_cb(lv_event_t *e)
@@ -378,7 +386,7 @@ static void tileview_scroll_cb(lv_event_t *e)
     lv_obj_t *tv = lv_event_get_target(e);
     lv_obj_t **dots = (lv_obj_t **)lv_event_get_user_data(e);
     int pages = (app_manager_count() + 3) / 4;
-    int cur = ui_page_of_scroll(tv, 480); /* tile 宽 = 屏宽 */
+    int cur = ui_page_of_scroll(tv, 0); /* 步长实测（tv 宽含父级 pad） */
     if (cur < 0) cur = 0;
     if (cur >= pages) cur = pages - 1;
     ui_dots_update(dots, pages, cur);

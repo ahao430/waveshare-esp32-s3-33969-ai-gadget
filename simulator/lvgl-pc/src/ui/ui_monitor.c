@@ -212,7 +212,7 @@ static void detail_tile_build(lv_obj_t *tile, const gadget_server_t *srv)
 static void detail_scroll_cb(lv_event_t *e)
 {
     lv_obj_t *tv = lv_event_get_target(e);
-    int cur = ui_page_of_scroll(tv, 480);
+    int cur = ui_page_of_scroll(tv, 0); /* 步长实测 */
     const gadget_state_t *s = ds_state();
     if (cur < 0) cur = 0;
     if (cur >= s->server_count) cur = s->server_count - 1;
@@ -255,5 +255,6 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
 
     ui_dots_create(scr, g_dots, UI_DOTS_MAX, s->server_count,
                    LV_ALIGN_BOTTOM_MID, -8);
+    ui_dots_update(g_dots, s->server_count, g_detail); /* set_tile 早于 cb 挂载 */
     lv_obj_add_event_cb(tv, detail_scroll_cb, LV_EVENT_SCROLL, NULL);
 }

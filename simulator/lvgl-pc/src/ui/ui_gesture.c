@@ -64,6 +64,13 @@ void ui_dots_update(lv_obj_t *dots[], int count, int cur)
 
 int ui_page_of_scroll(lv_obj_t *scrollable, int page_w)
 {
+    /* page_w<=0 = 实测步长：tileview 磁贴按 pct 定位（col*100% 内容宽），
+     * 步长=内容宽，未必等于屏宽——曾硬编码 480 导致页点错位
+     * （tv 宽 448 时第三页 896/480 整除落 1，选中了中间点）。 */
+    if (page_w <= 0) {
+        page_w = lv_obj_get_content_width(scrollable);
+        if (page_w <= 0) return 0;
+    }
     int sx = lv_obj_get_scroll_x(scrollable);
-    return sx / page_w; /* 右滑 → scroll_x 增 */
+    return (sx + page_w / 2) / page_w; /* 四舍五入到最近页（滚动中间态友好） */
 }
