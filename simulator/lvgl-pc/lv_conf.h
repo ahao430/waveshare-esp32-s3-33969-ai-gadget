@@ -42,4 +42,7 @@
 /* TODO: 中文 UI 需要 CJK 点阵字体，后续用 lv_font_conv 从思源黑体生成子集，
  * 模拟器与固件共用同一字体文件（ADR-001）。 */
 
+/* 离屏截图（main.c GADGET_SNAP 钩子）：headless UI 验收用 */
+#define LV_USE_SNAPSHOT 1
+
 #endif /* LV_CONF_H */

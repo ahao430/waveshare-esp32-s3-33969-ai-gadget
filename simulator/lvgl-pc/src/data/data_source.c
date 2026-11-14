@@ -20,16 +20,16 @@ static gadget_state_t g_state = {
 
     .sub_count = 2,
     .subs = {
-        { "智谱", "GLM Coding Plan (Lite)", 42, 61, 0, 0, true },
-        { "Kimi", "Kimi Coding Plan",        12, 35, 0, 0, true },
+        { "智谱", "GLM Coding Plan (Lite)", 42, 61, 18000, 604800, 0, 0, true },
+        { "Kimi", "Kimi Coding Plan",        12, 35, 18000, 604800, 0, 0, true },
     },
 
     .server_count = 4,
     .servers = {
-        { "hk-01", true,  23, 55, 120 },
-        { "hk-02", true,  48, 66, 730 },
-        { "jp-01", false,  0,  0,   0 },
-        { "us-01", true,  71, 82, 240 },
+        { "hk-01", true,  23, 55, 38,  540, 1560, 120 },
+        { "hk-02", true,  48, 66, 41,  890, 2450, 730 },
+        { "jp-01", false,  0,  0,  0,    0,    0,   0 },
+        { "us-01", true,  71, 82, 77, 1320, 3980, 240 },
     },
 
     .battery_pct  = 82,

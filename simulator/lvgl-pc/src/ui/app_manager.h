@@ -11,8 +11,10 @@
 
 typedef struct {
     int id;                 /* ui_app_id 枚举 */
-    const char *name;       /* 桌面标签（暂英文，CJK 字体 TODO） */
-    const char *symbol;     /* LV_SYMBOL_* 图标 */
+    const char *name;       /* 桌面标签 */
+    const char *symbol;     /* LV_SYMBOL_* 图标（符号磁贴用） */
+    uint32_t tile_color;    /* 磁贴底色（符号磁贴；0 = 无） */
+    const char *avatar;     /* 头像图路径（AI 磁贴用；NULL = 符号磁贴） */
     bool enabled;           /* false = 规划中 App，桌面置灰、可进占位页 */
     void (*build)(lv_obj_t *screen, int app_id); /* 在新屏幕上构建页面内容 */
     void (*on_exit)(void);            /* 可 NULL：退出时释放 App 私有资源（定时器等） */

@@ -307,6 +307,38 @@ AI 气泡逐字追加；provider 下拉来自 `/chat/providers`。
   规则触发 "prefixed in the build directory" 生成错误），改挂
   gadget_sim PRIVATE；且必须在 `add_executable` 之后。
 
+## UI 精修（2026-11-14 第四批）：四页按定稿图对齐 + 离屏截图钩子
+
+**桌面**：彩色磁贴（三 AI 头像 + 六彩色符号，网格序按定稿 3×3）；
+canvas 预渲染波浪渐变背景（RGB565 直写，4×4 Bayer 抖动消色带）；
+状态栏时钟+日期。**监控页**：四列指标（CPU/内存/磁盘/网络，数据层
+补 disk/net 字段）+ 在线胶囊 + 来源名截短。**订阅页**：5h 环改显
+剩余 x.xh（window_seconds 换算）+ 本周额度卡 + 手动预热/刷新按钮列。
+**设置页**：入口卡彩色圆角图标块 + 子页标题居中（原未 align 与
+back 叠位）。
+
+**GADGET_SNAP 离屏截图钩子**（main.c + LV_USE_SNAPSHOT）：
+`GADGET_SNAP=xx.ppm[,ms]` 延时快照当前屏后自动退出，配
+`SDL_VIDEODRIVER=dummy` headless 跑——UI 验收从"screencapture 抓
+真窗口"（受真实鼠标/遮挡/分析器误读干扰）升级为确定性逐像素复现。
+
+踩坑：
+
+- **legacy 字段覆盖新解析**：subs[0].reset_week 被
+  `= st->zhipu_reset_week`（从未更新的 legacy 字段）回写清 0，
+  表现为"重置 01-01 08:00"（epoch）。定位：字节级同 hash 对比 +
+  临时 fprintf——肉眼"代码看着对"时用二分打印最快。
+- **screencapture 验收不可靠**：真窗口被用户交互/其他窗口遮挡，
+  视觉模型分析缩放图误报（时钟"缺失"实为误读）；辅以像素计数
+  （区域亮度统计）做客观仲裁，后整体换 GADGET_SNAP。
+- **`A:` 盘符相对 CWD**：`A:simulator/lvgl-pc/assets/...` 路径要求
+  从仓库根启动模拟器，从 simulator/lvgl-pc 目录启动则头像/GIF
+  全部加载失败（表现为空磁贴）。
+- **RGB565 渐变色带**：5-6-5 位深下渐变呈块状条带，Bayer 抖动 ±2 解决。
+- **长 URL 钻到按钮下**：监控页"来源 bridge(http://...)"一行与右上
+  刷新按钮同高，超出按钮左缘的部分被盖住（误读为截断）——显示层
+  截短到 `(` 前。
+
 ## Phase 3 收尾（2026-11-14）：WebSocket events 实时通道
 
 ### Bridge

@@ -18,6 +18,9 @@ typedef struct {
     bool online;
     int cpu_pct;
     int mem_pct;
+    int disk_pct;
+    int net_up_kbps;   /* 上行 KB/s（bps/1024 换算，UI 显示用） */
+    int net_down_kbps; /* 下行 KB/s */
     int uptime_h; /* 小时粒度，设备端够用 */
 } gadget_server_t;
 
@@ -29,6 +32,8 @@ typedef struct {
     char plan[48];
     int used_5h;         /* % */
     int used_week;       /* % */
+    int win_5h_s;        /* 5h 窗口总秒数（18000；换算剩余小时用） */
+    int week_s;          /* 周窗口总秒数（604800；换算 x/y 小时用） */
     long reset_5h;       /* unix 秒 */
     long reset_week;     /* unix 秒 */
     bool valid;

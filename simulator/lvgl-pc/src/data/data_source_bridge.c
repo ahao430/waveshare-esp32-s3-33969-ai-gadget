@@ -71,7 +71,7 @@ static const cJSON *find_window(const cJSON *windows, const char *id)
     return NULL;
 }
 
-static void copy_window(const cJSON *win, int *used, long *reset)
+static void copy_window(const cJSON *win, int *used, long *reset, int *win_s)
 {
     if (!win) return;
     if (used) {
@@ -85,11 +85,16 @@ static void copy_window(const cJSON *win, int *used, long *reset)
             if (ts > 0) *reset = ts;
         }
     }
+    if (win_s) {
+        const cJSON *w = cJSON_GetObjectItem(win, "window_seconds");
+        if (cJSON_IsNumber(w) && w->valuedouble > 0) *win_s = (int)w->valuedouble;
+    }
 }
 
 static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
                         int *used_week, char *plan, size_t plan_len,
-                        long *fetched_ts)
+                        long *fetched_ts, int *win_5h_s, int *week_s,
+                        long *reset_week)
 {
     char buf[BRIDGE_BUF_SIZE];
     int status = http_get(url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
@@ -106,8 +111,8 @@ static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
         const cJSON *windows = cJSON_GetObjectItem(snap, "windows");
         if (!cJSON_IsArray(windows)) break;
 
-        copy_window(find_window(windows, "5h"), used_5h, reset_5h);
-        if (used_week) copy_window(find_window(windows, "weekly"), used_week, NULL);
+        copy_window(find_window(windows, "5h"), used_5h, reset_5h, win_5h_s);
+        if (used_week) copy_window(find_window(windows, "weekly"), used_week, reset_week, week_s);
 
         const cJSON *p = cJSON_GetObjectItem(snap, "plan_name");
         if (plan && cJSON_IsString(p) && p->valuestring[0] != '\0' &&
@@ -167,6 +172,13 @@ static void fetch_servers(gadget_state_t *st)
 
             const cJSON *up = cJSON_GetObjectItem(it, "uptime_s");
             s->uptime_h = cJSON_IsNumber(up) ? (int)(up->valuedouble / 3600.0 + 0.5) : 0;
+
+            const cJSON *disk = cJSON_GetObjectItem(it, "disk_pct");
+            s->disk_pct = cJSON_IsNumber(disk) ? (int)(disk->valuedouble + 0.5) : 0;
+            const cJSON *nup = cJSON_GetObjectItem(it, "net_up_bps");
+            s->net_up_kbps = cJSON_IsNumber(nup) ? (int)(nup->valuedouble / 1024.0 + 0.5) : 0;
+            const cJSON *ndn = cJSON_GetObjectItem(it, "net_down_bps");
+            s->net_down_kbps = cJSON_IsNumber(ndn) ? (int)(ndn->valuedouble / 1024.0 + 0.5) : 0;
             n++;
         }
         if (n > 0) st->server_count = n;
@@ -180,19 +192,25 @@ static bool bridge_refresh(gadget_state_t *st)
     /* 主 provider → Zhipu 页；失败返回 false（旧数据仍可用） */
     if (!fetch_quota(g_url, &st->zhipu_used_5h, &st->zhipu_reset_5h,
                      &st->zhipu_used_week, st->zhipu_plan,
-                     sizeof(st->zhipu_plan), &st->updated_unix)) {
+                     sizeof(st->zhipu_plan), &st->updated_unix,
+                     &st->subs[0].win_5h_s, &st->subs[0].week_s,
+                     &st->subs[0].reset_week)) {
         return false;
     }
     /* kimi provider → Kimi 页；不可用（未配 Key）时静默保留原值 */
     (void)fetch_quota(g_kimi_url, &st->kimi_used_5h, NULL,
-                      &st->kimi_used_week, NULL, 0, NULL);
+                      &st->kimi_used_week, NULL, 0, NULL,
+                      &st->subs[1].win_5h_s, &st->subs[1].week_s,
+                      &st->subs[1].reset_week);
 
-    /* 订阅列表：主 provider → subs[0]，kimi → subs[1]（名称/套餐带入） */
+    /* 订阅列表：主 provider → subs[0]，kimi → subs[1]（名称/套餐带入）。
+     * reset_week 已由上面 fetch_quota 直写 subs[0]（zhipu_reset_week 是
+     * 从未更新的 legacy 字段，这里不可用它回写——曾把解析结果清回 0） */
     if (st->sub_count >= 1) {
         st->subs[0].used_5h   = st->zhipu_used_5h;
         st->subs[0].used_week = st->zhipu_used_week;
         st->subs[0].reset_5h  = st->zhipu_reset_5h;
-        st->subs[0].reset_week = st->zhipu_reset_week;
+        st->zhipu_reset_week  = st->subs[0].reset_week; /* legacy 引用同步 */
         snprintf(st->subs[0].name, sizeof(st->subs[0].name), "%s", g_provider);
         st->subs[0].valid = true;
     }
@@ -252,7 +270,7 @@ static ds_prewarm_result_t bridge_prewarm(gadget_state_t *st, char *msg, int msg
     /* 顺带刷新额度，让 UI 立即显示 after 状态 */
     (void)fetch_quota(g_url, &st->zhipu_used_5h, &st->zhipu_reset_5h,
                       &st->zhipu_used_week, st->zhipu_plan,
-                      sizeof(st->zhipu_plan), &st->updated_unix);
+                      sizeof(st->zhipu_plan), &st->updated_unix, NULL, NULL, NULL);
 
     snprintf(msg, (size_t)msg_len, "%s%s", state, detail);
     return DS_PREWARM_OK;

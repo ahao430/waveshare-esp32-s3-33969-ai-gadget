@@ -88,6 +88,13 @@ static void back_btn_add(lv_obj_t *scr)
     lv_obj_center(icon);
 }
 
+/* 子页标题：居中，与 back 同行（原实现未 align 会与 back 叠位） */
+static void page_title(lv_obj_t *scr, const char *title)
+{
+    lv_obj_t *t = ui_label(scr, title, &lv_font_cn_20, UI_TEXT);
+    lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 10);
+}
+
 static void slider_changed_cb(lv_event_t *e)
 {
     const char *which = lv_event_get_user_data(e);
@@ -114,19 +121,31 @@ static void refresh_changed_cb(lv_event_t *e)
 }
 
 static lv_obj_t *entry_card(lv_obj_t *scr, int page, const char *title,
-                            const char *desc, const char *symbol)
+                            const char *desc, const char *symbol, uint32_t color)
 {
     lv_obj_t *card = lv_button_create(scr);
     lv_obj_set_size(card, LV_PCT(100), 78);
     ui_style_card(card);
     lv_obj_set_style_radius(card, 16, 0);
     lv_obj_add_event_cb(card, nav_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)page);
-    lv_obj_t *sym = ui_label(card, symbol, &lv_font_montserrat_20, UI_ACCENT2);
-    lv_obj_align(sym, LV_ALIGN_LEFT_MID, 12, 0);
+
+    /* 彩色圆角图标块（与桌面磁贴同视觉语言，定稿图风格） */
+    lv_obj_t *ic = lv_obj_create(card);
+    lv_obj_set_size(ic, 44, 44);
+    lv_obj_align(ic, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_set_style_radius(ic, 13, 0);
+    lv_obj_set_style_bg_color(ic, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(ic, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(ic, 0, 0);
+    lv_obj_clear_flag(ic, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(ic, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *sym = ui_label(ic, symbol, &lv_font_montserrat_16, lv_color_hex(0xFFFFFF));
+    lv_obj_center(sym);
+
     lv_obj_t *t = ui_label(card, title, &lv_font_cn_16, UI_TEXT);
-    lv_obj_align(t, LV_ALIGN_LEFT_MID, 52, -12);
+    lv_obj_align(t, LV_ALIGN_LEFT_MID, 60, -12);
     lv_obj_t *d = ui_label(card, desc, &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(d, LV_ALIGN_LEFT_MID, 52, 12);
+    lv_obj_align(d, LV_ALIGN_LEFT_MID, 60, 12);
     lv_obj_t *a = ui_label(card, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
     lv_obj_align(a, LV_ALIGN_RIGHT_MID, -10, 0);
     return card;
@@ -136,7 +155,7 @@ static lv_obj_t *entry_card(lv_obj_t *scr, int page, const char *title,
 
 static void page_display(lv_obj_t *scr)
 {
-    ui_label(scr, "显示与声音", &lv_font_cn_20, UI_TEXT);
+    page_title(scr, "显示与声音");
 
     const gadget_state_t *s = ds_state();
     char buf[16];
@@ -204,7 +223,7 @@ static void page_display(lv_obj_t *scr)
 
 static void page_network(lv_obj_t *scr)
 {
-    ui_label(scr, "网络与连接", &lv_font_cn_20, UI_TEXT);
+    page_title(scr, "网络与连接");
 
     /* Wi-Fi 状态卡（模拟器 mock；真机读 network_manager） */
     lv_obj_t *card1 = lv_obj_create(scr);
@@ -250,7 +269,7 @@ static void page_network(lv_obj_t *scr)
 
 static void page_service(lv_obj_t *scr)
 {
-    ui_label(scr, "服务管理", &lv_font_cn_20, UI_TEXT);
+    page_title(scr, "服务管理");
 
     lv_obj_t *card1 = lv_obj_create(scr);
     lv_obj_set_size(card1, LV_PCT(100), 116);
@@ -283,7 +302,7 @@ static void page_service(lv_obj_t *scr)
 
 static void page_device(lv_obj_t *scr)
 {
-    ui_label(scr, "设备信息", &lv_font_cn_20, UI_TEXT);
+    page_title(scr, "设备信息");
 
     lv_obj_t *card1 = lv_obj_create(scr);
     lv_obj_set_size(card1, LV_PCT(100), 88);
@@ -357,15 +376,15 @@ void ui_settings_build_page(lv_obj_t *scr)
         lv_obj_t *t = ui_label(scr, "系统设置", &lv_font_cn_20, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 10);
 
-        struct { int page; const char *t; const char *d; const char *s; } items[] = {
-            { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS },
-            { SP_NETWORK, "网络与连接", "Wi-Fi、配网、二维码", LV_SYMBOL_WIFI },
-            { SP_SERVICE, "服务管理",   "订阅刷新、后台服务",  LV_SYMBOL_REFRESH },
-            { SP_DEVICE,  "设备信息",   "版本、内存、硬件",    LV_SYMBOL_LIST },
+        struct { int page; const char *t; const char *d; const char *s; uint32_t c; } items[] = {
+            { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS, 0x7C5CFF },
+            { SP_NETWORK, "网络与连接", "Wi-Fi、配网、二维码", LV_SYMBOL_WIFI,     0x2EC4B6 },
+            { SP_SERVICE, "服务管理",   "订阅刷新、后台服务",  LV_SYMBOL_REFRESH,  0xFF8A3D },
+            { SP_DEVICE,  "设备信息",   "版本、内存、硬件",    LV_SYMBOL_LIST,     0x3A6FF7 },
         };
         for (int i = 0; i < 4; i++) {
             lv_obj_t *card = entry_card(scr, items[i].page, items[i].t,
-                                        items[i].d, items[i].s);
+                                        items[i].d, items[i].s, items[i].c);
             lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 46 + i * 88);
         }
 
