@@ -6,6 +6,7 @@
  */
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "app_manager.h"
@@ -317,6 +318,13 @@ void ui_chat_build(lv_obj_t *scr, int app_id)
         pthread_create(&tid, NULL, prov_worker, NULL);
         pthread_detach(tid);
         prov_started = true;
+    }
+
+    /* 演示钩子：GADGET_DEMO_CHAT_TEXT 自动发送一条消息 */
+    const char *demo_text = getenv("GADGET_DEMO_CHAT_TEXT");
+    if (demo_text && demo_text[0]) {
+        lv_textarea_set_text(g_input, demo_text);
+        send_btn_cb(NULL);
     }
 
     /* 结果轮询（页面销毁时由 on_exit 停止） */

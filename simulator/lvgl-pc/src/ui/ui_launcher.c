@@ -48,11 +48,11 @@ void ui_launcher_build(void)
     g_lbl_battery = ui_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_montserrat_16, UI_TEXT_DIM);
     lv_obj_align(g_lbl_battery, LV_ALIGN_RIGHT_MID, 0, 0);
 
-    g_lbl_date = ui_label(g_launcher, "", &lv_font_montserrat_14, UI_TEXT_DIM);
+    g_lbl_date = ui_label(g_launcher, "", &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(g_lbl_date, LV_ALIGN_TOP_LEFT, 0, 50);
 
     /* ---- 额度速览（数据流验证卡片） ---- */
-    g_lbl_glance = ui_label(g_launcher, "", &lv_font_montserrat_14, UI_TEXT_DIM);
+    g_lbl_glance = ui_label(g_launcher, "", &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(g_lbl_glance, LV_ALIGN_TOP_RIGHT, 0, 50);
 
     /* ---- App 网格（3×N，条目来自 app_manager） ---- */
@@ -60,9 +60,12 @@ void ui_launcher_build(void)
 
     int count = app_manager_count();
     int rows = (count + 2) / 3;
-    lv_coord_t row_dsc[6] = { 0 };
-    for (int r = 0; r < rows && r < 6; r++) row_dsc[r] = LV_GRID_FR(1);
-    row_dsc[rows > 5 ? 5 : rows] = LV_GRID_TEMPLATE_LAST;
+    /* LVGL grid 只保存 dsc 指针：数组必须 static（栈数组出函数即失效，
+     * 表现为整个网格不渲染——目视验收抓出的 bug） */
+    static lv_coord_t row_dsc[7];
+    for (int r = 0; r < 6 && r < rows; r++) row_dsc[r] = LV_GRID_FR(1);
+    row_dsc[rows > 5 ? 6 : rows] = LV_GRID_TEMPLATE_LAST;
+    for (int r = rows + 1; r < 7; r++) row_dsc[r] = 0;
 
     lv_obj_t *grid = lv_obj_create(g_launcher);
     lv_obj_set_size(grid, LV_PCT(100), 306);

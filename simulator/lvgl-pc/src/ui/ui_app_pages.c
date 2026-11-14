@@ -4,6 +4,7 @@
  */
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "app_manager.h"
@@ -21,10 +22,17 @@ void ui_init(void)
     /* 数据源先于 UI 初始化：环境变量决定 mock/bridge（ADR-001） */
     ds_init(NULL, NULL, NULL);
 
+    /* 顺序敏感：先注册 App（Launcher 网格按注册表构建），再建桌面 */
+    register_apps();
     lv_obj_t *home = ui_launcher_screen();
     app_manager_set_home(home);
-    register_apps();
     lv_screen_load(home); /* Launcher 是启动屏幕（常驻系统 UI） */
+
+    /* 演示/测试钩子：GADGET_DEMO_APP=<id> 启动即进入指定 App */
+    const char *demo = getenv("GADGET_DEMO_APP");
+    if (demo && demo[0]) {
+        ui_open_app(atoi(demo));
+    }
 }
 
 void ui_show_launcher(void) { app_manager_back(); }

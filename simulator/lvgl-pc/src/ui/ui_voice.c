@@ -5,6 +5,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "app_manager.h"
@@ -304,6 +305,11 @@ void ui_voice_build(lv_obj_t *scr, int app_id)
     lv_obj_add_event_cb(g_ptt_btn, ptt_released_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_t *ptt_lbl = ui_label(g_ptt_btn, "按住说话", &lv_font_cn_16, UI_TEXT);
     lv_obj_center(ptt_lbl);
+
+    /* 演示钩子：GADGET_DEMO_VOICE=1 自动进入 Listening（波形/光环展示） */
+    if (getenv("GADGET_DEMO_VOICE") && getenv("GADGET_DEMO_VOICE")[0] == '1') {
+        vs_ptt_begin();
+    }
 
     /* tick 驱动 + 光环状态刷新（页面销毁时 on_exit 停止） */
     g_poll_timer = lv_timer_create(poll_timer_cb, 50, NULL);
