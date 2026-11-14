@@ -13,3 +13,9 @@
 - 状态映射：Idle/Listening=东张西望、Thinking=写代码、Speaking=凭空生花
 - 位置：`simulator/lvgl-pc/assets/dsh/`，UI 加黑色圆角卡展示；
   会话状态切换动画见 `ui_conversation.c set_mascot_for_state()`
+
+## GPT 素材包（2026-11-14）
+
+- 来源：用户提供的 material-pack-2026-11-14.zip（GPT 生成设计稿）
+- 归档：assets/material-pack/（概念图/三角色 sprite/COMPANION_ANIMATION_SPEC.md）
+- 用途：UI 精修参考（480×480 定稿稿见 concepts/assistant-and-launcher-concept-*.png）

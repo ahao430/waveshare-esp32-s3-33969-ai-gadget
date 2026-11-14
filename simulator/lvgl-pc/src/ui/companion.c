@@ -60,12 +60,13 @@ static void create_gif(lv_obj_t *parent, int16_t y)
     lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y);
 }
 
+/* 小智形象：素材包 wave 动画（"png" 实为 GIF 89a 动画） */
 static void create_image(lv_obj_t *parent, int16_t y)
 {
-    g_obj = lv_image_create(parent);
-    lv_image_set_src(g_obj, "A:simulator/lvgl-pc/assets/xiaozhi/xiaozhi-220.png");
-    lv_obj_set_size(g_obj, 220, 220);
-    lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y);
+    g_obj = lv_gif_create(parent);
+    lv_gif_set_src(g_obj, "A:simulator/lvgl-pc/assets/xiaozhi/xiaozhi-wave.gif");
+    lv_obj_set_size(g_obj, 220, 195);
+    lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y + 12);
 }
 
 void companion_create(lv_obj_t *parent, int app_id, int16_t y)
