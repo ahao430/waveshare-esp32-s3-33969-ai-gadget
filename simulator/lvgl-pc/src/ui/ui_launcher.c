@@ -297,50 +297,57 @@ void ui_launcher_build(void)
             lv_obj_t *tile_btn = lv_button_create(grid);
             lv_obj_set_grid_cell(tile_btn, LV_GRID_ALIGN_STRETCH, k % 2, 1,
                                  LV_GRID_ALIGN_STRETCH, k / 2, 1);
-            lv_obj_set_style_bg_color(tile_btn, lv_color_hex(0x141B30), 0);
-            lv_obj_set_style_bg_opa(tile_btn, def->enabled ? LV_OPA_80 : LV_OPA_40, 0);
+            /* 无磁贴卡片底：图标 + 标签直接浮于壁纸（原厂范式） */
+            lv_obj_set_style_bg_opa(tile_btn, LV_OPA_TRANSP, 0);
             lv_obj_set_style_border_width(tile_btn, 0, 0);
-            lv_obj_set_style_radius(tile_btn, 24, 0);
-            lv_obj_set_style_shadow_width(tile_btn, 12, 0);
-            lv_obj_set_style_shadow_opa(tile_btn, LV_OPA_20, 3);
-            lv_obj_set_style_shadow_opa(tile_btn, LV_OPA_20, 0);
+            lv_obj_set_style_shadow_width(tile_btn, 0, 0);
             lv_obj_set_style_pad_all(tile_btn, 0, 0);
             lv_obj_add_event_cb(tile_btn, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
 
+            const int ICON = 108;
             if (def->avatar) {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
-                lv_obj_set_size(holder, 84, 84);
-                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 14);
-                lv_obj_set_style_radius(holder, 22, 0);
+                lv_obj_set_size(holder, ICON, ICON);
+                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 10);
+                lv_obj_set_style_radius(holder, 26, 0);
                 lv_obj_set_style_bg_color(holder, UI_CARD, 0);
                 lv_obj_set_style_bg_opa(holder, LV_OPA_COVER, 0);
                 lv_obj_set_style_border_width(holder, 0, 0);
                 lv_obj_set_style_pad_all(holder, 0, 0);
                 lv_obj_set_style_clip_corner(holder, true, 0);
+                lv_obj_set_style_shadow_width(holder, 18, 0);
+                lv_obj_set_style_shadow_opa(holder, LV_OPA_40, 0);
+                lv_obj_set_style_shadow_color(holder, lv_color_hex(0x000000), 0);
+                lv_obj_set_style_shadow_ofs_y(holder, 6, 0);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
                 lv_image_set_src(img, def->avatar);
-                lv_obj_set_size(img, 84, 84);
-                lv_image_set_scale(img, (256 * 84) / 88);
+                lv_obj_set_size(img, ICON, ICON);
+                lv_image_set_scale(img, (256 * ICON) / 88);
                 lv_obj_center(img);
             } else {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
-                lv_obj_set_size(holder, 84, 84);
-                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 14);
-                lv_obj_set_style_radius(holder, 22, 0);
+                lv_obj_set_size(holder, ICON, ICON);
+                lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 10);
+                lv_obj_set_style_radius(holder, 26, 0);
                 lv_obj_set_style_bg_color(holder, lv_color_hex(def->tile_color), 0);
                 lv_obj_set_style_bg_opa(holder, def->enabled ? LV_OPA_COVER : LV_OPA_40, 0);
                 lv_obj_set_style_border_width(holder, 0, 0);
                 lv_obj_set_style_pad_all(holder, 0, 0);
+                lv_obj_set_style_shadow_width(holder, 18, 0);
+                lv_obj_set_style_shadow_opa(holder, LV_OPA_40, 0);
+                lv_obj_set_style_shadow_color(holder, lv_color_hex(0x000000), 0);
+                lv_obj_set_style_shadow_ofs_y(holder, 6, 0);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
-                lv_obj_t *sym = ui_label(holder, def->symbol, &lv_font_montserrat_28, lv_color_hex(0xFFFFFF));
+                lv_obj_t *sym = ui_label(holder, def->symbol, &lv_font_montserrat_28,
+                                         lv_color_hex(0xFFFFFF));
                 lv_obj_center(sym);
             }
             lv_obj_t *name = ui_label(tile_btn, def->name, &lv_font_cn_14,
                                       def->enabled ? UI_TEXT : UI_TEXT_DIM);
-            lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -12);
+            lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 128);
         }
     }
 
