@@ -305,7 +305,13 @@ void ui_launcher_build(void)
             lv_obj_add_event_cb(tile_btn, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
 
             const int ICON = 108;
+            /* 素材缺位时回退符号占位（assets/icons/ 自备图标体系） */
+            bool has_icon = false;
             if (def->avatar) {
+                FILE *f = fopen(def->avatar + (strncmp(def->avatar, "A:", 2) == 0 ? 2 : 0), "rb");
+                if (f) { fclose(f); has_icon = true; }
+            }
+            if (has_icon) {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
                 lv_obj_set_size(holder, ICON, ICON);
                 lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 10);
@@ -323,8 +329,12 @@ void ui_launcher_build(void)
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
                 lv_image_set_src(img, def->avatar);
+                /* 按源图实际宽度自适应缩放（88 头像/更大自备图标均可） */
+                lv_obj_update_layout(img);
+                int32_t src_w = lv_obj_get_width(img);
+                if (src_w <= 0) src_w = 88;
                 lv_obj_set_size(img, ICON, ICON);
-                lv_image_set_scale(img, (256 * ICON) / 88);
+                lv_image_set_scale(img, (256 * ICON) / src_w);
                 lv_obj_center(img);
             } else {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
