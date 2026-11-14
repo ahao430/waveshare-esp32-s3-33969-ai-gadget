@@ -1,8 +1,8 @@
 # 出厂系统架构审查：扩展原厂 vs 基于官方框架重建
 
-> 2026-11-14 设备到手实测后方向调整（用户拍板）：不再推倒重做出厂系统，
-> 保留原厂体验并扩展。本文是对微雪官方仓库的架构审查结论，回答
-> 「原厂固件扩展」还是「基于官方 BSP 重建并复刻原厂功能」。
+> 2026-11-14 设备到手实测后方向调整。**最终路线见 ADR-008：固件基线
+> 回到自研**——本文定位为交互范式与社区项目学习资料（esp-brookesia
+> 操作方式/架构设计 + 社区项目调研），不作框架基座。
 
 ## 1. 结论先行
 
@@ -18,10 +18,10 @@
 | LVGL 是否统一 Display Manager | ✅ 是。esp-brookesia 统一管理（Phone/Display/StatusBar/NavBar），BSP 提供 `bsp_display_lock/unlock` 与 LvLock 集成 |
 | 能否不改原厂应用添加新应用 | ✅ 原厂应用=出厂固件闭源；**但基于 esp-brookesia 重建的系统里，新应用=实现 `systems::phone::App` 子类 + Registry 注册，完全不触碰框架与其他应用** |
 
-**决策（ADR-007）**：采用「**基于官方公开框架重建原厂体验 + 应用扩展**」：
-esp-brookesia Phone 框架（Launcher/手势/任务列表现成）+ Waveshare BSP
-（硬件层现成）+ 我们的自研 apps 经 App::Registry 注册。出厂固件保留设备
-恢复用；我们不再维护"从零自研 Launcher"路线的固件仓库主体。
+**决策演进**：ADR-007 曾选"框架重建"；ADR-008（最终）改为**固件基线
+回到自研**，esp-brookesia 仅作交互范式学习对象——不引入框架依赖，
+自研 Launcher 按 esp-brookesia 的交互范式实现（四宫格/左右分页/上滑
+退出/任务列表/pause-resume 生命周期语义）。
 
 > **构建验证（2026-11-14）**：03_esp-brookesia 在本项目 IDF v6.0.3
 > 工具链下完整编译通过（1937 个编译单元，产出 esp-brookesia.bin），
@@ -62,6 +62,42 @@ class BigfishChatApp : public systems::phone::App {
   应用有官方参考实现
 - 应用 UI 可用 Squareline Studio 导出（官方模板即此流程），也可纯
   LVGL 手写
+
+## 6. 社区项目调研：QuotaFrame（eMUQI/QuotaFrame）
+
+**架构**：CodexBar CLI（桌面取数）→ Python Bridge → 加密 BLE（NUS，
+JSONL）→ ESP32 固件 → 屏幕显示；协议 `usage.v1` 只发用量百分比/
+重置时间/采样时间，**不传凭据**。与我们同款目标板（Waveshare AMOLED
+2.16 为首要 target）。
+
+**对订阅展示的可借鉴点**：
+
+1. **数据三态语义**：`ok / partial / unavailable`——"Bridge 取数失败
+   时继续发布最后有效数据，保留原始状态与 sampled_at；仅蓝牙断开或
+   从未取得有效数据时显示灰态"。对齐我们 Bridge 的 snapshot_cache
+   stale 语义，订阅页可升级为三态显示（有效数据常驻 + 灰态仅从未
+   有数据时）。
+2. **重置倒计时**：设备端卡片右上角实时倒计时（reset_at →
+   "xx:xx:xx 后重置"），比静态时间戳更直观——本仓库订阅页已落地。
+3. **字段范围最小化**：Bridge→设备只传 percent/reset/sampled_at，
+   凭据不出 Bridge——与 PLAN §19 安全边界一致。
+4. **组件化固件**：usage_core/usage_ble/usage_protocol/usage_panel_state
+   分组件——我们的 companion/input 服务按同样粒度拆分。
+5. **BLE（可选增量）**：NUS 传输 + ACK/seq/能力协商/boot_valid 启动
+   自检 + BLE OTA。我们 Bridge→设备走 WiFi HTTP（已实现，更简单），
+   BLE 桥留作无 Wi-Fi 场景的后续扩展。
+
+其余社区项目：Winamp 播放器（音乐 app UI/音频参考）、VibePulse/
+Clawdmeter/Codex Usage Display（通知与状态显示范式）——按需在对应
+应用开发时再调研。
+
+## 7. 配网策略（ADR-008 §3）
+
+- **主路径**：Web 二维码配置（后台页全屏大码，已实现于设置→网络与
+  连接）——小屏输入成本高，桌面/手机浏览器操作效率高。
+- **保留**：小屏 Wi-Fi 直连入口（原厂方式，适合无电脑场景）——
+  设置→网络与连接加"屏幕配网"项：设备起临时热点 + 软键盘/表单
+  （Phase 6 真机实现）。
 
 ## 4. 对现有仓库资产的影响
 

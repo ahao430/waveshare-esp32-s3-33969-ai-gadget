@@ -3,6 +3,7 @@
  * 数据一律来自 data_source（mock 或 Bridge，ADR-001）。
  */
 #include <stdint.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,8 @@
 static void register_apps(void);
 static void voice_demo_begin_cb(lv_timer_t *t);
 static void voice_demo_end_cb(lv_timer_t *t);
+static void quota_on_exit(void);
+static void quota_countdown_cb(lv_timer_t *t);
 
 void ui_init(void)
 {
@@ -104,6 +107,7 @@ static lv_obj_t *topbar_build(lv_obj_t *scr, const char *title)
 
 typedef struct {
     lv_obj_t *arc;
+    lv_timer_t *cd_timer;   /* 重置倒计时（1s 刷新，QuotaFrame 借鉴） */
     lv_obj_t *arc_lbl;    /* 剩余 x.yh（大字） */
     lv_obj_t *arc_sub;    /* 剩余可用 · 5小时窗口 */
     lv_obj_t *week_bar;
@@ -152,9 +156,15 @@ static void quota_update(int app_id)
     snprintf(buf, sizeof(buf), "重置 %s", tbuf);
     lv_label_set_text(r->week_reset, buf);
 
+    /* 5h 窗口重置倒计时（QuotaFrame 借鉴：相对时长比时间戳直观） */
     ui_fmt_hhmm(sub->reset_5h, tbuf, sizeof(tbuf));
-    snprintf(buf, sizeof(buf), "5 小时窗口重置于 %s", tbuf);
-    lv_label_set_text(r->reset_lbl, buf);
+    {
+        long now = (long)time(NULL);
+        long remain = sub->reset_5h > now ? sub->reset_5h - now : 0;
+        snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld 后重置（%s）",
+                 remain / 3600, (remain % 3600) / 60, remain % 60, tbuf);
+        lv_label_set_text(r->reset_lbl, buf);
+    }
 
     ui_fmt_hhmm(s->updated_unix, tbuf, sizeof(tbuf));
     snprintf(buf, sizeof(buf), "更新于 %s · 来源 %s", tbuf, ds_source_name());
@@ -422,6 +432,34 @@ static void quota_build(lv_obj_t *scr, int app_id)
     }
 
     quota_update(app_id);
+
+    /* 重置倒计时 1s 刷新（页面销毁时由 on_exit 清理） */
+    r->cd_timer = lv_timer_create(quota_countdown_cb, 1000, r);
+}
+
+/* 倒计时 tick：仅重算 reset_lbl 文本 */
+static void quota_countdown_cb(lv_timer_t *t)
+{
+    quota_refs_t *r = (quota_refs_t *)lv_timer_get_user_data(t);
+    if (!r || !r->reset_lbl) return;
+    const gadget_state_t *s = ds_state();
+    if (r->sub_idx >= s->sub_count) return;
+    const ds_subscription_t *sub = &s->subs[r->sub_idx];
+    char buf[96], tbuf[20];
+    ui_fmt_hhmm(sub->reset_5h, tbuf, sizeof(tbuf));
+    long now = (long)time(NULL);
+    long remain = sub->reset_5h > now ? sub->reset_5h - now : 0;
+    snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld 后重置（%s）",
+             remain / 3600, (remain % 3600) / 60, remain % 60, tbuf);
+    lv_label_set_text(r->reset_lbl, buf);
+}
+
+static void quota_on_exit(void)
+{
+    if (g_q.cd_timer) {
+        lv_timer_delete(g_q.cd_timer);
+        g_q.cd_timer = NULL;
+    }
 }
 
 /* ---------------- 占位页 ---------------- */
@@ -478,7 +516,7 @@ static void register_apps(void)
         { UI_APP_CHAT,     "大肥鱼",  NULL,                 0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_XIAOZHI,  "小智",    NULL,                 0,        "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_MUSIC,    "音乐",    LV_SYMBOL_AUDIO,      0xFF4D6D, NULL,                                            false, placeholder_build,     NULL },
-        { UI_APP_ZHIPU,    "订阅",    LV_SYMBOL_CHARGE,     0x2EC4B6, NULL,                                            true,  quota_build,           NULL },
+        { UI_APP_ZHIPU,    "订阅",    LV_SYMBOL_CHARGE,     0x2EC4B6, NULL,                                            true,  quota_build,           quota_on_exit },
         { UI_APP_ZCODE,    "ZCode",   LV_SYMBOL_KEYBOARD,   0x3A6FF7, NULL,                                            true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_WEATHER,  "天气",    LV_SYMBOL_TINT,        0x4F8CFF, NULL,                                            false, placeholder_build,     NULL },
         { UI_APP_MONITOR,  "服务器",  LV_SYMBOL_EYE_OPEN,   0x9B5DE5, NULL,                                            true,  ui_monitor_build,      NULL },

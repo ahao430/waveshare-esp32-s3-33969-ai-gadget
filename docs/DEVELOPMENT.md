@@ -360,6 +360,17 @@ Simulator 协议资产不变。PLAN 顶部加 v1.2 修订块（自研 Launcher �
 遍历安装）→ BSP idf_component.yml 依赖链核对（修正社区 issue 的
 "BSP 拉入 XiaoZhi"误传）→ 03 示例 IDF v6.0.3 构建验证。
 
+## 固件路线定稿与 QuotaFrame 落地（2026-11-14 第九批）
+
+ADR-008（修订 ADR-007）：固件基线**回到自研**，esp-brookesia/出厂
+系统仅作交互范式学习（四宫格/上滑退出/任务列表/pause-resume 语义）。
+新增决策：三顶部按键短按/长按（PWR 长按开关机=PMU 硬件不动；短按
+息屏切换；KEY3 返回/长按 PTT；BOOT 回桌面/长按配网）→
+POWER_MANAGEMENT §13.4；配网 Web 二维码为主 + 小屏 Wi-Fi 保留。
+QuotaFrame 调研（FACTORY_REVIEW §6）：usage.v1 三态语义/倒计时/组件化
+借鉴；订阅页已落地**重置倒计时**（1s timer 动态"X:XX:XX 后重置
+（HH:MM）"，quota_on_exit 清理）。
+
 ## 电源管理方案文档（2026-11-14 第六批）：POWER_MANAGEMENT.md 落库
 
 用户提供电源优化与电源管理完整方案 V1.0 → `docs/POWER_MANAGEMENT.md`
