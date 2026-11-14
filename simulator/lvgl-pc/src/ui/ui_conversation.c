@@ -19,6 +19,7 @@
 
 #include "app_manager.h"
 #include "audio_mock.h"
+
 #include "companion.h"
 #include "data_source.h"
 #include "voice_session.h"
@@ -243,8 +244,10 @@ static void poll_timer_cb(lv_timer_t *t)
             if (h > 12) h += (int)(6 * (0.5 + 0.5 * sin(i * 0.7 + (double)disp / 6)));
             if (h < 4) h = 4;
             lv_obj_set_size(g_wave[i], 6, h);
+            int side = i < WAVE_BARS_MAX / 2 ? -1 : 1;
+            int idx = i < WAVE_BARS_MAX / 2 ? i : i - WAVE_BARS_MAX / 2;
             lv_obj_align(g_wave[i], LV_ALIGN_BOTTOM_MID,
-                     -((WAVE_BARS_MAX / 2) * 8) + i * 8, 122);
+                         side * (60 + idx * 9), -108);
             lv_obj_set_style_bg_opa(g_wave[i],
                                     vs_state() == VS_LISTENING ? LV_OPA_COVER : LV_OPA_30, 0);
         }
@@ -322,6 +325,31 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         return;
     }
 
+    /* 顶栏：头像 + 标题 + 在线状态（定稿图对齐） */
+    static const char *avatar_paths[UI_APP_COUNT] = {
+        [UI_APP_CHAT]    = "A:simulator/lvgl-pc/assets/avatars/chat.png",
+        [UI_APP_MUSE]    = "A:simulator/lvgl-pc/assets/avatars/muse.png",
+        [UI_APP_XIAOZHI] = "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png",
+    };
+    if (avatar_paths[app_id]) {
+        lv_obj_t *avatar = lv_image_create(scr);
+        lv_image_set_src(avatar, avatar_paths[app_id]);
+        lv_obj_set_size(avatar, 44, 44);
+        lv_obj_align(avatar, LV_ALIGN_TOP_LEFT, 64, 0);
+        lv_obj_set_style_radius(avatar, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_clip_corner(avatar, true, 0);
+    }
+
+    lv_obj_t *online_dot = lv_obj_create(scr);
+    lv_obj_set_size(online_dot, 8, 8);
+    lv_obj_set_style_radius(online_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(online_dot, UI_OK, 0);
+    lv_obj_set_style_bg_opa(online_dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(online_dot, 0, 0);
+    lv_obj_align(online_dot, LV_ALIGN_TOP_MID, -28, 38);
+    lv_obj_t *online = ui_label(scr, "在线", &lv_font_cn_12, UI_OK);
+    lv_obj_align(online, LV_ALIGN_TOP_MID, 0, 34);
+
     lv_obj_t *title_lbl = ui_label(scr, g_meta[app_id].title, &lv_font_cn_20, UI_TEXT);
     lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
 
@@ -347,48 +375,58 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     companion_create(scr, app_id, 80);
 
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 296);
+    lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 262);
 
     g_reply_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(g_reply_lbl, LV_ALIGN_TOP_MID, 0, 318);
+    lv_obj_align(g_reply_lbl, LV_ALIGN_TOP_MID, 0, 284);
     lv_label_set_long_mode(g_reply_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(g_reply_lbl, 440);
     lv_label_set_long_mode(g_reply_lbl, LV_LABEL_LONG_DOT);
 
-    /* 波形（状态行左右两侧，各 16 条） */
+    /* 波形：麦克风两侧（左 12 / 右 12，定稿图对齐） */
     for (int i = 0; i < WAVE_BARS_MAX; i++) {
         lv_obj_t *bar = lv_obj_create(scr);
-        lv_obj_set_size(bar, 6, 4);
+        lv_obj_set_size(bar, 6, 8);
         lv_obj_set_style_bg_color(bar, UI_ACCENT2, 0);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_30, 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_70, 0);
         lv_obj_set_style_radius(bar, 3, 0);
         lv_obj_set_style_border_width(bar, 0, 0);
         lv_obj_set_style_shadow_width(bar, 0, 0);
         lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, -((WAVE_BARS_MAX / 2) * 8) + i * 8, 122);
+        int side = i < WAVE_BARS_MAX / 2 ? -1 : 1;
+        int idx = i < WAVE_BARS_MAX / 2 ? i : i - WAVE_BARS_MAX / 2;
+        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID,
+                     side * (60 + idx * 9), -108);
         g_wave[i] = bar;
     }
 
-    /* PTT */
+    /* 底部交互区（定稿图）：中央麦克风圆按钮（按住说话）+ 左右波形 */
     g_ptt_btn = lv_button_create(scr);
-    lv_obj_set_size(g_ptt_btn, LV_PCT(100) - 16, 52);
-    lv_obj_align(g_ptt_btn, LV_ALIGN_BOTTOM_MID, 0, 8);
-    ui_style_card(g_ptt_btn);
+    lv_obj_set_size(g_ptt_btn, 96, 96);
+    lv_obj_align(g_ptt_btn, LV_ALIGN_BOTTOM_MID, 0, -22);
+    lv_obj_set_style_radius(g_ptt_btn, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(g_ptt_btn, g_voice_enabled ? UI_ACCENT : UI_CARD, 0);
-    lv_obj_set_style_radius(g_ptt_btn, 16, 0);
+    lv_obj_set_style_bg_opa(g_ptt_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_ptt_btn, 0, 0);
+    lv_obj_set_style_shadow_width(g_ptt_btn, 0, 0);
     if (g_voice_enabled) {
         lv_obj_add_event_cb(g_ptt_btn, ptt_pressed_cb, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(g_ptt_btn, ptt_released_cb, LV_EVENT_RELEASED, NULL);
     }
-    lv_obj_t *ptt_lbl = ui_label(g_ptt_btn,
-                                 g_voice_enabled ? "按住说话" : "语音对话 · 等待数据源",
-                                 &lv_font_cn_16, g_voice_enabled ? UI_TEXT : UI_TEXT_DIM);
-    lv_obj_center(ptt_lbl);
+    lv_obj_t *mic = ui_label(g_ptt_btn, LV_SYMBOL_AUDIO, &lv_font_montserrat_28,
+                             g_voice_enabled ? UI_TEXT : UI_TEXT_DIM);
+    lv_obj_center(mic);
+
+    if (!g_voice_enabled) {
+        lv_obj_t *hint = ui_label(scr, "语音对话 · 等待数据源（PLAN §5.7）",
+                                  &lv_font_cn_12, UI_TEXT_DIM);
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, 6);
+    }
 
     if (!g_voice_enabled) {
         lv_obj_t *hint = ui_label(scr, "ZCode 数据源待接入（PLAN §5.7）",
                                   &lv_font_cn_12, UI_TEXT_DIM);
-        lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 296);
+        lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 262);
         lv_obj_set_style_text_color(hint, UI_TEXT_DIM, 0);
         lv_obj_del(g_status_lbl);
         g_status_lbl = NULL;
