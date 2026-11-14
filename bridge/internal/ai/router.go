@@ -22,10 +22,13 @@ import (
 // Upstream 是一个可路由的对话端点：OpenAI 兼容（透传）或 AstrBot
 // 机器人实例（Bridge 做 SSE 格式适配，见 astrbot.go）。
 type Upstream struct {
-	ID      string // 路由前缀（bot 实例为订阅实例 id）
-	BaseURL string
-	APIKey  string
-	Kind    string // ""（OpenAI 兼容）| "astrbot"
+	ID       string // 路由前缀（bot 实例 id）
+	BaseURL  string
+	APIKey   string
+	Kind     string // ""（OpenAI 兼容）| "astrbot"
+	ConfigID string // AstrBot 配置文件（人设/模型套餐；可选）
+	Provider string // AstrBot provider id 覆盖（可选）
+	Model    string // AstrBot 模型名覆盖（可选）
 }
 
 // Router 选择 upstream 并代理请求。

@@ -23,9 +23,9 @@ func loadFixture(t *testing.T, name string) []byte {
 
 // newTestServer 起 httptest 服务，按 path 返回 fixture 内容与状态码。
 type resp struct {
-	path     string
-	body     string
-	status   int
+	path   string
+	body   string
+	status int
 }
 
 func newTestServer(t *testing.T, resps ...resp) *httptest.Server {
@@ -148,8 +148,8 @@ func TestNormalizeResetMs(t *testing.T) {
 		want int64
 	}{
 		{1767223200000, 1767223200}, // 毫秒
-		{1767223200, 1767223200},     // 秒
-		{0, 0},                       // 缺失
+		{1767223200, 1767223200},    // 秒
+		{0, 0},                      // 缺失
 	}
 	for _, c := range cases {
 		if got := normalizeResetMs(c.in); got != c.want {

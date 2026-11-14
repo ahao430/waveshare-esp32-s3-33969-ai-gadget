@@ -14,7 +14,7 @@ func NewMockSource() *MockSource { return &MockSource{} }
 func (m *MockSource) Name() string { return "mock" }
 
 type mockServerSpec struct {
-	name string
+	name     string
 	baseLoad float64
 }
 

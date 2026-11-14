@@ -28,10 +28,10 @@ const (
 
 // quotaLimitPath 与 subscriptionPath 是 C 级社区观察接口。
 const (
-	quotaLimitPath    = "/api/monitor/usage/quota/limit"
-	subscriptionPath  = "/api/biz/subscription/list"
-	requestTimeout    = 10 * time.Second
-	maxResponseBytes  = 1 << 20 // 1MB 上限，防御异常响应
+	quotaLimitPath   = "/api/monitor/usage/quota/limit"
+	subscriptionPath = "/api/biz/subscription/list"
+	requestTimeout   = 10 * time.Second
+	maxResponseBytes = 1 << 20 // 1MB 上限，防御异常响应
 )
 
 // Provider 是智谱额度 Provider。
@@ -134,8 +134,8 @@ func (p *Provider) get(ctx context.Context, apiKey, path string) ([]byte, error)
 
 // rawEnvelope 是所有智谱接口的公共外壳。
 type rawEnvelope struct {
-	Code any    `json:"code"` // 可能是 number 或 string，宽松处理
-	Msg  string `json:"msg,omitempty"`
+	Code any             `json:"code"` // 可能是 number 或 string，宽松处理
+	Msg  string          `json:"msg,omitempty"`
 	Data json.RawMessage `json:"data,omitempty"`
 }
 
@@ -155,6 +155,7 @@ func envelopeOK(env rawEnvelope) bool {
 //   - TOKENS_LIMIT + unit=3,number=5  → 5 小时窗口
 //   - TOKENS_LIMIT + unit=6,number=1  → 每周窗口
 //   - TIME_LIMIT                      → 工具/时间额度（独立窗口，不与 Token 窗口混算）
+//
 // 其余组合保留原始 unit/number 到 SourceField，标记为未分类。
 func parseQuotaResponse(body []byte) ([]quota.QuotaWindow, string, error) {
 	var env rawEnvelope
@@ -170,8 +171,8 @@ func parseQuotaResponse(body []byte) ([]quota.QuotaWindow, string, error) {
 			Type          string   `json:"type"`
 			Unit          int      `json:"unit"`
 			Number        int      `json:"number"`
-			Percentage    *float64 `json:"percentage"`     // 已使用百分比（非剩余）
-			NextResetTime int64    `json:"nextResetTime"`  // Unix 毫秒（社区记录）
+			Percentage    *float64 `json:"percentage"`    // 已使用百分比（非剩余）
+			NextResetTime int64    `json:"nextResetTime"` // Unix 毫秒（社区记录）
 		} `json:"limits"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil {

@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -36,12 +37,7 @@ func serveAstrBotChat(w http.ResponseWriter, body []byte, u Upstream, clientGone
 	}
 
 	// 2) 构造 AstrBot 请求
-	payload, err := json.Marshal(map[string]any{
-		"message":          msg,
-		"username":         astrbotUsername,
-		"session_id":       "gadget-bigfish-" + u.ID,
-		"enable_streaming": true,
-	})
+	payload, err := json.Marshal(astrbotPayload(msg, u))
 	if err != nil {
 		return err
 	}
@@ -180,6 +176,31 @@ func lastUserContent(body []byte) string {
 }
 
 // astrbotComplete 非流式：收齐 SSE 全文后返回（voice 链路用）。
+// astrbotPayload 组装 /api/v1/chat 请求体：
+//   - config_id 始终携带（配置文件=人设/模型套餐，粘滞在会话上；显式发
+//     "default" 才会把已改过的会话路由重置回默认——保证 Web 端改动即时生效）
+//   - selected_provider/selected_model 仅在配置了覆盖时携带（单次请求生效）
+func astrbotPayload(message string, u Upstream) map[string]any {
+	cfg := u.ConfigID
+	if cfg == "" {
+		cfg = "default"
+	}
+	p := map[string]any{
+		"message":          message,
+		"username":         astrbotUsername,
+		"session_id":       "gadget-bigfish-" + u.ID,
+		"config_id":        cfg,
+		"enable_streaming": true,
+	}
+	if u.Provider != "" {
+		p["selected_provider"] = u.Provider
+	}
+	if u.Model != "" {
+		p["selected_model"] = u.Model
+	}
+	return p
+}
+
 func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (string, error) {
 	msg := ""
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -191,12 +212,7 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 	if msg == "" {
 		msg = "你好"
 	}
-	payload, err := json.Marshal(map[string]any{
-		"message":          msg,
-		"username":         astrbotUsername,
-		"session_id":       "gadget-bigfish-" + u.ID,
-		"enable_streaming": true,
-	})
+	payload, err := json.Marshal(astrbotPayload(msg, u))
 	if err != nil {
 		return "", err
 	}
@@ -239,9 +255,10 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 
 // ProbeAstrBot 连通性测试（Web 后台"测试"按钮）：发一条 ping 并取回
 // 首段回复。只返回截断文本与脱敏错误码，不带 URL/token。
-func ProbeAstrBot(ctx context.Context, id, baseURL, token string) (string, error) {
+func ProbeAstrBot(ctx context.Context, id, baseURL, token, configID, provider, model string) (string, error) {
 	reply, err := astrbotComplete(ctx, Upstream{
 		ID: id, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
+		ConfigID: configID, Provider: provider, Model: model,
 	}, []ChatMessage{{Role: "user", Content: "ping（连通性测试，请回复 pong）"}})
 	if err != nil {
 		return "", err
@@ -251,4 +268,52 @@ func ProbeAstrBot(ctx context.Context, id, baseURL, token string) (string, error
 		r = r[:60]
 	}
 	return string(r), nil
+}
+
+// AstrBotConfig AstrBot 配置文件摘要（人设/模型套餐）。
+type AstrBotConfig struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	IsDefault bool   `json:"is_default"`
+}
+
+// FetchAstrBotConfigs 拉取配置文件列表（GET {base}/api/v1/chat/configs，
+// 需 config scope；403 时返回可读提示）。
+func FetchAstrBotConfigs(ctx context.Context, baseURL, token string) ([]AstrBotConfig, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		strings.TrimRight(baseURL, "/")+"/api/v1/chat/configs", nil)
+	if err != nil {
+		return nil, fmt.Errorf("bad_base_url")
+	}
+	req.Header.Set("Accept", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch_failed")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("403：API Key 需勾选 config 权限（设置→OpenAPI→编辑 Key）")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("http_%d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, fmt.Errorf("read_failed")
+	}
+	var wrapped struct {
+		Configs []AstrBotConfig `json:"configs"`
+		Data    []AstrBotConfig `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err != nil || (wrapped.Configs == nil && wrapped.Data == nil) {
+		return nil, fmt.Errorf("unsupported_response")
+	}
+	out := wrapped.Configs
+	if out == nil {
+		out = wrapped.Data
+	}
+	return out, nil
 }

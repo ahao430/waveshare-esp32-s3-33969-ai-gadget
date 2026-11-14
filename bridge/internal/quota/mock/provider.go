@@ -34,8 +34,8 @@ func (p *Provider) FetchQuota(ctx context.Context, account quota.AccountRef) (*q
 	// 以分钟为粒度的时间伪随机，避免每次请求剧烈跳变。
 	seed := now.Unix() / 60
 
-	used5h := float64(seed%73 + 5)            // 5~77%
-	usedWeek := float64((seed/7)%61 + 10)     // 10~70%
+	used5h := float64(seed%73 + 5)        // 5~77%
+	usedWeek := float64((seed/7)%61 + 10) // 10~70%
 	reset5h := now.Add(time.Duration(25+seed%180) * time.Minute)
 	resetWeek := now.Add(time.Duration(30+seed%300) * time.Hour)
 

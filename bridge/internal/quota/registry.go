@@ -41,8 +41,8 @@ func (r *Registry) Get(id string) (QuotaProvider, bool) {
 
 // InfoEntry 是 /api/v1/quota/providers 的条目。
 type InfoEntry struct {
-	ID           string              `json:"id"`
-	DisplayName  string              `json:"display_name"`
+	ID           string               `json:"id"`
+	DisplayName  string               `json:"display_name"`
 	Capabilities ProviderCapabilities `json:"capabilities"`
 }
 

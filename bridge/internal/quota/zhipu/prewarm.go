@@ -20,9 +20,9 @@ import (
 //   - 预热 ≠ 重置 5 小时窗口；UI 必须按供应商真实窗口规则解释，
 //     本服务只报告观测到的前后变化，不做任何"重置"承诺。
 const (
-	prewarmCooldown   = 10 * time.Minute // 两次预热最小间隔
-	prewarmIdemTTL    = 15 * time.Minute // 幂等 Key 记忆时长
-	prewarmWeeklyMax  = 95.0             // 周额度已用 ≥95% 时拒绝预热
+	prewarmCooldown    = 10 * time.Minute // 两次预热最小间隔
+	prewarmIdemTTL     = 15 * time.Minute // 幂等 Key 记忆时长
+	prewarmWeeklyMax   = 95.0             // 周额度已用 ≥95% 时拒绝预热
 	prewarmHTTPTimeout = 15 * time.Second
 )
 
@@ -30,25 +30,25 @@ const (
 type PrewarmStatus string
 
 const (
-	PrewarmExecuted      PrewarmStatus = "executed"        // 轻量请求已发出
-	PrewarmFailed        PrewarmStatus = "failed"          // 请求发出但失败；before 已记录
-	PrewarmSkippedLow    PrewarmStatus = "skipped_low_quota" // 周额度保护，未发请求
-	PrewarmSkippedCool   PrewarmStatus = "skipped_cooldown"  // 冷却中，未发请求
-	PrewarmDuplicate     PrewarmStatus = "duplicate"       // 幂等命中，返回上次结果
+	PrewarmExecuted    PrewarmStatus = "executed"          // 轻量请求已发出
+	PrewarmFailed      PrewarmStatus = "failed"            // 请求发出但失败；before 已记录
+	PrewarmSkippedLow  PrewarmStatus = "skipped_low_quota" // 周额度保护，未发请求
+	PrewarmSkippedCool PrewarmStatus = "skipped_cooldown"  // 冷却中，未发请求
+	PrewarmDuplicate   PrewarmStatus = "duplicate"         // 幂等命中，返回上次结果
 )
 
 // PrewarmResult 一次预热的完整记录（含前后快照）。
 type PrewarmResult struct {
-	IdempotencyKey string          `json:"idempotency_key"`
-	Status         PrewarmStatus   `json:"status"`
-	Message        string          `json:"message,omitempty"`
-	Model          string          `json:"model,omitempty"`
-	LightHTTPStatus int            `json:"light_http_status,omitempty"` // 轻量请求 HTTP 码
-	DurationMS     int64           `json:"duration_ms,omitempty"`
-	CooldownRemainS int64          `json:"cooldown_remain_s,omitempty"` // skipped_cooldown 时给出
-	Before         *quota.QuotaSnapshot `json:"before,omitempty"`
-	After          *quota.QuotaSnapshot  `json:"after,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	IdempotencyKey  string               `json:"idempotency_key"`
+	Status          PrewarmStatus        `json:"status"`
+	Message         string               `json:"message,omitempty"`
+	Model           string               `json:"model,omitempty"`
+	LightHTTPStatus int                  `json:"light_http_status,omitempty"` // 轻量请求 HTTP 码
+	DurationMS      int64                `json:"duration_ms,omitempty"`
+	CooldownRemainS int64                `json:"cooldown_remain_s,omitempty"` // skipped_cooldown 时给出
+	Before          *quota.QuotaSnapshot `json:"before,omitempty"`
+	After           *quota.QuotaSnapshot `json:"after,omitempty"`
+	CreatedAt       time.Time            `json:"created_at"`
 }
 
 // LightRequester 发起轻量模型请求；生产与测试各自注入。
@@ -61,9 +61,9 @@ type Prewarmer struct {
 	model    string                  // 轻量请求模型（env 可配）
 	light    LightRequester
 
-	mu      sync.Mutex
-	lastAt  time.Time
-	idem    map[string]*PrewarmResult
+	mu     sync.Mutex
+	lastAt time.Time
+	idem   map[string]*PrewarmResult
 }
 
 // NewPrewarmer 创建预热服务。model 传空串时用默认（注意：模型名随

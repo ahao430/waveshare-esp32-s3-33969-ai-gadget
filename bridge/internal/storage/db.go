@@ -41,6 +41,9 @@ CREATE TABLE IF NOT EXISTS bots (          -- 大肥鱼机器人（AstrBot 实�
     label       TEXT NOT NULL,
     base_url    TEXT NOT NULL,             -- AstrBot 部署地址
     encrypted   TEXT NOT NULL DEFAULT '',  -- abk_ token（加密；空=无鉴权）
+    config_id   TEXT NOT NULL DEFAULT '',  -- AstrBot 配置文件（人设/模型套餐）
+    provider    TEXT NOT NULL DEFAULT '',  -- 覆盖 provider id（可选）
+    model       TEXT NOT NULL DEFAULT '',  -- 覆盖模型名（可选）
     updated_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS app_settings (  -- 应用配置 KV（zcode/monitor/keys）
@@ -78,6 +81,9 @@ func Open(path string) (*DB, error) {
 		sqlDB.Close()
 		return nil, fmt.Errorf("storage: migrate astrbot->bots: %w", err)
 	}
+	ensureColumn(sqlDB, "bots", "config_id", "TEXT NOT NULL DEFAULT ''")
+	ensureColumn(sqlDB, "bots", "provider", "TEXT NOT NULL DEFAULT ''")
+	ensureColumn(sqlDB, "bots", "model", "TEXT NOT NULL DEFAULT ''")
 	return &DB{sql: sqlDB}, nil
 }
 
@@ -139,6 +145,14 @@ func migrateAstrBotToBots(sqlDB *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// ensureColumn 旧库补列（列已存在时报错忽略；幂等）。
+func ensureColumn(sqlDB *sql.DB, table, column, decl string) {
+	_, err := sqlDB.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	if err != nil {
+		return // duplicate column 等——已存在即达成目的
+	}
 }
 
 // LoadAll 恢复全部缓存快照。损坏的行跳过并计入 errors（不整体失败）。

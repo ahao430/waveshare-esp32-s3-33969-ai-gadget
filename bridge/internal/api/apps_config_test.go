@@ -6,6 +6,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -92,8 +93,19 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 	mk := newTestMasterKey(t)
 	srv, _ := newConfigServer(t, mk)
 
-	// 假 AstrBot：校验 Bearer + 返回 SSE 片段
+	var lastChatBody map[string]any
+	// 假 AstrBot：校验 Bearer + 返回 SSE 片段；记录请求体供 config 断言
 	bot := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/chat/configs" {
+			if r.Header.Get("Authorization") != "Bearer abk-test" {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			_, _ = w.Write([]byte(`{"status":"ok","configs":[
+				{"id":"default","name":"默认配置","is_default":true},
+				{"id":"conf-maid","name":"女仆人设","is_default":false}]}`))
+			return
+		}
 		if r.URL.Path != "/api/v1/chat" {
 			http.NotFound(w, r)
 			return
@@ -102,14 +114,17 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 			http.Error(w, "unauthorized", 401)
 			return
 		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &lastChatBody)
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"result\":\"pong\"}\n\n"))
 	}))
 	t.Cleanup(bot.Close)
 
-	// 空 → 有
+	// 空 → 有（带配置文件 + 模型覆盖）
 	code, out := doJSON(t, "POST", srv.URL+"/api/v1/bots",
-		`{"label":"客厅机器人","base_url":"`+bot.URL+`","token":"abk-test"}`)
+		`{"label":"客厅机器人","base_url":"`+bot.URL+`","token":"abk-test",
+		  "config_id":"conf-maid","provider":"openai","model":"gpt-4o"}`)
 	if code != 200 {
 		t.Fatalf("create bot: %d %v", code, out)
 	}
@@ -134,10 +149,35 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 		t.Fatal("token 不得回显")
 	}
 
-	// probe（用已保存 id；假服务验证凭据链路）
+	// 配置文件列表代理（Key 正确 → 两个配置）
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/configs", `{"id":"`+id+`"}`)
+	if code != 200 || out["ok"] != true {
+		t.Fatalf("configs: %d %v", code, out)
+	}
+	if cfgs, _ := out["configs"].([]any); len(cfgs) != 2 {
+		t.Fatalf("want 2 configs, got %v", out["configs"])
+	}
+
+	// probe（用已保存 id；假服务验证凭据链路 + config/provider/model 传递）
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe", `{"id":"`+id+`"}`)
 	if code != 200 || out["ok"] != true || !strings.Contains(out["reply"].(string), "pong") {
 		t.Fatalf("probe: %d %v", code, out)
+	}
+	if lastChatBody["config_id"] != "conf-maid" ||
+		lastChatBody["selected_provider"] != "openai" ||
+		lastChatBody["selected_model"] != "gpt-4o" {
+		t.Fatalf("chat payload missing overrides: %v", lastChatBody)
+	}
+
+	// 编辑（不带 token 字段=保留原 Token；probe 仍应鉴权通过）
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots",
+		`{"id":"`+id+`","label":"客厅机器人改名","base_url":"`+bot.URL+`","config_id":"conf-maid"}`)
+	if code != 200 {
+		t.Fatalf("edit: %d %v", code, out)
+	}
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe", `{"id":"`+id+`"}`)
+	if code != 200 || out["ok"] != true {
+		t.Fatalf("probe after edit (token kept): %d %v", code, out)
 	}
 
 	// 错误 token 的 probe → ok=false
@@ -145,6 +185,17 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 		`{"base_url":"`+bot.URL+`","token":"abk-wrong"}`)
 	if code != 200 || out["ok"] != false {
 		t.Fatalf("probe should fail: %d %v", code, out)
+	}
+
+	// 配置列表 403 → 明确提示 config scope
+	bot2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "forbidden", 403)
+	}))
+	t.Cleanup(bot2.Close)
+	_, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/configs",
+		`{"base_url":"`+bot2.URL+`"}`)
+	if out["ok"] != false || !strings.Contains(out["error"].(string), "config") {
+		t.Fatalf("403 hint wrong: %v", out)
 	}
 
 	// 删除幂等

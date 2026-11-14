@@ -221,12 +221,13 @@ func main() {
 		}
 		var bots []ai.Upstream
 		for _, b := range list {
-			_, baseURL, token, err := db.GetBot(b.ID, masterKey)
+			_, baseURL, token, cfg, prov, model, err := db.GetBot(b.ID, masterKey)
 			if err != nil {
 				continue
 			}
 			bots = append(bots, ai.Upstream{
 				ID: b.ID, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
+				ConfigID: cfg, Provider: prov, Model: model,
 			})
 		}
 		return bots

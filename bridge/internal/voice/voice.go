@@ -26,7 +26,7 @@ import (
 
 // 音频约定（PLAN §11.1：16kHz 16bit 单声道）。
 const (
-	sampleRate = 16000
+	sampleRate    = 16000
 	maxAudioBytes = 1 << 20 // 1MB ≈ 32s@16k16bit 单声道
 )
 
@@ -97,10 +97,10 @@ func (m *MockInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	}
 	// 每字符 120ms 440Hz 短音（字符间 40ms 间隙），首尾 100ms 静音。
 	const (
-		charDurMs    = 120
-		gapMs        = 40
-		marginMs     = 100
-		toneFreqHz   = 440.0
+		charDurMs  = 120
+		gapMs      = 40
+		marginMs   = 100
+		toneFreqHz = 440.0
 	)
 	chars := len([]rune(text))
 	if chars == 0 {
@@ -133,13 +133,13 @@ func wrapWav(pcm []int16) []byte {
 	binary.LittleEndian.PutUint32(buf[4:], uint32(36+dataLen))
 	copy(buf[8:], "WAVE")
 	copy(buf[12:], "fmt ")
-	binary.LittleEndian.PutUint32(buf[16:], 16)                     // fmt chunk 大小
-	binary.LittleEndian.PutUint16(buf[20:], 1)                      // PCM
-	binary.LittleEndian.PutUint16(buf[22:], 1)                      // mono
-	binary.LittleEndian.PutUint32(buf[24:], sampleRate)             // 16k
-	binary.LittleEndian.PutUint32(buf[28:], sampleRate*2)           // byte rate
-	binary.LittleEndian.PutUint16(buf[32:], 2)                      // block align
-	binary.LittleEndian.PutUint16(buf[34:], 16)                     // bits
+	binary.LittleEndian.PutUint32(buf[16:], 16)           // fmt chunk 大小
+	binary.LittleEndian.PutUint16(buf[20:], 1)            // PCM
+	binary.LittleEndian.PutUint16(buf[22:], 1)            // mono
+	binary.LittleEndian.PutUint32(buf[24:], sampleRate)   // 16k
+	binary.LittleEndian.PutUint32(buf[28:], sampleRate*2) // byte rate
+	binary.LittleEndian.PutUint16(buf[32:], 2)            // block align
+	binary.LittleEndian.PutUint16(buf[34:], 16)           // bits
 	copy(buf[36:], "data")
 	binary.LittleEndian.PutUint32(buf[40:], uint32(dataLen))
 	for i, v := range pcm {

@@ -44,9 +44,9 @@ func (d *DB) DeleteSetting(key string) error {
 
 // 常用配置键。
 const (
-	SettingKeyZCode   = "zcode"   // ZCode 远程 {base_url, enc_token}
-	SettingKeyMonitor = "monitor" // Komari 监控 {base_url, enc_token}
-	SettingKeyKeys    = "keys"    // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
-	SettingKeyWeather = "weather" // 天气 {mode: auto|manual, city}
+	SettingKeyZCode    = "zcode"    // ZCode 远程 {base_url, enc_token}
+	SettingKeyMonitor  = "monitor"  // Komari 监控 {base_url, enc_token}
+	SettingKeyKeys     = "keys"     // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
+	SettingKeyWeather  = "weather"  // 天气 {mode: auto|manual, city}
 	SettingKeyLauncher = "launcher" // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
 )

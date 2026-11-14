@@ -24,15 +24,15 @@ var ErrUnsupportedResponse = errors.New("unsupported_response")
 
 // Server 是一台被监控服务器的摘要（PLAN §5.8 展示字段）。
 type Server struct {
-	UUID     string    `json:"uuid"`
-	Name     string    `json:"name"`
-	Online   bool      `json:"online"`
-	CPUPct   *float64  `json:"cpu_pct,omitempty"`   // 0~100；nil=未提供
-	MemPct   *float64  `json:"mem_pct,omitempty"`   // 0~100
-	DiskPct  *float64  `json:"disk_pct,omitempty"`  // 0~100
-	NetUpBps *int64    `json:"net_up_bps,omitempty"`   // 字节/秒
-	NetDownBps *int64  `json:"net_down_bps,omitempty"`
-	UptimeS  *int64    `json:"uptime_s,omitempty"`
+	UUID       string    `json:"uuid"`
+	Name       string    `json:"name"`
+	Online     bool      `json:"online"`
+	CPUPct     *float64  `json:"cpu_pct,omitempty"`    // 0~100；nil=未提供
+	MemPct     *float64  `json:"mem_pct,omitempty"`    // 0~100
+	DiskPct    *float64  `json:"disk_pct,omitempty"`   // 0~100
+	NetUpBps   *int64    `json:"net_up_bps,omitempty"` // 字节/秒
+	NetDownBps *int64    `json:"net_down_bps,omitempty"`
+	UptimeS    *int64    `json:"uptime_s,omitempty"`
 	LastReport time.Time `json:"last_report"`
 }
 

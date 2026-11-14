@@ -113,6 +113,7 @@
 | 语音崩溃修复 | ✅ | chunked 块 >8KB 写爆栈（read_chunked_body 分片）；GADGET_DEMO_VOICE 回归钩子 |
 | 官方教程索引 | ✅ | WAVESHARE_GUIDES.md（烧录/ESP-IDF/Arduino 对照） |
 | 重置倒计时 | ✅ | 订阅页 1s 动态倒计时（QuotaFrame 借鉴） |
+| 机器人选人设/模型（AstrBot） | ✅ | bots 表扩 config_id/provider/model（ALTER 迁移）；chat 请求始终带 config_id（default 重置粘滞路由）+ selected_provider/model 覆盖；/api/v1/bots/configs 代理拉配置文件列表（403→提示补 config 权限）；Web 表单下拉+编辑（token 缺省=保留） |
 | 主页排布（Web 配置） | ✅ | /api/v1/launcher（order=可见顺序，不在列表=隐藏；目录+校验）；设备 app_def_t 加 key、启动拉取重排；Web 排布页（↑↓/隐藏/恢复/分页预览）；e2e：设置提到第一+隐藏 3 个 → 桌面顺序与页点（2 页 2 点）像素验证 |
 | 天气 App 全链路 | ✅ | Open-Meteo 免 Key（IP 定位 ip-api/ipwho.is + 手动城市 Geocoding）；Bridge 缓存 10min+保温；Web 配置页（自动/手动）；ui_weather 页面（当前+5日）；字体重生成（°+天气字典+GB2312 一级字库治动态中文豆腐） |
 | 应用配置四域（机器人/ZCode/监控/按键） | ✅ | Bridge bots 表+app_settings（astrbot 订阅自动迁移）；/bots CRUD+probe、/zcode config+sessions、/monitor config+动态源、/keys；Web 四配置页；模拟器按键映射拉取+KEY3 长按 PTT（A/B 快照验证 Web 下发生效） |

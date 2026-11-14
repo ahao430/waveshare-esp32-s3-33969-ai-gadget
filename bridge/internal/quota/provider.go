@@ -70,14 +70,14 @@ type CreditBalance struct {
 
 // QuotaSnapshot 一次成功抓取的完整快照。
 type QuotaSnapshot struct {
-	ProviderID string           `json:"provider_id"`
-	AccountID  string           `json:"account_id"`
-	PlanName   string           `json:"plan_name,omitempty"`
-	FetchedAt  time.Time        `json:"fetched_at"`
-	Status     string           `json:"status"`
-	Windows    []QuotaWindow    `json:"windows"`
-	Credits    []CreditBalance  `json:"credits,omitempty"`
-	RawVersion string           `json:"raw_version,omitempty"`
+	ProviderID string          `json:"provider_id"`
+	AccountID  string          `json:"account_id"`
+	PlanName   string          `json:"plan_name,omitempty"`
+	FetchedAt  time.Time       `json:"fetched_at"`
+	Status     string          `json:"status"`
+	Windows    []QuotaWindow   `json:"windows"`
+	Credits    []CreditBalance `json:"credits,omitempty"`
+	RawVersion string          `json:"raw_version,omitempty"`
 }
 
 // Status 常量。

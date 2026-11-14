@@ -29,10 +29,13 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 
 	mux.HandleFunc("POST /api/v1/bots", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ID      string `json:"id"`
-			Label   string `json:"label"`
-			BaseURL string `json:"base_url"`
-			Token   string `json:"token"`
+			ID       string  `json:"id"`
+			Label    string  `json:"label"`
+			BaseURL  string  `json:"base_url"`
+			Token    *string `json:"token"` // nil=保留原值（编辑留空）；""=清除；非空=新值
+			ConfigID string  `json:"config_id"`
+			Provider string  `json:"provider"`
+			Model    string  `json:"model"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
@@ -46,7 +49,16 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		if id == "" {
 			id = "bot-" + randomID()
 		}
-		if err := db.SaveBot(id, body.Label, body.BaseURL, body.Token, d.MasterKey); err != nil {
+		token := ""
+		if body.Token != nil {
+			token = *body.Token
+		} else if id != "" { // 编辑未带 token：读旧值
+			if _, _, t, _, _, _, err := db.GetBot(id, d.MasterKey); err == nil {
+				token = t
+			}
+		}
+		if err := db.SaveBot(id, body.Label, body.BaseURL, token,
+			body.ConfigID, body.Provider, body.Model, d.MasterKey); err != nil {
 			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
 			return
 		}
@@ -65,6 +77,44 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		writeJSON(w, logger, http.StatusOK, map[string]bool{"deleted": true})
 	})
 
+	// 拉取 AstrBot 配置文件列表（= 人设/模型套餐；GET {base}/api/v1/chat/configs）。
+	// Key 需勾选 config 权限，403 时给出明确提示。
+	mux.HandleFunc("POST /api/v1/bots/configs", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ID      string `json:"id"`
+			BaseURL string `json:"base_url"`
+			Token   string `json:"token"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
+			return
+		}
+		baseURL, token := body.BaseURL, body.Token
+		if body.ID != "" {
+			_, b, t, _, _, _, err := db.GetBot(body.ID, d.MasterKey)
+			if err == nil {
+				if baseURL == "" {
+					baseURL = b
+				}
+				if token == "" {
+					token = t
+				}
+			}
+		}
+		if baseURL == "" {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id 或 base_url")
+			return
+		}
+		configs, err := ai.FetchAstrBotConfigs(r.Context(), baseURL, token)
+		if err != nil {
+			writeJSON(w, logger, http.StatusOK, map[string]any{
+				"ok": false, "error": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "configs": configs})
+	})
+
 	// 连通性测试：直接对 body 里的 base_url/token 发一条 ping（未保存也可先测）。
 	mux.HandleFunc("POST /api/v1/bots/probe", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -77,8 +127,9 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			return
 		}
 		baseURL, token := body.BaseURL, body.Token
+		configID, provider, model := "", "", ""
 		if body.ID != "" {
-			_, b, t, err := db.GetBot(body.ID, d.MasterKey)
+			_, b, t, c, pv, m, err := db.GetBot(body.ID, d.MasterKey)
 			if err != nil {
 				writeErr(w, logger, http.StatusNotFound, "not_found", "robot not found")
 				return
@@ -89,6 +140,7 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			if token == "" {
 				token = t
 			}
+			configID, provider, model = c, pv, m
 		}
 		if baseURL == "" {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id 或 base_url")
@@ -96,7 +148,7 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
-		reply, err := ai.ProbeAstrBot(ctx, body.ID, baseURL, token)
+		reply, err := ai.ProbeAstrBot(ctx, body.ID, baseURL, token, configID, provider, model)
 		if err != nil {
 			writeJSON(w, logger, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 			return
