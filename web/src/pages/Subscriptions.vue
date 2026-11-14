@@ -74,13 +74,14 @@ interface SubInfo {
   updated_at: string
 }
 const subs = ref<SubInfo[]>([])
-const subKinds = ['mock', 'zhipu', 'kimi', 'opencode', 'newapi']
+const subKinds = ['zhipu', 'kimi', 'opencode', 'newapi', 'astrbot', 'mock']
 const subKindNames: Record<string, string> = {
   mock: 'Mock（演示）',
   zhipu: '智谱 Coding Plan',
   kimi: 'Kimi Coding Plan',
   opencode: 'OpenCode Zen',
   newapi: 'NewAPI 中转站',
+  astrbot: 'AstrBot 机器人（大肥鱼）',
 }
 const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
 const subAdding = ref(false)

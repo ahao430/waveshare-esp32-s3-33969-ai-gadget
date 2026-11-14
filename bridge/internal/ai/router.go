@@ -19,11 +19,13 @@ import (
 	"time"
 )
 
-// Upstream 是一个 OpenAI 兼容服务端点。
+// Upstream 是一个可路由的对话端点：OpenAI 兼容（透传）或 AstrBot
+// 机器人实例（Bridge 做 SSE 格式适配，见 astrbot.go）。
 type Upstream struct {
-	ID      string // 路由前缀，如 "zhipu"
-	BaseURL string // 如 https://open.bigmodel.cn/api/paas/v4
+	ID      string // 路由前缀（bot 实例为订阅实例 id）
+	BaseURL string
 	APIKey  string
+	Kind    string // ""（OpenAI 兼容）| "astrbot"
 }
 
 // Router 选择 upstream 并代理请求。
@@ -31,6 +33,9 @@ type Router struct {
 	upstreams map[string]Upstream // key = provider 前缀（小写）
 	defaultID string
 	hc        *http.Client
+	// BotResolver 每次请求现读订阅配置（Web 添加 bot 实例即时生效，
+	// 无需重启 Bridge）。返回 kind=astrbot 的 Upstream 列表。
+	BotResolver func() []Upstream
 }
 
 // 请求体上限与 upstream 超时。
@@ -82,6 +87,14 @@ func (r *Router) resolve(model string) (Upstream, string, error) {
 		rest = model[i+1:]
 	}
 	u, ok := r.upstreams[id]
+	if !ok && r.BotResolver != nil {
+		for _, bu := range r.BotResolver() {
+			if strings.EqualFold(bu.ID, id) {
+				u, ok = bu, true
+				break
+			}
+		}
+	}
 	if !ok {
 		return Upstream{}, "", fmt.Errorf("%w: %s", ErrNoUpstream, id)
 	}
@@ -104,6 +117,9 @@ func (r *Router) ChatCompletions(w http.ResponseWriter, body []byte, clientGone 
 	}
 	if u.ID == "mock" {
 		return serveMockChat(w, body)
+	}
+	if u.Kind == "astrbot" {
+		return serveAstrBotChat(w, body, u, clientGone)
 	}
 
 	upstreamBody, err := jsonSetString(body, "model", modelName)

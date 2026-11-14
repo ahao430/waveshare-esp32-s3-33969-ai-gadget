@@ -28,6 +28,9 @@ func (r *Router) Complete(ctx context.Context, model string, messages []ChatMess
 	if u.ID == "mock" {
 		return mockReplyText(messages), nil
 	}
+	if u.Kind == "astrbot" {
+		return astrbotComplete(ctx, u, messages)
+	}
 
 	body, err := json.Marshal(map[string]any{
 		"model":    modelName,

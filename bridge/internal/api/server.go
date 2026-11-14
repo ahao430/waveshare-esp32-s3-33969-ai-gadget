@@ -136,7 +136,18 @@ func NewHandler(d Deps) http.Handler {
 	// Bigfish Chat：OpenAI 兼容透传（model = "<provider>/<model>"）。
 	if d.ChatRouter != nil {
 		mux.HandleFunc("GET /api/v1/chat/providers", func(w http.ResponseWriter, r *http.Request) {
-			writeJSON(w, logger, http.StatusOK, map[string]any{"providers": d.ChatRouter.Providers()})
+			ids := d.ChatRouter.Providers()
+			if d.SubscriptionsDB != nil && d.MasterKey != nil {
+				subs, err := d.SubscriptionsDB.ListSubscriptions()
+				if err == nil {
+					for _, s := range subs {
+						if s.Kind == storage.SubKindAstrBot {
+							ids = append(ids, s.ID) // bot 实例 id 作路由前缀
+						}
+					}
+				}
+			}
+			writeJSON(w, logger, http.StatusOK, map[string]any{"providers": ids})
 		})
 		mux.HandleFunc("POST /api/v1/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 			body, err := io.ReadAll(io.LimitReader(r.Body, maxChatRequestBytes))

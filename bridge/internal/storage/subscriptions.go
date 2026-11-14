@@ -19,12 +19,14 @@ const (
 	SubKindOpencode = "opencode"
 	SubKindNewAPI   = "newapi"
 	SubKindMock     = "mock"
+	// SubKindAstrBot AstrBot 机器人实例（大肥鱼对话对接；2026-11-14）。
+	SubKindAstrBot = "astrbot"
 )
 
 // ValidKind 检查 kind 是否受支持。
 func ValidKind(kind string) bool {
 	switch kind {
-	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock:
+	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock, SubKindAstrBot:
 		return true
 	}
 	return false

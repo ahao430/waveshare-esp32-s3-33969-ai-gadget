@@ -188,6 +188,32 @@ func main() {
 		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
 	}
 
+	// 大肥鱼对接 AstrBot 机器人实例（subscriptions kind=astrbot）：
+	// 每次对话请求现读配置（Web 添加/删除即时生效，无需重启）。
+	chatRouter.BotResolver = func() []ai.Upstream {
+		if db == nil || masterKey == nil {
+			return nil
+		}
+		subs, err := db.ListSubscriptions()
+		if err != nil {
+			return nil
+		}
+		var bots []ai.Upstream
+		for _, s := range subs {
+			if s.Kind != storage.SubKindAstrBot {
+				continue
+			}
+			_, _, baseURL, token, err := db.GetSubscription(s.ID, masterKey)
+			if err != nil {
+				continue
+			}
+			bots = append(bots, ai.Upstream{
+				ID: s.ID, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
+			})
+		}
+		return bots
+	}
+
 	handler := api.NewHandler(api.Deps{
 		Registry:        reg,
 		Store:           store,
