@@ -26,6 +26,8 @@ typedef struct {
 	/* 自定义背景拉取（可为 NULL=不支持）：成功把图片字节写入 save_path。
 	 * 返回 0=已写入；1=无背景（HTTP 404）；-1=失败。 */
 	int (*fetch_background)(const char *save_path);
+	/* Web 下发主题拉取（可为 NULL=不支持）：0=拿到 *theme / 1=默认 / -1 */
+	int (*fetch_theme)(int *theme);
 
 } ds_impl_t;
 

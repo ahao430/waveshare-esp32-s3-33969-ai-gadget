@@ -4,6 +4,7 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -87,6 +88,58 @@ func appearancePutBG(d Deps, logger *slog.Logger) http.HandlerFunc {
 		}
 		logger.Info("appearance background updated", "bytes", len(data))
 		writeJSON(w, logger, http.StatusOK, map[string]int{"bytes": len(data)})
+	}
+}
+
+// themePath 主题存 AppearanceDir/theme.json（设备启动拉取生效）。
+func themePath(dir string) string { return filepath.Join(dir, "theme.json") }
+
+func appearanceGetTheme(d Deps, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(themePath(d.AppearanceDir))
+		if err != nil {
+			// 未配置：返回默认 0（星云紫）
+			writeJSON(w, logger, http.StatusOK, map[string]int{"theme": 0})
+			return
+		}
+		var v struct {
+			Theme int `json:"theme"`
+		}
+		if err := json.Unmarshal(data, &v); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "bad_theme", err.Error())
+			return
+		}
+		writeJSON(w, logger, http.StatusOK, map[string]int{"theme": v.Theme})
+	}
+}
+
+func appearancePutTheme(d Deps, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var v struct {
+			Theme int `json:"theme"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&v); err != nil {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want {theme: int}")
+			return
+		}
+		if v.Theme < 0 || v.Theme > 3 {
+			writeErr(w, logger, http.StatusBadRequest, "bad_theme", "theme index 0..3")
+			return
+		}
+		if err := os.MkdirAll(d.AppearanceDir, 0o750); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "io_failed", err.Error())
+			return
+		}
+		data, _ := json.Marshal(v)
+		if err := os.WriteFile(themePath(d.AppearanceDir), data, 0o640); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "io_failed", err.Error())
+			return
+		}
+		if d.Events != nil {
+			d.Events.Publish("appearance.theme", v)
+		}
+		logger.Info("appearance theme updated", "theme", v.Theme)
+		writeJSON(w, logger, http.StatusOK, map[string]int{"theme": v.Theme})
 	}
 }
 

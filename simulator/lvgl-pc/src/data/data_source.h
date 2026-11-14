@@ -153,6 +153,10 @@ void ds_config_set_theme(int idx);                /* UI 主题 */
  * 返回 0=已写入新文件；1=无自定义背景（保留旧文件）；-1=网络失败。 */
 int ds_appearance_fetch(const char *save_path);
 
+/* 拉取 Web 下发的主题（Bridge appearance/theme）；返回 0=拿到（写 *theme）
+ * / 1=未配置默认 / -1=失败。bridge 模式有效。 */
+int ds_appearance_fetch_theme(int *theme);
+
 /* 聊天 provider：
  * - ds_chat_providers 填充 "\n" 分隔的 provider id 列表（bridge=HTTP
  *   拉取，mock 返回 "mock"）；在后台线程调用。

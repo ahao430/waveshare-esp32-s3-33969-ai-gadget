@@ -37,6 +37,10 @@ void ui_init(void)
 
     /* 主题先于任何 UI 构建（UI_ACCENT 变量生效）；bridge 模式顺手
      * 拉一次自定义背景缓存（无则回退内置波浪） */
+    int web_theme = -1;
+    if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
+        ds_config_set_theme(web_theme);
+    }
     ui_theme_select(ds_state()->theme_idx);
     (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
 

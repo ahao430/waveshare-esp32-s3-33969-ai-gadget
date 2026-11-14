@@ -205,6 +205,13 @@ ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
 int ds_appearance_fetch(const char *save_path)
 {
     if (!g_impl) ds_init(NULL, NULL, NULL);
-    if (!g_impl->fetch_background) return 1; /* 当前数据源不支持（mock 等） */
+    if (!g_impl->fetch_background) return 1;
     return g_impl->fetch_background(save_path);
+}
+
+int ds_appearance_fetch_theme(int *theme)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->fetch_theme) return 1;
+    return g_impl->fetch_theme(theme);
 }

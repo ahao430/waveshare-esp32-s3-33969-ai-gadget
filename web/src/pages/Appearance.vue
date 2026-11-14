@@ -11,6 +11,32 @@ const themes = [
   { name: '落日橙', accent: '#FF8A3D', accent2: '#FF5D7A' },
   { name: '蔷薇粉', accent: '#FF6FA5', accent2: '#B28DFF' },
 ]
+const currentTheme = ref(-1)
+
+async function loadTheme() {
+  try {
+    const r = await request<{ theme: number }>('/api/v1/appearance/theme')
+    currentTheme.value = r.theme
+  } catch {
+    currentTheme.value = -1
+  }
+}
+
+async function pickTheme(idx: number) {
+  try {
+    await request('/api/v1/appearance/theme', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: idx }),
+    })
+    currentTheme.value = idx
+    message.value = `主题已下发（${themes[idx].name}），设备重启模拟器后生效。`
+    isError.value = false
+  } catch (err) {
+    message.value = err instanceof Error ? err.message : String(err)
+    isError.value = true
+  }
+}
 
 const hasBackground = ref(false)
 const previewUrl = ref<string | null>(null)
@@ -30,7 +56,7 @@ async function refresh() {
   }
 }
 
-onMounted(refresh)
+onMounted(() => { refresh(); loadTheme() })
 
 async function onFile(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
@@ -125,20 +151,30 @@ function buildAuthHeaders(extra: Record<string, string>): Record<string, string>
     </header>
 
     <div class="card">
-      <h2 class="mb-3 font-medium">主题色（设备端切换）</h2>
+      <h2 class="mb-1 font-medium">主题色</h2>
+      <p class="mb-3 text-xs text-dim">点击即下发到设备（重启模拟器生效）；设备端设置页也可切换。</p>
       <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div v-for="t in themes" :key="t.name" class="rounded-lg border border-line p-3">
+        <button
+          v-for="(t, i) in themes"
+          :key="t.name"
+          class="rounded-lg border p-3 text-left transition"
+          :class="currentTheme === i ? 'border-accent' : 'border-line'"
+          @click="pickTheme(i)"
+        >
           <div
             class="h-10 rounded-md"
             :style="{ background: `linear-gradient(135deg, ${t.accent}, ${t.accent2})` }"
           />
-          <p class="mt-2 text-sm">{{ t.name }}</p>
-        </div>
+          <p class="mt-2 text-sm">
+            {{ t.name }}
+            <span v-if="currentTheme === i" class="ml-1 badge">当前</span>
+          </p>
+        </button>
       </div>
     </div>
 
     <div class="card">
-      <h2 class="mb-3 font-medium">自定义背景</h2>
+      <h2 class="mb-3 mt-6 font-medium">自定义背景</h2>
       <div class="flex flex-wrap items-center gap-4">
         <div
           class="h-32 w-32 shrink-0 rounded-lg border border-line bg-black/40 bg-cover bg-center"

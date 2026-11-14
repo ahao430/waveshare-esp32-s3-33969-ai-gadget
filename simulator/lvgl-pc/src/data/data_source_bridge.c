@@ -32,6 +32,7 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
 static int bridge_fetch_background(const char *save_path);
+static int bridge_fetch_theme(int *theme);
 
 static void bridge_init(void)
 {
@@ -488,12 +489,38 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .voice_interact  = bridge_voice_interact,
         .chat_providers  = bridge_chat_providers,
         .fetch_background = bridge_fetch_background,
+        .fetch_theme      = bridge_fetch_theme,
     };
     return &impl;
 }
 
 /* 自定义背景：GET /api/v1/appearance/background（≤256KB，Web 端已压到
  * 480×480）。404=未设置（返回 1，保留本地旧文件）；成功写盘返回 0。 */
+/* Web 下发主题：GET /api/v1/appearance/theme */
+static int bridge_fetch_theme(int *theme)
+{
+    static char th_url[256];
+    if (th_url[0] == '\0') {
+        snprintf(th_url, sizeof(th_url), "%s/api/v1/appearance/theme", g_base);
+    }
+    char buf[512];
+    int status = http_get(th_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
+    if (status != 200) return -1;
+
+    /* 响应为 pretty JSON（writeJSON 用 MarshalIndent）——用 cJSON 解析 */
+    int ret = 1;
+    cJSON *root = cJSON_Parse(buf);
+    if (root) {
+        const cJSON *v = cJSON_GetObjectItem(root, "theme");
+        if (cJSON_IsNumber(v) && v->valueint >= 0 && v->valueint < 4) {
+            if (theme) *theme = v->valueint;
+            ret = 0;
+        }
+        cJSON_Delete(root);
+    }
+    return ret;
+}
+
 static int bridge_fetch_background(const char *save_path)
 {
     static char bg_url[256];

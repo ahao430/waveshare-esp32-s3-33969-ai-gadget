@@ -1,213 +1,82 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+// 配置总览：公共配置 + 各应用配置入口（Web=配置后台，不做查看）。
+import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
-import { api, type PrewarmResult, type StoredSnapshot } from '@/api/client'
-import { deviceApi } from '@/api/device'
-import { connectEvents, type EventsConnection } from '@/api/ws'
-import { useQuotaStore } from '@/stores/quota'
+import { request } from '@/api/client'
 
-const store = useQuotaStore()
-const refreshing = ref('')
-const device = ref<Awaited<ReturnType<typeof deviceApi.status>>>()
+const bridgeOk = ref<boolean | null>(null)
+const themeName = ref('')
 
-/* 预热（PLAN §5.6）：手动触发 + 二次确认 + 前后对比展示 */
-const prewarmConfirming = ref(false)
-const prewarmBusy = ref(false)
-const prewarmResult = ref<PrewarmResult | null>(null)
-const prewarmError = ref('')
-
-async function prewarm() {
-  if (prewarmConfirming.value) {
-    prewarmConfirming.value = false
-    prewarmBusy.value = true
-    prewarmError.value = ''
-    try {
-      prewarmResult.value = await api.prewarmZhipu(crypto.randomUUID())
-      await store.loadSnapshot('zhipu', true)
-    } catch (e) {
-      prewarmError.value = e instanceof Error ? e.message : String(e)
-    } finally {
-      prewarmBusy.value = false
-    }
-  } else {
-    prewarmConfirming.value = true // 第一次点击只进入确认态
-    prewarmResult.value = null
-  }
-}
-
-function pctOf(r: PrewarmResult, which: 'before' | 'after', win: string): string {
-  const snap = which === 'before' ? r.before : r.after
-  const w = snap?.windows.find((x) => x.id === win)
-  return w?.used_percent?.toFixed(1) ?? '—'
-}
-
-const prewarmStatusText: Record<PrewarmResult['status'], string> = {
-  executed: '已发出轻量请求',
-  failed: '请求失败',
-  skipped_low_quota: '已跳过：周额度保护',
-  skipped_cooldown: '已跳过：冷却中',
-  duplicate: '重复请求（幂等命中）',
-}
+const themes = ['星云紫', '极光青', '落日橙', '蔷薇粉']
 
 onMounted(async () => {
-  store.loadAll()
-  device.value = await deviceApi.status()
-  /* 实时通道：quota.<id> 推送直接应用（Bridge 侧刷新即推送） */
-  wsConn = connectEvents((topic, data) => {
-    if (topic.startsWith('quota.')) {
-      store.applySnapshot(topic.slice('quota.'.length), data as StoredSnapshot)
-    }
-  })
+  try {
+    await request('/api/v1/device/status')
+    bridgeOk.value = true
+  } catch {
+    bridgeOk.value = false
+  }
+  try {
+    const r = await request<{ theme: number }>('/api/v1/appearance/theme')
+    themeName.value = themes[r.theme] ?? ''
+  } catch {
+    themeName.value = ''
+  }
 })
 
-onUnmounted(() => wsConn?.close())
-
-async function refresh(id: string) {
-  prewarmConfirming.value = false // 其他操作取消预热确认态
-  refreshing.value = id
-  try {
-    await store.loadSnapshot(id, true)
-  } finally {
-    refreshing.value = ''
-  }
-}
-
-function pctColor(pct: number): string {
-  if (pct >= 85) return 'bg-err'
-  if (pct >= 60) return 'bg-warn'
-  return 'bg-accent2'
-}
-
-function fmtTime(iso?: string): string {
-  if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
-}
-
-const bridgeToken = ref(localStorage.getItem('bridge_token') ?? '')
-function saveToken() {
-  if (bridgeToken.value) localStorage.setItem('bridge_token', bridgeToken.value)
-  else localStorage.removeItem('bridge_token')
-  location.reload() // Token 变更后重连 WS（连接 URL 携带旧 token）
-}
-
-let wsConn: EventsConnection | null = null
+const groups = [
+  {
+    title: '公共配置',
+    items: [
+      { to: '/appearance', label: '外观', desc: '主题色下发、自定义背景图' },
+      { to: '/network', label: '网络与配网', desc: 'Wi-Fi 配置方式说明、设备热点' },
+      { to: '/provisioning', label: '后台二维码', desc: '本后台地址全屏码（设备扫码直达）' },
+    ],
+  },
+  {
+    title: '应用配置',
+    items: [
+      { to: '/subscriptions', label: '订阅中心', desc: '订阅实例增删（智谱/Kimi/OpenCode/NewAPI/Mock）' },
+      { to: '/subscriptions', label: '聊天机器人', desc: 'AstrBot 实例配置（大肥鱼对话对接）' },
+    ],
+  },
+]
 </script>
 
 <template>
-  <h1 class="page-title">仪表盘</h1>
-  <p class="page-sub">设备总览与订阅额度（额度来自 Go Bridge，设备数据为 Mock）</p>
-
-  <!-- UI 定稿概念图（产品风格基准，2026-11-14） -->
-  <div class="card mb-5 overflow-hidden !p-0">
-    <img src="/assistant-ui-final.png" alt="UI 定稿概念图" class="w-full" />
-    <div class="border-t border-line px-4 py-2 text-xs text-dim">
-      产品 UI 风格基准（2026-11-14 定稿）——三 AI 对话页 + 桌面九宫格
-    </div>
-  </div>
-
-  <!-- 设备总览（Mock） -->
-  <div v-if="device" class="card mb-5 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
-    <div>
-      <div class="text-dim">设备</div>
-      <div>{{ device.model }}</div>
-    </div>
-    <div>
-      <div class="text-dim">Wi-Fi</div>
-      <div>{{ device.wifi_ssid ?? '未连接' }} · {{ device.ip ?? '—' }}</div>
-    </div>
-    <div>
-      <div class="text-dim">电池</div>
-      <div>{{ device.battery_pct }}%</div>
-    </div>
-    <div>
-      <div class="text-dim">运行</div>
-      <div>{{ Math.floor(device.uptime_s / 3600) }}h {{ Math.floor((device.uptime_s % 3600) / 60) }}m</div>
-    </div>
-    <div class="ml-auto text-xs text-dim">fw {{ device.firmware }}</div>
-  </div>
-
-  <!-- Bridge 连接（Token 认证，PLAN §19） -->
-  <div class="card mb-5 flex flex-wrap items-end gap-3">
-    <div class="min-w-56 flex-1">
-      <div class="mb-1 text-xs text-dim">Bridge Token（启用 BRIDGE_TOKEN 时填写；仅存本机浏览器）</div>
-      <input v-model="bridgeToken" class="input" type="password" placeholder="留空 = 无认证" />
-    </div>
-    <button class="btn" @click="saveToken">保存</button>
-  </div>
-
-  <p v-if="store.error" class="mb-4 text-sm text-warn">
-    加载失败：{{ store.error }}（确认 Bridge 已启动：bridge/run.sh；若启用 Token 请在上方填写）
-  </p>
-
-  <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-    <div v-for="p in store.providers" :key="p.id" class="card">
-      <h3 class="mb-3 flex items-center justify-between gap-2 text-[15px] font-semibold">
-        {{ p.display_name }}
-        <span class="badge" :class="{ '!bg-warn/15 !text-warn': p.capabilities.experimental }">
-          {{ p.capabilities.trust }} 级{{ p.capabilities.experimental ? ' · 实验性' : '' }}
+  <section class="space-y-6">
+    <header>
+      <h1 class="text-xl font-semibold">配置总览</h1>
+      <p class="mt-1 text-sm text-dim">
+        Web 是设备的配置后台——公共配置与各应用配置在这里完成；数据查看
+        （额度/监控/对话）在设备端体验。
+        Bridge 状态：
+        <span :class="bridgeOk ? 'text-ok' : 'text-err'">
+          {{ bridgeOk === null ? '检查中…' : bridgeOk ? '已连接' : '未连接（:8081）' }}
         </span>
-      </h3>
-
-      <template v-if="store.snapshots[p.id]?.snapshot">
-        <div v-for="w in store.snapshots[p.id].snapshot?.windows ?? []" :key="w.id" class="mb-3">
-          <div class="mb-1.5 flex items-baseline justify-between text-[13px]">
-            <span>{{ w.label }}</span>
-            <span class="text-xs text-dim" v-if="w.reset_at">重置 {{ fmtTime(w.reset_at) }}</span>
-          </div>
-          <div class="mb-1 h-2 overflow-hidden rounded bg-cardhi">
-            <div
-              class="h-full rounded transition-all duration-300"
-              :class="pctColor(w.used_percent ?? 0)"
-              :style="{ width: (w.used_percent ?? 0) + '%' }"
-            ></div>
-          </div>
-          <div class="text-xs text-dim">
-            已用 {{ w.used_percent?.toFixed(1) ?? '—' }}% · 剩余 {{ w.remaining_pct?.toFixed(1) ?? '—' }}%
-          </div>
-        </div>
-        <div class="mt-3 flex items-center justify-between">
-          <span class="text-xs text-dim">更新于 {{ fmtTime(store.snapshots[p.id].fetched_at) }}</span>
-          <div class="flex gap-2">
-            <!-- 预热：仅智谱；二次确认后才真正发起（PLAN §5.6） -->
-            <button
-              v-if="p.id === 'zhipu'"
-              class="btn-ghost !px-3 !py-1.5 !text-[13px]"
-              :class="{ '!border-warn !text-warn': prewarmConfirming }"
-              :disabled="prewarmBusy"
-              @click="prewarm"
-            >
-              {{
-                prewarmBusy ? '预热中…'
-                : prewarmConfirming ? '确认发送？（模型 1 token 请求）'
-                : '预热'
-              }}
-            </button>
-            <button class="btn !px-3 !py-1.5 !text-[13px]" :disabled="refreshing === p.id" @click="refresh(p.id)">
-              {{ refreshing === p.id ? '刷新中…' : '刷新' }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 预热结果：前后额度对比（不承诺重置窗口） -->
-        <div v-if="prewarmResult" class="mt-3 rounded-xl border border-line bg-bg p-3 text-xs">
-          <div :class="prewarmResult.status === 'executed' ? 'text-ok' : 'text-warn'">
-            {{ prewarmStatusText[prewarmResult.status] }}
-            <span v-if="prewarmResult.message" class="text-dim">（{{ prewarmResult.message }}）</span>
-          </div>
-          <div class="mt-1.5 grid grid-cols-3 gap-1 text-dim">
-            <span>5小时：{{ pctOf(prewarmResult, 'before', '5h') }}% → {{ pctOf(prewarmResult, 'after', '5h') }}%</span>
-            <span>本周：{{ pctOf(prewarmResult, 'before', 'weekly') }}% → {{ pctOf(prewarmResult, 'after', 'weekly') }}%</span>
-            <span v-if="prewarmResult.duration_ms != null">耗时 {{ prewarmResult.duration_ms }}ms</span>
-          </div>
-          <div class="mt-1 text-dim">预热只发起一次轻量请求并记录前后变化，不代表重置 5 小时窗口。</div>
-        </div>
-        <p v-if="prewarmError" class="mt-2 text-xs text-err">预热失败：{{ prewarmError }}</p>
-      </template>
-      <p v-else class="text-sm text-dim">暂无快照数据</p>
-
-      <p v-if="store.snapshots[p.id]?.stale" class="mt-2 text-xs text-warn">
-        ⚠ 最近一次刷新失败（{{ store.snapshots[p.id]?.last_error }}），以上为缓存数据
+        <template v-if="themeName"> · 当前主题：{{ themeName }}</template>
       </p>
+    </header>
+
+    <div v-for="g in groups" :key="g.title" class="space-y-3">
+      <h2 class="text-sm font-medium text-dim">{{ g.title }}</h2>
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <RouterLink
+          v-for="it in g.items"
+          :key="it.label"
+          :to="it.to"
+          class="card block transition hover:border-accent"
+        >
+          <h3 class="font-semibold">{{ it.label }}</h3>
+          <p class="mt-1 text-sm text-dim">{{ it.desc }}</p>
+        </RouterLink>
+      </div>
     </div>
-  </div>
+
+    <div class="card text-xs text-dim">
+      说明：订阅实例中的「聊天机器人」即 AstrBot 实例（大肥鱼对话与语音
+      经 Bridge 路由到对应机器人）；添加/删除即时生效，无需重启 Bridge。
+    </div>
+  </section>
 </template>

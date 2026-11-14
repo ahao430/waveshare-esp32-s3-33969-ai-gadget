@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { RouterLink, RouterView } from 'vue-router'
 
+/* 配置后台：公共配置 + 各应用配置（查看类在设备端，Web 不重复） */
 const nav = [
-  { to: '/', label: '仪表盘' },
-  { to: '/subscriptions', label: '订阅额度' },
-  { to: '/chat', label: '聊天' },
-  { to: '/monitoring', label: '监控' },
-  { to: '/network', label: '网络' },
-  { to: '/provisioning', label: '配网' },
-  { to: '/appearance', label: '个性化' },
+  { to: '/', label: '配置总览' },
+  { to: '/appearance', label: '外观' },
+  { to: '/network', label: '网络与配网' },
+  { to: '/provisioning', label: '二维码' },
+  { to: '/subscriptions', label: '订阅中心' },
 ]
 </script>
 

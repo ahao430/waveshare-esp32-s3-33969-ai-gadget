@@ -128,6 +128,8 @@ func NewHandler(d Deps) http.Handler {
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。
 	if d.AppearanceDir != "" {
 		mux.Handle("GET /api/v1/appearance", appearanceInfo(d, logger))
+		mux.Handle("GET /api/v1/appearance/theme", appearanceGetTheme(d, logger))
+		mux.Handle("POST /api/v1/appearance/theme", appearancePutTheme(d, logger))
 		mux.Handle("GET /api/v1/appearance/background", appearanceGetBG(d, logger))
 		mux.Handle("POST /api/v1/appearance/background", appearancePutBG(d, logger))
 		mux.Handle("DELETE /api/v1/appearance/background", appearanceDelBG(d, logger))
