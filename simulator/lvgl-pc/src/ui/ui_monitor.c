@@ -75,7 +75,9 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
     for (int i = 0; i < s->server_count && i < DS_SERVER_MAX; i++) {
         const gadget_server_t *srv = &s->servers[i];
         lv_obj_t *card = lv_obj_create(list);
-        lv_obj_set_size(card, LV_PCT(100), LV_SIZE_CONTENT);
+        /* 固定高度：LV_SIZE_CONTENT 对 BOTTOM 对齐子项计算不足，
+         * 条形会溢出到相邻卡片（目视验收抓出） */
+        lv_obj_set_size(card, LV_PCT(100), srv->online ? 64 : 40);
         ui_style_card(card);
         lv_obj_set_style_radius(card, 16, 0);
         lv_obj_set_style_pad_all(card, 10, 0);
@@ -91,36 +93,36 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
         lv_obj_align(dot, LV_ALIGN_TOP_LEFT, 0, 2);
 
         lv_obj_t *name = ui_label(card, srv->name, &lv_font_cn_14, UI_TEXT);
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 18, -2);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 18, 0);
 
         snprintf(buf, sizeof(buf), srv->online ? "%d天" : "离线", srv->uptime_h / 24);
         lv_obj_t *up = ui_label(card, buf, &lv_font_cn_12, UI_TEXT_DIM);
-        lv_obj_align(up, LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_obj_align(up, LV_ALIGN_TOP_RIGHT, 0, 2);
 
         if (srv->online) {
-            /* 行 2/3：CPU/内存迷你条 */
+            /* 行 2/3：CPU/内存迷你条（卡片 64px：名称行 0~18，条 20/34） */
             const struct { const char *label; int pct; int y; } rows[] = {
-                { "CPU", srv->cpu_pct, -26 },
-                { "MEM", srv->mem_pct, -4 },
+                { "CPU", srv->cpu_pct, 22 },
+                { "MEM", srv->mem_pct, 36 },
             };
             for (size_t r = 0; r < sizeof(rows) / sizeof(rows[0]); r++) {
                 lv_obj_t *lbl = ui_label(card, rows[r].label, &lv_font_montserrat_12, UI_TEXT_DIM);
-                lv_obj_align(lbl, LV_ALIGN_BOTTOM_LEFT, 0, rows[r].y);
+                lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 18, rows[r].y);
 
                 lv_obj_t *bar = lv_bar_create(card);
-                lv_obj_set_size(bar, 150, 10);
-                lv_obj_align(bar, LV_ALIGN_BOTTOM_LEFT, 42, rows[r].y + 3);
+                lv_obj_set_size(bar, 150, 8);
+                lv_obj_align(bar, LV_ALIGN_TOP_LEFT, 58, rows[r].y + 2);
                 lv_bar_set_range(bar, 0, 100);
                 lv_bar_set_value(bar, rows[r].pct, LV_ANIM_OFF);
                 lv_obj_set_style_bg_color(bar, UI_CARD_HI, 0);
                 lv_obj_set_style_bg_color(bar, ui_pct_color(rows[r].pct), LV_PART_INDICATOR);
-                lv_obj_set_style_radius(bar, 5, 0);
-                lv_obj_set_style_radius(bar, 5, LV_PART_INDICATOR);
+                lv_obj_set_style_radius(bar, 4, 0);
+                lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
 
                 char pb[12];
                 snprintf(pb, sizeof(pb), "%d%%", rows[r].pct);
                 lv_obj_t *pct_lbl = ui_label(card, pb, &lv_font_montserrat_12, UI_TEXT_DIM);
-                lv_obj_align(pct_lbl, LV_ALIGN_BOTTOM_RIGHT, 0, rows[r].y);
+                lv_obj_align(pct_lbl, LV_ALIGN_TOP_RIGHT, 0, rows[r].y);
             }
         }
     }
