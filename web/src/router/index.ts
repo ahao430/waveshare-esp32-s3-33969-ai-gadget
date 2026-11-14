@@ -8,6 +8,7 @@ export const router = createRouter({
     { path: '/network', name: 'network', component: () => import('@/pages/Network.vue') },
     { path: '/provisioning', name: 'provisioning', component: () => import('@/pages/Provisioning.vue') },
     { path: '/keys', name: 'keys', component: () => import('@/pages/Keys.vue') },
+    { path: '/launcher', name: 'launcher', component: () => import('@/pages/Launcher.vue') },
     { path: '/subscriptions', name: 'subscriptions', component: () => import('@/pages/Subscriptions.vue') },
     { path: '/bots', name: 'bots', component: () => import('@/pages/Bots.vue') },
     { path: '/zcode', name: 'zcode', component: () => import('@/pages/Zcode.vue') },

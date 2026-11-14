@@ -32,6 +32,7 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
 static int bridge_fetch_background(const char *save_path);
+static int bridge_fetch_launcher(char *out_csv, int cap, int *count);
 static int bridge_fetch_weather(ds_weather_t *out);
 static int bridge_fetch_theme(int *theme);
 static int bridge_fetch_keys(char *pwr_short, char *boot_short,
@@ -495,6 +496,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .fetch_theme      = bridge_fetch_theme,
         .fetch_keys       = bridge_fetch_keys,
         .fetch_weather    = bridge_fetch_weather,
+        .fetch_launcher   = bridge_fetch_launcher,
     };
     return &impl;
 }
@@ -523,6 +525,40 @@ static int bridge_fetch_theme(int *theme)
         }
         cJSON_Delete(root);
     }
+    return ret;
+}
+
+/* 主页排布：GET /api/v1/launcher（order 数组 → "key,key,..." csv） */
+static int bridge_fetch_launcher(char *out_csv, int cap, int *count)
+{
+    static char lay_url[256];
+    if (lay_url[0] == '\0') {
+        snprintf(lay_url, sizeof(lay_url), "%s/api/v1/launcher", g_base);
+    }
+    char buf[2048];
+    int status = http_get(lay_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
+    if (status != 200) return -1;
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return -1;
+    int ret = 1, n = 0, pos = 0;
+    const cJSON *order = cJSON_GetObjectItem(root, "order");
+    if (cJSON_IsArray(order)) {
+        const cJSON *it;
+        cJSON_ArrayForEach(it, order) {
+            if (!cJSON_IsString(it) || !it->valuestring[0]) continue;
+            int len = (int)strlen(it->valuestring);
+            if (pos + len + 2 >= cap) break;
+            pos += snprintf(out_csv + pos, (size_t)(cap - pos), "%s%s",
+                            n ? "," : "", it->valuestring);
+            n++;
+        }
+        if (n > 0) {
+            if (count) *count = n;
+            ret = 0;
+        }
+    }
+    cJSON_Delete(root);
     return ret;
 }
 

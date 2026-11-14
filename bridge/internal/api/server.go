@@ -133,6 +133,7 @@ func NewHandler(d Deps) http.Handler {
 		serveMonitorConfig(mux, d, logger)
 		serveKeys(mux, d, logger)
 		serveWeather(mux, d, logger)
+		serveLauncher(mux, d, logger)
 	}
 
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。

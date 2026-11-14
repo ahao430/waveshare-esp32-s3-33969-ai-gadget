@@ -760,3 +760,22 @@ Bridge 加密落库 + Web 后台 + 设备拉取的同一套范式：
   **GB2312 一级字库 3755 字**（覆盖中国城市/行政区名）+ `°`（0xB0 不在
   ASCII range）。字体 .c 增至 2-4.5MB/号；固件阶段若 flash 紧张，
   可只给 16/20px 两号上全集、12/14px 维持源码集。
+
+## 主页排布 Web 配置（2026-11-14 第十三批）
+
+- **Bridge** `/api/v1/launcher`：GET（order + catalog + page_size）/ POST
+  （order 校验：非空、key 合法、无重复）。存储 app_settings(launcher)；
+  损坏/缺失回落出厂 9 应用顺序。catalog（key↔名称）与设备注册表同源
+  维护：{"chat","xiaozhi","muse","sub","zcode","weather","monitor",
+  "settings","music"}。
+- **设备**：app_def_t 增加 `key` 字段；register_apps 拉取
+  ds_launcher_fetch（bridge GET → order 数组转 csv）后按序重排，
+  **不在 order 中的 App = 隐藏**（不注册，桌面消失、页数/页点随之变）；
+  完全无匹配（key 体系不兼容）才回落默认，防空白桌面。
+- **Web** 主页排布页：↑↓ 排序、隐藏/恢复、恢复默认、实时分页预览
+  （一屏 4 个）；隐藏"设置"时出警示徽标（设备端将无法进设置，只能
+  后台恢复）。
+- **e2e**：order=["settings","weather","chat","sub","monitor","xiaozhi"]
+  → 桌面第一页=设置/天气/大肥鱼/订阅（视觉验证），页点 2 页 2 个、
+  活动点第一位（像素验证）；stderr "[apps] web layout applied: 6/9
+  apps (hidden 3)"。

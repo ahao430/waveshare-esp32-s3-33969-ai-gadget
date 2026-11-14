@@ -216,6 +216,13 @@ int ds_appearance_fetch_theme(int *theme)
     return g_impl->fetch_theme(theme);
 }
 
+int ds_launcher_fetch(char *out_csv, int cap, int *count)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->fetch_launcher) return 1;
+    return g_impl->fetch_launcher(out_csv, cap, count);
+}
+
 int ds_weather_fetch(ds_weather_t *out)
 {
     if (!g_impl) ds_init(NULL, NULL, NULL);

@@ -474,19 +474,52 @@ static void register_apps(void)
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
      * 页1 AI 三位 + 订阅｜页2 ZCode/天气/服务器/设置｜页3 音乐 */
     const app_def_t defs[] = {
-        { UI_APP_CHAT,     "大肥鱼",  NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_XIAOZHI,  "小智",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_MUSE,     "Muse",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_ZHIPU,    "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",      true,  quota_build,           quota_on_exit },
-        { UI_APP_ZCODE,    "ZCode",   LV_SYMBOL_KEYBOARD, 0x3A6FF7, "A:simulator/lvgl-pc/assets/icons/zcode.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_WEATHER,  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",  true,  ui_weather_build,      ui_weather_on_exit },
-        { UI_APP_MONITOR,  "服务器",  LV_SYMBOL_EYE_OPEN, 0x9B5DE5, "A:simulator/lvgl-pc/assets/icons/server.png",   true,  ui_monitor_build,      NULL },
-        { UI_APP_SETTINGS, "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png", true,  ui_settings_build,     ui_settings_on_exit },
-        { UI_APP_MUSIC,    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",    false, placeholder_build,     NULL },
+        { UI_APP_CHAT,     "chat",     "大肥鱼",  NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_MUSE,     "muse",     "Muse",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
+        { UI_APP_ZCODE,    "zcode",    "ZCode",   LV_SYMBOL_KEYBOARD, 0x3A6FF7, "A:simulator/lvgl-pc/assets/icons/zcode.png",     true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },
+        { UI_APP_MONITOR,  "monitor",  "服务器",  LV_SYMBOL_EYE_OPEN, 0x9B5DE5, "A:simulator/lvgl-pc/assets/icons/server.png",    true,  ui_monitor_build,      NULL },
+        { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit },
+        { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL },
     };
-    for (size_t i = 0; i < sizeof(defs) / sizeof(defs[0]); i++) {
-        if (!app_manager_register(&defs[i])) {
-            fprintf(stderr, "app_manager_register failed at %zu\n", i);
+    const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
+
+    /* Web 后台主页排布（/api/v1/launcher）：order=可见顺序，不在列表=
+     * 隐藏；列表外的 App（目录漂移新增）追加到末尾保证不丢。 */
+    app_def_t ordered[16];
+    int visible = 0;
+    char layout[192];
+    int lay_n = 0;
+    if (ds_launcher_fetch(layout, sizeof(layout), &lay_n) == 0 && lay_n > 0) {
+        bool used[16] = {false};
+        char tmp[sizeof(layout)];
+        snprintf(tmp, sizeof(tmp), "%s", layout);
+        char *save = NULL;
+        for (char *tok = strtok_r(tmp, ",", &save); tok && visible < 16;
+             tok = strtok_r(NULL, ",", &save)) {
+            for (int i = 0; i < def_n; i++) {
+                if (used[i] || !defs[i].key || strcmp(defs[i].key, tok) != 0) continue;
+                ordered[visible++] = defs[i];
+                used[i] = true;
+                break;
+            }
+        }
+        /* order 之外的 App = 隐藏（Web 显式恢复）；完全无匹配（key 体系
+         * 不兼容）才回落出厂全量，防止空白桌面。 */
+        if (visible == 0) {
+            for (int i = 0; i < def_n; i++) ordered[visible++] = defs[i];
+        }
+        fprintf(stderr, "[apps] web layout applied: %d/%d apps (hidden %d)\n",
+                visible, def_n, def_n - visible);
+    } else {
+        for (int i = 0; i < def_n; i++) ordered[visible++] = defs[i];
+    }
+
+    for (int i = 0; i < visible; i++) {
+        if (!app_manager_register(&ordered[i])) {
+            fprintf(stderr, "[apps] app_manager_register failed at %d\n", i);
         }
     }
 }

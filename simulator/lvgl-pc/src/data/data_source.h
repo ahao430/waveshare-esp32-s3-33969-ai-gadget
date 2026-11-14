@@ -178,6 +178,11 @@ typedef struct {
 /* 拉取天气：0=成功写 *out / 1=数据源不支持 / -1=失败（*out.valid=false） */
 int ds_weather_fetch(ds_weather_t *out);
 
+/* 拉取 Web 下发的主页排布（Bridge /api/v1/launcher）：0=成功（out_csv
+ * 写成 "chat,xiaozhi,..." 逗号分隔 key 列表，*count=App 数）/
+ * 1=未配置默认 / -1=失败。bridge 模式有效。 */
+int ds_launcher_fetch(char *out_csv, int cap, int *count);
+
 /* 拉取 Web 下发的按键映射（Bridge /api/v1/keys）：0=四槽写入（每槽 ≥8
  * 字节）/ 1=未配置默认（不写） / -1=失败。bridge 模式有效。 */
 int ds_keys_fetch(char *pwr_short, char *boot_short,

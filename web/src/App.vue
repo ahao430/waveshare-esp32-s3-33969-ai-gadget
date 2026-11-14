@@ -8,6 +8,7 @@ const nav = [
   { to: '/network', label: '网络与配网' },
   { to: '/provisioning', label: '二维码' },
   { to: '/keys', label: '物理按键' },
+  { to: '/launcher', label: '主页排布' },
   { to: '/subscriptions', label: '订阅中心' },
   { to: '/bots', label: '聊天机器人' },
   { to: '/zcode', label: 'ZCode 远程' },

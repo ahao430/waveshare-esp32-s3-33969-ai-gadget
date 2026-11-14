@@ -11,6 +11,7 @@
 
 typedef struct {
     int id;                 /* ui_app_id 枚举 */
+    const char *key;        /* 稳定标识（Web 后台排布配置用，如 "chat"） */
     const char *name;       /* 桌面标签 */
     const char *symbol;     /* LV_SYMBOL_* 图标（符号磁贴用） */
     uint32_t tile_color;    /* 磁贴底色（符号磁贴；0 = 无） */

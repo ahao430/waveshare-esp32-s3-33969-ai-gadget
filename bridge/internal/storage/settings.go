@@ -48,4 +48,5 @@ const (
 	SettingKeyMonitor = "monitor" // Komari 监控 {base_url, enc_token}
 	SettingKeyKeys    = "keys"    // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
 	SettingKeyWeather = "weather" // 天气 {mode: auto|manual, city}
+	SettingKeyLauncher = "launcher" // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
 )

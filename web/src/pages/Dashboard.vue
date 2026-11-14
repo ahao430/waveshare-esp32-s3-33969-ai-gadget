@@ -33,6 +33,7 @@ const groups = [
       { to: '/network', label: '网络与配网', desc: 'Wi-Fi 配置方式说明、设备热点' },
       { to: '/provisioning', label: '后台二维码', desc: '本后台地址全屏码（设备扫码直达）' },
       { to: '/keys', label: '物理按键', desc: '三键短按/长按映射（长按电源/BOOT 固定）' },
+      { to: '/launcher', label: '主页排布', desc: '桌面应用顺序/显示隐藏（一屏 4 个自动分页）' },
     ],
   },
   {

@@ -335,3 +335,56 @@ func TestZcodeConfigAndSessions(t *testing.T) {
 		t.Fatal("token 不得回显")
 	}
 }
+
+// ---- launcher 布局 ----
+
+func TestLauncherLayout(t *testing.T) {
+	mk := newTestMasterKey(t)
+	srv, _ := newConfigServer(t, mk)
+
+	// 默认 = 出厂顺序（9 个全可见）
+	code, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
+	if code != 200 {
+		t.Fatalf("get: %d", code)
+	}
+	order, _ := out["order"].([]any)
+	if len(order) != 9 || order[0] != "chat" || order[8] != "music" {
+		t.Fatalf("default order wrong: %v", order)
+	}
+	if cat, _ := out["catalog"].([]any); len(cat) != 9 {
+		t.Fatalf("catalog wrong: %v", cat)
+	}
+
+	// 重排 + 隐藏（只留 5 个，settings 提前）
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/launcher",
+		`{"order":["settings","weather","chat","sub","monitor"]}`)
+	if code != 200 {
+		t.Fatalf("post: %d %v", code, out)
+	}
+	_, out = doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
+	order, _ = out["order"].([]any)
+	if len(order) != 5 || order[0] != "settings" {
+		t.Fatalf("order not persisted: %v", order)
+	}
+
+	// 非法：未知 key / 重复 / 空
+	if code, _ = doJSON(t, "POST", srv.URL+"/api/v1/launcher", `{"order":["chat","nope"]}`); code != 400 {
+		t.Fatalf("unknown key want 400, got %d", code)
+	}
+	if code, _ = doJSON(t, "POST", srv.URL+"/api/v1/launcher", `{"order":["chat","chat"]}`); code != 400 {
+		t.Fatalf("dup key want 400, got %d", code)
+	}
+	if code, _ = doJSON(t, "POST", srv.URL+"/api/v1/launcher", `{"order":[]}`); code != 400 {
+		t.Fatalf("empty want 400, got %d", code)
+	}
+
+	// 损坏存储回落出厂（db 句柄直写坏 JSON）
+	srv2, db2 := newConfigServer(t, mk)
+	if err := db2.SaveSetting(storage.SettingKeyLauncher, "{broken"); err != nil {
+		t.Fatal(err)
+	}
+	_, out = doJSON(t, "GET", srv2.URL+"/api/v1/launcher", "")
+	if order, _ = out["order"].([]any); len(order) != 9 || order[0] != "chat" {
+		t.Fatalf("corrupt setting should fall back to default, got %v", order)
+	}
+}
