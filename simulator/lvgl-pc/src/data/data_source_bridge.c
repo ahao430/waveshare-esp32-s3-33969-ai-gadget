@@ -24,7 +24,7 @@ static char g_providers_url[256];
 static char g_voice_url[256];
 static char g_chat_url[256];
 static char g_subs_url[256];
-static char g_name[96];
+static char g_name[176]; /* "bridge(" + g_base(160) + ")" 余量 */
 static char g_provider[24];
 
 /* 前置声明：bridge_voice_interact / bridge_fetch_background 函数体在文件尾部 */
@@ -103,11 +103,14 @@ static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
                         long *fetched_ts, int *win_5h_s, int *week_s,
                         long *reset_week)
 {
-    char buf[BRIDGE_BUF_SIZE];
-    int status = http_get(url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
-    if (status != 200) return false;
-
-    cJSON *root = cJSON_Parse(buf);
+    /* 64KB 响应缓冲严禁上栈（ESP32 worker 栈 8-16KB 会炸穿——真机
+     * 随机堆损坏的根源）；malloc 后解析完立即释放。≥16KB 在 IDF
+     * 自动落 PSRAM，PC 走堆。 */
+    char *buf = malloc(BRIDGE_BUF_SIZE);
+    if (!buf) return false;
+    int status = http_get(url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS);
+    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
+    free(buf);
     if (!root) return false;
 
     bool ok = false;
@@ -143,10 +146,11 @@ static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
  * 失败静默保留旧值（监控页下次刷新重试）。 */
 static void fetch_servers(gadget_state_t *st)
 {
-    char buf[BRIDGE_BUF_SIZE];
-    if (http_get(g_komari_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return;
-
-    cJSON *root = cJSON_Parse(buf);
+    char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
+    if (!buf) return;
+    int status = http_get(g_komari_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS);
+    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
+    free(buf);
     if (!root) return;
 
     do {
@@ -199,10 +203,11 @@ static void fetch_servers(gadget_state_t *st)
  * 快照窗口映射：5h/weekly → 设备展示字段；credits → 余额副行。 */
 static void fetch_subscriptions(gadget_state_t *st)
 {
-    char buf[BRIDGE_BUF_SIZE];
-    if (http_get(g_subs_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS * 4) != 200) return;
-
-    cJSON *root = cJSON_Parse(buf);
+    char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
+    if (!buf) return;
+    int status = http_get(g_subs_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS * 4);
+    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
+    free(buf);
     if (!root) return;
     do {
         const cJSON *arr = cJSON_GetObjectItem(root, "subscriptions");
@@ -569,17 +574,26 @@ static int bridge_fetch_weather(ds_weather_t *out)
     if (wx_url[0] == '\0') {
         snprintf(wx_url, sizeof(wx_url), "%s/api/v1/weather", g_base);
     }
-    char buf[8192];
-    int status = http_get(wx_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
-    if (status != 200) {
+    char *buf = malloc(8192); /* 8KB 也不上栈（worker 栈预算紧） */
+    if (!buf) {
         if (out) out->valid = false;
         return -1;
     }
-    if (!out) return -1;
+    int status = http_get(wx_url, buf, 8192, BRIDGE_TIMEOUT_MS);
+    if (status != 200) {
+        free(buf);
+        if (out) out->valid = false;
+        return -1;
+    }
+    if (!out) {
+        free(buf);
+        return -1;
+    }
     memset(out, 0, sizeof(*out));
 
     int ret = -1;
-    cJSON *root = cJSON_Parse(buf);
+    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
+    free(buf); /* 解析完成即释放（后续仅用 root） */
     if (!root) return -1;
     const cJSON *snap = cJSON_GetObjectItem(root, "snapshot");
     if (snap) {
@@ -669,9 +683,20 @@ static int bridge_fetch_background(const char *save_path)
         snprintf(bg_url, sizeof(bg_url), "%s/api/v1/appearance/background", g_base);
     }
 
-    static char buf[256 * 1024];
+    /* 背景图响应缓冲 256KB：ESP 上 PSRAM 惰性分配（DRAM BSS 放不下） */
+    static char *buf;
+    const size_t buf_cap = 256 * 1024;
+    if (buf == NULL) {
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+        buf = heap_caps_malloc(buf_cap, MALLOC_CAP_SPIRAM);
+#else
+        buf = malloc(buf_cap);
+#endif
+        if (buf == NULL) return -1;
+    }
     size_t len = 0;
-    int status = http_get_bin(bg_url, buf, sizeof(buf), &len, BRIDGE_TIMEOUT_MS);
+    int status = http_get_bin(bg_url, buf, buf_cap, &len, BRIDGE_TIMEOUT_MS);
     if (status == 404) return 1;
     if (status != 200 || len == 0) return -1;
 

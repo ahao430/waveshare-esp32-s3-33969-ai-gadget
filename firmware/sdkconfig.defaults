@@ -12,3 +12,22 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_32=y
+# UI 移植（共享源需要）：Montserrat 20/28/48 + GIF 解码（伴宠动画）
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+CONFIG_LV_USE_GIF=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_USE_QRCODE=y
+# 内存水位（真机实测：UI+WiFi 后 internal 最大连续块 ~31KB）：
+# 任务栈允许入 PSRAM（LVGL 任务栈走 PSRAM）。
+# ⚠️ 勿开 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP：lwIP pbuf 入 PSRAM 后
+# Wi-Fi DMA 读不到（S3 限制）→ tcpip 线程结构体损坏 → Guru 崩溃重启
+#（真机踩坑 2026-11-15）。内部水位靠显示分块 20 行（main.c
+#  display_start_custom）适配，而非把 WiFi 缓冲搬去 PSRAM。
+# pthread 默认栈 3KB→8KB：HTTP+cJSON fetch 链会溢出（真机 netconn 踩坏崩溃）
+CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=8192
+# UI 构建/首帧渲染在 240MHz 上可超 5s（GB2312 字体+全量页面），
+# TWDT 放宽到 30s（真机 WDT 误杀 ui_init）
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# PSRAM 保持 80MHz：120MHz 对八线 PSRAM 为 IDF 实验特性（温漂风险），不开

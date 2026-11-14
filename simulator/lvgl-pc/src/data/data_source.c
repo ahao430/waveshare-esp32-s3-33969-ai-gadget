@@ -18,8 +18,8 @@ static gadget_state_t g_state = {
     .kimi_used_5h   = 12,
     .kimi_used_week = 35,
 
-    .sub_count = 0,
-    .subs = {{0}},
+    .sub_count = 0, /* subs 未列出 = 零填充（designated init 语义，
+                       显式 {{0}} 反触发新 GCC missing-braces 告警） */
 
     .server_count = 4,
     .servers = {

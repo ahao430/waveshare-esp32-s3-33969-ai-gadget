@@ -47,7 +47,7 @@ static lv_obj_t *g_reply_lbl;
 static lv_obj_t *g_wave[32];
 static lv_obj_t *g_ptt_btn;
 static lv_obj_t *g_cont_lbl;
-static lv_obj_t *g_poll_timer;
+static lv_timer_t *g_poll_timer;
 static int g_app_id = -1;
 static bool g_voice_enabled;
 static bool g_continuous; /* 连续对话（KEY3 短按切换；聊天应用自定义语义） */
@@ -58,7 +58,16 @@ static pthread_mutex_t g_voice_mu = PTHREAD_MUTEX_INITIALIZER;
 static bool g_voice_done;
 static char g_transcript[192];
 static char g_reply[CONV_TEXT];
-static int16_t g_capture[16000 * 8];
+/* 采集缓冲 256KB：ESP 上 PSRAM 惰性分配（DRAM BSS 放不下），PC 上 malloc */
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#define G_CAPTURE_ALLOC(n) heap_caps_malloc((n), MALLOC_CAP_SPIRAM)
+#else
+#include <stdlib.h>
+#define G_CAPTURE_ALLOC(n) malloc((n))
+#endif
+#define G_CAPTURE_SAMPLES (16000 * 8)
+static int16_t *g_capture;
 static int g_capture_frames;
 static int g_wave_amp;
 static bool g_wave_data;
@@ -96,7 +105,8 @@ static void *voice_worker(void *arg)
 {
     (void)arg;
     char transcript[192] = {0}, reply[CONV_TEXT] = {0};
-    ds_voice_interact(g_capture, g_capture_frames,
+    ds_voice_interact(g_capture ? g_capture : (const int16_t *)"",
+                      g_capture ? g_capture_frames : 0,
                       transcript, sizeof(transcript),
                       reply, sizeof(reply));
 
@@ -135,7 +145,13 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
         pthread_t tid;
-        pthread_create(&tid, NULL, voice_worker, NULL);
+        /* ESP32 worker 栈预算：HTTP 链 + cJSON + 会话处理，给 16KB
+         *（栈上大缓冲已全部改为堆分配） */
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, 16 * 1024);
+        pthread_create(&tid, &attr, voice_worker, NULL);
+        pthread_attr_destroy(&attr);
         pthread_detach(tid);
     }
 }
@@ -149,7 +165,11 @@ static void on_vs_speak(const char *visible, void *user)
 static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
 {
     (void)user;
-    if (g_capture_frames + frames <= (int)(sizeof(g_capture) / sizeof(g_capture[0]))) {
+    if (g_capture == NULL) {
+        g_capture = G_CAPTURE_ALLOC(G_CAPTURE_SAMPLES * sizeof(int16_t));
+        if (g_capture == NULL) return; /* 分配失败丢弃本帧 */
+    }
+    if (g_capture_frames + frames <= G_CAPTURE_SAMPLES) {
         memcpy(g_capture + g_capture_frames, pcm, (size_t)frames * 2);
         g_capture_frames += frames;
     }

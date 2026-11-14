@@ -1,21 +1,21 @@
-/* AI Gadget 固件（Phase 6 bring-up 第 2 批：触摸/音频/亮度/旋转）。
- * 上电流程：
- *   1. I2C 全地址扫描（证据见 docs/HARDWARE.md §2.7）
- *   2. 电源管理（AXP2101 轮询，PMU 缺失不阻塞）
- *   3. LVGL 测试面板：
- *      - 触摸：按下出现圆形指示器 + 坐标读数（§2.2 单点验证）
- *      - 亮度滑条：拖动调 0-100%（§2.1）
- *      - TONE 键 / KEY3(GPIO18)：440Hz 正弦 2s（§2.3 播放）
- *      - REC 键：录音 2s，屏显 peak/RMS（§2.3 录音非零校验）
- *      - ROT 键：0/90/180/270 旋转循环（§2.1）
- * 音频走独立 FreeRTOS 任务（esp_codec_dev_write 阻塞调用，不占 LVGL 线程）。
+/* AI Gadget 固件（Phase 6 后半：模拟器 UI 移植上真机，ADR-001 共享源）。
+ *
+ * 启动序（顺序是踩坑结论，勿调整）：
+ *   1. I2C 扫描（证据）+ PMU + 探针（RTC/PMU/TF）
+ *   2. 音频 codec 预初始化（后续语音用）
+ *   3. 显示 + ui_init()（模拟器共享 UI，mock 数据源起步）
+ *      + 充电屏保挂 lv_layer_top（跨 App 屏常驻）
+ *   4. Wi-Fi 最后启动；GOT_IP → SNTP 对时 + ds_init 切 bridge 数据源
+ *      （UI 构建必须先于 Wi-Fi：NVS 缓存凭据 2.4s 拿 IP 的竞态教训）
+ *
+ * KEY3（GPIO18）：屏保态=唤醒；正常态=ui_key_dispatch（Web 可配映射）。
+ * PWR/BOOT 短按接入与 KEY3 长按（PTT）：待按键输入服务阶段。
  */
 #include "bsp/esp-bsp.h"
+#include "bsp/touch.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_codec_dev.h"
-#include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
@@ -28,15 +28,15 @@
 #include "lvgl.h"
 #include "nvs_flash.h"
 #include "power_manager.h"
+#include "ui.h"
+#include "ui_keys.h"
+#include "data_source.h"
 
-#include <assert.h>
 #include <math.h>
-#include <stdarg.h>
-#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
-/* bring-up Wi-Fi 凭据（gitignore，不进仓库）；缺文件则跳过联网测试 */
+/* bring-up Wi-Fi 凭据（gitignore，不进仓库）；缺文件则跳过联网 */
 #if __has_include("wifi_secret.h")
 #include "wifi_secret.h"
 #else
@@ -47,44 +47,12 @@
 
 static const char *TAG = "gadget";
 
-/* ---- 音频参数（BSP 默认 I2S：mono duplex 16bit 22050Hz） ---- */
-#define AUD_RATE 22050
-#define TONE_HZ 440
-#define TONE_SECONDS 2
-#define TONE_SAMPLES (AUD_RATE * TONE_SECONDS)
-#define REC_SECONDS 2
-#define REC_SAMPLES (AUD_RATE * REC_SECONDS)
+/* 事件位 */
+#define EV_KEY3_BIT BIT0  /* KEY3 短按（去抖后） */
+#define EV_NET_BIT BIT1   /* Wi-Fi 拿到 IP → 对时 + 切 bridge 数据源 */
+#define EV_BOOT_BIT BIT2  /* BOOT(GPIO0) 短按 = 返回 */
 
-/* 音频任务事件位 */
-#define EV_TONE_BIT BIT0
-#define EV_REC_BIT BIT1
-#define EV_NET_BIT BIT2 /* Wi-Fi 拿到 IP → 联网任务做 Bridge 探活+压力测试 */
-#define EV_KEY3_BIT BIT3 /* KEY3：屏保态=退出屏保；正常态=播 TONE */
-
-/* ---- 充电屏保（PLAN §13.4，用户 2026-11-14 拍板）----
- * USB 供电态（充电中/充满未拔）屏幕常亮，但 idle 2 分钟后进屏保：
- * 纯黑背景 + 亮度 15% + 时钟/电量/缓慢绕圆呼吸点（分散像素负载防烧屏）。
- * 触摸或 KEY3 退出，再 idle 再进。USB 断开则不再进入。 */
-static lv_obj_t *g_saver;
-static lv_obj_t *g_saver_clock;
-static lv_obj_t *g_saver_batt;
-static lv_obj_t *g_saver_dot;
-static volatile bool g_saver_on;
-static int64_t g_last_activity_us;
-static int g_user_brightness = 100;
-#define SAVER_IDLE_MS (2 * 60 * 1000)
-#define SAVER_BRIGHTNESS 15
-
-static EventGroupHandle_t g_audio_ev;
-static esp_codec_dev_handle_t g_spk;
-static esp_codec_dev_handle_t g_mic;
-static int16_t *g_aud_buf; /* PSRAM：tone 播放 / 录音共用 */
-
-/* ---- LVGL 控件引用 ---- */
-static lv_obj_t *g_lbl_status;
-static lv_obj_t *g_touch_dot;
-static int g_touch_count;
-static char g_status_buf[128];
+static EventGroupHandle_t g_ev;
 
 static const struct {
     uint8_t addr;
@@ -123,299 +91,7 @@ static void i2c_scan(void)
     ESP_LOGI(TAG, "=== scan done（对照 docs/HARDWARE.md §2.6）===");
 }
 
-static void set_status(const char *fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    vsnprintf(g_status_buf, sizeof(g_status_buf), fmt, ap);
-    va_end(ap);
-    ESP_LOGI(TAG, "status: %s", g_status_buf);
-    /* BSP 语义：bsp_display_lock(0) = 无限等待（头文件 "0 will block
-     * indefinitely"）。注意：有限超时一旦超时会触发 FreeRTOS 递归互斥量
-     * 断言 vTaskPriorityDisinheritAfterTimeout（真机三次复现），禁用。 */
-    bsp_display_lock(0);
-    if (g_lbl_status != NULL) {
-        lv_label_set_text(g_lbl_status, g_status_buf);
-        lv_obj_center(g_lbl_status);
-    }
-    bsp_display_unlock();
-}
-
-/* ---- 充电屏保状态机 ---- */
-static void saver_mark_activity(void)
-{
-    g_last_activity_us = esp_timer_get_time();
-}
-
-/* 只做 LVGL 操作；跨任务调用需自备显示锁（本文件内在 LVGL 线程跑） */
-static void saver_enter(void)
-{
-    if (g_saver_on) return;
-    g_saver_on = true;
-    lv_obj_set_hidden(g_saver, false);
-    lv_obj_move_to_index(g_saver, -1); /* 置顶 */
-    bsp_display_brightness_set(SAVER_BRIGHTNESS);
-    ESP_LOGI(TAG, "screensaver ON (brightness %d%%)", SAVER_BRIGHTNESS);
-}
-
-static void saver_exit(void)
-{
-    if (!g_saver_on) return;
-    g_saver_on = false;
-    lv_obj_set_hidden(g_saver, true);
-    bsp_display_brightness_set(g_user_brightness);
-    saver_mark_activity();
-    ESP_LOGI(TAG, "screensaver OFF (brightness %d%%)", g_user_brightness);
-}
-
-/* 1s 周期：进入判定 + 时钟/电量/呼吸点更新（LVGL 定时器上下文） */
-static void saver_tick(lv_timer_t *t)
-{
-    (void)t;
-    battery_status_t st = power_manager_snapshot();
-    int64_t idle_ms = (esp_timer_get_time() - g_last_activity_us) / 1000;
-
-    static int beat = 0; /* bring-up 心跳：60s 一行，观测快照值与 idle 计时 */
-    if (++beat >= 60) {
-        beat = 0;
-        ESP_LOGI(TAG, "saver-tick: usb=%d bat=%d chg=%d pct=%d vmV=%d idle=%lldms",
-                 st.usb_connected, st.battery_present, st.charging,
-                 st.battery_percent, st.battery_voltage_mv, (long long)idle_ms);
-    }
-
-    if (!g_saver_on) {
-        if (st.usb_connected && idle_ms >= SAVER_IDLE_MS) {
-            saver_enter();
-        }
-        return;
-    }
-
-    /* 时钟（SNTP 对时后为真实时间） */
-    time_t now = time(NULL);
-    struct tm tmv;
-    localtime_r(&now, &tmv);
-    char buf[8];
-    strftime(buf, sizeof(buf), "%H:%M", &tmv);
-    lv_label_set_text(g_saver_clock, buf);
-
-    /* 电量行：充电中闪电语义 / USB 在位 / 纯电池 */
-    if (st.charging) {
-        lv_label_set_text_fmt(g_saver_batt, "%d%% charging", st.battery_percent);
-    } else if (st.usb_connected) {
-        lv_label_set_text_fmt(g_saver_batt, "%d%% usb", st.battery_percent);
-    } else {
-        lv_label_set_text_fmt(g_saver_batt, "%d%%", st.battery_percent);
-    }
-
-    /* 呼吸点：绕屏中心缓慢公转（~9 分钟一圈）+ 透明度呼吸，
-     * 避免固定亮区（AMOLED 烧屏防护核心） */
-    static float angle = 0;
-    static int phase = 0;
-    angle += 0.7f;
-    phase++;
-    const int cx = 240, cy = 225, r = 185;
-    float rad = angle * (float)M_PI / 180.0f;
-    lv_obj_set_pos(g_saver_dot,
-                   (int)(cx + r * cosf(rad)) - 6, (int)(cy + r * sinf(rad)) - 6);
-    lv_obj_set_style_bg_opa(g_saver_dot,
-                            (lv_opa_t)(110 + 90 * sinf(phase * 0.12f)), 0);
-}
-
-/* 屏保层触摸 → 退出（首次触摸仅唤醒） */
-static void saver_press_cb(lv_event_t *e)
-{
-    (void)e;
-    saver_exit();
-}
-
-/* ---- 音频任务：TONE / REC ---- */
-static void audio_task(void *arg)
-{
-    (void)arg;
-    esp_codec_dev_sample_info_t fs = {
-        .bits_per_sample = 16,
-        .channel = 1,
-        .sample_rate = AUD_RATE,
-    };
-
-    for (;;) {
-        EventBits_t bits = xEventGroupWaitBits(g_audio_ev,
-                                               EV_TONE_BIT | EV_REC_BIT | EV_KEY3_BIT,
-                                               pdTRUE, pdFALSE, portMAX_DELAY);
-        if (bits & EV_KEY3_BIT) {
-            saver_mark_activity();
-            if (g_saver_on) {
-                bsp_display_lock(0); /* 跨任务操作 LVGL：持显示锁（0=无限等） */
-                saver_exit();
-                bsp_display_unlock();
-                continue; /* 屏保态按键仅唤醒，不播音 */
-            }
-            xEventGroupSetBits(g_audio_ev, EV_TONE_BIT);
-        }
-        if (bits & EV_TONE_BIT) {
-            if (g_spk == NULL) {
-                set_status("spk init failed");
-                continue;
-            }
-            /* 生成 440Hz 正弦（幅值 0.35，防爆音） */
-            for (int i = 0; i < TONE_SAMPLES; i++) {
-                g_aud_buf[i] = (int16_t)(0.35 * 32767 *
-                                         sinf(2 * (float)M_PI * TONE_HZ * i / AUD_RATE));
-            }
-            esp_codec_dev_set_out_vol(g_spk, 70);
-            int t0 = (int)esp_timer_get_time();
-            esp_err_t err = esp_codec_dev_open(g_spk, &fs) == 0 ? ESP_OK : ESP_FAIL;
-            if (err == ESP_OK) {
-                err = esp_codec_dev_write(g_spk, g_aud_buf, TONE_SAMPLES * 2) == 0
-                          ? ESP_OK
-                          : ESP_FAIL;
-                esp_codec_dev_close(g_spk);
-            }
-            int ms = ((int)esp_timer_get_time() - t0) / 1000;
-            set_status("TONE 440Hz done\n%d ms %s", ms,
-                       err == ESP_OK ? "(audible?)" : "(write FAILED)");
-        }
-        if (bits & EV_REC_BIT) {
-            if (g_mic == NULL) {
-                set_status("mic init failed");
-                continue;
-            }
-            memset(g_aud_buf, 0, REC_SAMPLES * 2);
-            esp_codec_dev_set_in_gain(g_mic, 24.0); /* 42dB 削波（peak 顶 32767），降档 */
-            esp_err_t err = esp_codec_dev_open(g_mic, &fs) == 0 ? ESP_OK : ESP_FAIL;
-            if (err == ESP_OK) {
-                err = esp_codec_dev_read(g_mic, g_aud_buf, REC_SAMPLES * 2) == 0
-                          ? ESP_OK
-                          : ESP_FAIL;
-                esp_codec_dev_close(g_mic);
-            }
-            if (err != ESP_OK) {
-                set_status("REC read FAILED");
-                continue;
-            }
-            int64_t sum_sq = 0; /* int32 在 peak≈32767 时溢出（实测 2147483647） */
-            int16_t peak = 0;
-            for (int i = 0; i < REC_SAMPLES; i++) {
-                int16_t s = g_aud_buf[i];
-                sum_sq += (int64_t)s * s;
-                if (s < 0) s = -s;
-                if (s > peak) peak = s;
-            }
-            int rms = (int)sqrtf((float)(sum_sq / REC_SAMPLES));
-            set_status("REC 2s\npeak=%d rms=%d %s", peak, rms,
-                       peak > 1000 ? "(speaks!)" : "(quiet?)");
-        }
-    }
-}
-
-/* ---- KEY3（GPIO18，低有效）：屏保态=退出屏保；正常态=播 TONE ---- */
-static void IRAM_ATTR key3_isr(void *arg)
-{
-    /* 机械抖动去抖 200ms：一次按压的多个下降沿只取第一个
-     * （否则屏保唤醒后的第二个抖动事件会误触发 TONE，真机踩过） */
-    static int64_t last_us = 0;
-    int64_t now = esp_timer_get_time();
-    if (now - last_us < 200000) return;
-    last_us = now;
-
-    BaseType_t wakeup = pdFALSE;
-    xEventGroupSetBitsFromISR(g_audio_ev, EV_KEY3_BIT, &wakeup);
-    portYIELD_FROM_ISR(wakeup);
-}
-
-static void btn_tone_cb(lv_event_t *e)
-{
-    (void)e;
-    saver_mark_activity();
-    xEventGroupSetBits(g_audio_ev, EV_TONE_BIT);
-}
-
-static void btn_rec_cb(lv_event_t *e)
-{
-    (void)e;
-    saver_mark_activity();
-    xEventGroupSetBits(g_audio_ev, EV_REC_BIT);
-}
-
-static void slider_brightness_cb(lv_event_t *e)
-{
-    lv_obj_t *slider = lv_event_get_target(e);
-    int v = (int)lv_slider_get_value(slider);
-    g_user_brightness = v; /* 记住用户亮度，屏保退出时恢复 */
-    bsp_display_brightness_set(v);
-    saver_mark_activity();
-    ESP_LOGI(TAG, "brightness -> %d%%", v);
-}
-
-/* 屏幕级触摸事件：按下/拖动显示指示器与坐标，松手隐藏（§2.2） */
-static void screen_touch_cb(lv_event_t *e)
-{
-    lv_event_code_t code = lv_event_get_code(e);
-    lv_indev_t *indev = lv_indev_active();
-    if (indev == NULL) return;
-    lv_point_t p;
-    lv_indev_get_point(indev, &p);
-
-    if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
-        if (code == LV_EVENT_PRESSED) {
-            g_touch_count++;
-            saver_mark_activity();
-        }
-        /* 回调在 LVGL 线程内，直接操作控件（无需再加显示锁） */
-        lv_obj_set_pos(g_touch_dot, p.x - 18, p.y - 18);
-        lv_obj_set_hidden(g_touch_dot, false);
-        lv_obj_t *lbl = lv_obj_get_child(g_touch_dot, 0);
-        lv_label_set_text_fmt(lbl, "%d,%d", (int)p.x, (int)p.y);
-        ESP_LOGD(TAG, "touch %s (%d,%d)",
-                 code == LV_EVENT_PRESSED ? "down" : "move", p.x, p.y);
-    } else if (code == LV_EVENT_RELEASED) {
-        lv_obj_set_hidden(g_touch_dot, true);
-        ESP_LOGI(TAG, "touch released (total %d)", g_touch_count);
-    }
-}
-
-static lv_obj_t *make_btn(lv_obj_t *parent, const char *text, lv_event_cb_t cb)
-{
-    lv_obj_t *btn = lv_button_create(parent);
-    lv_obj_set_size(btn, 118, 56);
-    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *lbl = lv_label_create(btn);
-    lv_label_set_text(lbl, text);
-    lv_obj_center(lbl);
-    return btn;
-}
-
-/* ---- §2.4 TF 卡：挂载 + 32B 写读校验（无卡只告警） ---- */
-static void probe_sdcard(void)
-{
-    esp_err_t err = bsp_sdcard_mount();
-    if (err != ESP_OK || bsp_sdcard == NULL) {
-        ESP_LOGW(TAG, "sdcard mount: %s（未插卡可忽略）", esp_err_to_name(err));
-        return;
-    }
-    ESP_LOGI(TAG, "sdcard: mounted, cid.name=%s", bsp_sdcard->cid.name);
-
-    const char *path = BSP_SD_MOUNT_POINT "/bringup.txt";
-    FILE *f = fopen(path, "w");
-    if (f == NULL) {
-        ESP_LOGW(TAG, "sdcard write: open failed");
-        return;
-    }
-    fputs("bringup-ok-20261114", f);
-    fclose(f);
-
-    char buf[32] = { 0 };
-    f = fopen(path, "r");
-    if (f != NULL) {
-        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
-        buf[n] = '\0';
-        fclose(f);
-    }
-    ESP_LOGI(TAG, "sdcard r/w: %s",
-             strcmp(buf, "bringup-ok-20261114") == 0 ? "OK" : "MISMATCH");
-}
-
-/* ---- 共享 I2C 单字节读探针 ---- */
+/* ---- 探针（bring-up 保留项，结果进日志/HARDWARE.md） ---- */
 static esp_err_t i2c_read_u8(uint8_t dev_addr, uint8_t reg, uint8_t *val)
 {
     i2c_device_config_t dev = {
@@ -431,7 +107,6 @@ static esp_err_t i2c_read_u8(uint8_t dev_addr, uint8_t reg, uint8_t *val)
     return err;
 }
 
-/* ---- §2.6 PCF85063 RTC：BCD 读时分秒（sec.7=OSC 停振标志） ---- */
 static void probe_rtc(void)
 {
     uint8_t s = 0, m = 0, h = 0;
@@ -446,7 +121,6 @@ static void probe_rtc(void)
     }
 }
 
-/* ---- §2.5 AXP2101 原始寄存器（对表解释待电池接入后做） ---- */
 static void probe_pmu_raw(void)
 {
     uint8_t r00, r01, r03;
@@ -454,47 +128,299 @@ static void probe_pmu_raw(void)
     ok = ok && i2c_read_u8(0x34, 0x01, &r01) == ESP_OK;
     ok = ok && i2c_read_u8(0x34, 0x03, &r03) == ESP_OK;
     if (ok) {
-        ESP_LOGI(TAG, "axp2101 raw: reg00=0x%02X reg01=0x%02X reg03=0x%02X（datasheet 对表待做）",
+        ESP_LOGI(TAG, "axp2101 raw: reg00=0x%02X reg01=0x%02X reg03=0x%02X",
                  r00, r01, r03);
     } else {
         ESP_LOGW(TAG, "axp2101 raw read failed");
     }
 }
 
-/* ---- §2.10 Wi-Fi + Bridge 探活 + §2.1 PSRAM 压力测试 ---- */
-static int g_wifi_retry;
+static void probe_sdcard(void)
+{
+    esp_err_t err = bsp_sdcard_mount();
+    if (err != ESP_OK || bsp_sdcard == NULL) {
+        ESP_LOGW(TAG, "sdcard mount: %s（未插卡可忽略）", esp_err_to_name(err));
+        return;
+    }
+    ESP_LOGI(TAG, "sdcard: mounted, cid.name=%s", bsp_sdcard->cid.name);
+}
 
+/* ---- 自建显示管线（复刻 bsp_display_start，两处真机调优） ----
+ * 1) buffer_height 50→20（480×20×2=19.2KB/块）：Wi-Fi 上线后内部 RAM
+ *    最大连续块实测仅 ~31KB，50 行分块（48KB）的 SPI DMA 分配失败
+ *    →"Draw bitmap failed: NO_MEM"→ 花屏卡死（屏保全屏渲染首触）；
+ * 2) LVGL 任务栈入 PSRAM。max_transfer_sz 同步按块匹配（BSP 原值 450KB）。 */
+static void rounder_event_cb(lv_event_t *e)
+{
+    lv_area_t *area = (lv_area_t *)lv_event_get_param(e);
+    area->x1 = (area->x1 >> 1) << 1;
+    area->y1 = (area->y1 >> 1) << 1;
+    area->x2 = ((area->x2 >> 1) << 1) + 1;
+    area->y2 = ((area->y2 >> 1) << 1) + 1;
+}
+
+static lv_display_t *display_start_custom(void)
+{
+    esp_lv_adapter_config_t lv_cfg = ESP_LV_ADAPTER_DEFAULT_CONFIG();
+    lv_cfg.stack_in_psram = true;
+    lv_cfg.task_stack_size = 16 * 1024; /* 页面刷新回调里同步跑 HTTP+cJSON */
+    ESP_ERROR_CHECK(esp_lv_adapter_init(&lv_cfg));
+
+    const bsp_display_config_t disp_config = {
+        .max_transfer_sz = 480 * 20 * 2, /* SPI 分块上限（内部 DMA 预算内） */
+    };
+    esp_lcd_panel_handle_t panel = NULL;
+    esp_lcd_panel_io_handle_t io = NULL;
+    ESP_ERROR_CHECK(bsp_display_new(&disp_config, &panel, &io));
+
+    /* 分块渲染：20 行/块（19.2KB，内部 DMA 水位内）。真机教训：
+     * buffer_height=480 全帧刷会触发 DMA 洪水→花屏（同 bring-up 坑#2）；
+     * QSPI 也不支持 TEAR DOUBLE_FULL。顺滑度靠 PSRAM 120MHz + 后续
+     * 渲染优化补。 */
+    const esp_lv_adapter_display_config_t disp_cfg = {
+        .panel = panel,
+        .panel_io = io,
+        .profile = {
+            .interface = ESP_LV_ADAPTER_PANEL_IF_OTHER,
+            .rotation = ESP_LV_ADAPTER_ROTATE_0,
+            .hor_res = 480,
+            .ver_res = 480,
+            .buffer_height = 20,
+            .use_psram = true,
+            .enable_ppa_accel = false,
+            .require_double_buffer = true,
+        },
+        .tear_avoid_mode = ESP_LV_ADAPTER_TEAR_AVOID_MODE_NONE,
+    };
+    lv_display_t *disp = esp_lv_adapter_register_display(&disp_cfg);
+    if (disp == NULL) return NULL;
+    lv_display_add_event_cb(disp, rounder_event_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+
+    /* 触摸参数与 BSP 默认一致（swap_xy=1 / mirror_y=1） */
+    bsp_display_cfg_t touch_sel = {
+        .touch_flags = { .swap_xy = 1, .mirror_x = 0, .mirror_y = 1 },
+    };
+    esp_lcd_touch_handle_t tp = NULL;
+    ESP_ERROR_CHECK(bsp_touch_new(&touch_sel, &tp));
+    const esp_lv_adapter_touch_config_t touch_cfg =
+        ESP_LV_ADAPTER_TOUCH_DEFAULT_CONFIG(disp, tp);
+    if (esp_lv_adapter_register_touch(&touch_cfg) == NULL) return NULL;
+
+    ESP_ERROR_CHECK(bsp_display_brightness_init());
+    ESP_ERROR_CHECK(esp_lv_adapter_start());
+    return disp;
+}
+
+/* ---- 充电屏保（PLAN §13.4）：挂 lv_layer_top，跨 App 屏常驻 ---- */
+static lv_obj_t *g_saver;
+static lv_obj_t *g_saver_clock;
+static lv_obj_t *g_saver_batt;
+static lv_obj_t *g_saver_dot;
+static volatile bool g_saver_on;
+static int64_t g_key_activity_us; /* KEY3 非触摸，LVGL inactivity 不感知 */
+static int g_user_brightness = 100;
+#define SAVER_IDLE_MS (2 * 60 * 1000)
+#define SAVER_BRIGHTNESS 15
+
+static void saver_enter(void)
+{
+    if (g_saver_on) return;
+    g_saver_on = true;
+    lv_obj_clear_flag(g_saver, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_to_index(g_saver, -1); /* 顶到 layer_top 最上（状态栏之上） */
+    bsp_display_brightness_set(SAVER_BRIGHTNESS);
+    ESP_LOGI(TAG, "screensaver ON (brightness %d%%)", SAVER_BRIGHTNESS);
+}
+
+static void saver_exit(void)
+{
+    if (!g_saver_on) return;
+    g_saver_on = false;
+    lv_obj_add_flag(g_saver, LV_OBJ_FLAG_HIDDEN);
+    bsp_display_brightness_set(g_user_brightness);
+    ESP_LOGI(TAG, "screensaver OFF (brightness %d%%)", g_user_brightness);
+}
+
+static void heap_report(const char *where)
+{
+    ESP_LOGI(TAG, "heap[%s]: total=%u internal=%u largest_int=%u largest_dma=%u",
+             where, (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_free_internal_heap_size(),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+}
+
+static void saver_tick(lv_timer_t *t)
+{
+    (void)t;
+    battery_status_t st = power_manager_snapshot();
+
+    static int beat = 0;
+    if (++beat >= 30) { /* 30s 心跳：内存水位观测（UI 移植期诊断） */
+        beat = 0;
+        heap_report("tick");
+    }
+
+    /* idle = LVGL 输入不活动时间 与 KEY3 距今 较小者 */
+    uint32_t lv_idle = lv_display_get_inactive_time(NULL);
+    int64_t key_idle = (esp_timer_get_time() - g_key_activity_us) / 1000;
+    int64_t idle_ms = key_idle < (int64_t)lv_idle ? key_idle : (int64_t)lv_idle;
+
+    if (!g_saver_on) {
+        if (st.usb_connected && idle_ms >= SAVER_IDLE_MS) {
+            saver_enter();
+        }
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char buf[8];
+    strftime(buf, sizeof(buf), "%H:%M", &tmv);
+    lv_label_set_text(g_saver_clock, buf);
+
+    if (st.charging) {
+        lv_label_set_text_fmt(g_saver_batt, "%d%% charging", st.battery_percent);
+    } else if (st.usb_connected) {
+        lv_label_set_text_fmt(g_saver_batt, "%d%% usb", st.battery_percent);
+    } else {
+        lv_label_set_text_fmt(g_saver_batt, "%d%%", st.battery_percent);
+    }
+
+    /* 呼吸点绕圆缓移 + 透明度呼吸（AMOLED 烧屏防护：无固定亮区） */
+    static float angle = 0;
+    static int phase = 0;
+    angle += 0.7f;
+    phase++;
+    const int cx = 240, cy = 225, r = 185;
+    float rad = angle * (float)M_PI / 180.0f;
+    lv_obj_set_pos(g_saver_dot,
+                   (int)(cx + r * cosf(rad)) - 6, (int)(cy + r * sinf(rad)) - 6);
+    lv_obj_set_style_bg_opa(g_saver_dot,
+                            (lv_opa_t)(110 + 90 * sinf(phase * 0.12f)), 0);
+}
+
+static void saver_press_cb(lv_event_t *e)
+{
+    (void)e;
+    saver_exit();
+}
+
+static void saver_build(void)
+{
+    g_saver = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_saver, 480, 480);
+    lv_obj_set_pos(g_saver, 0, 0);
+    lv_obj_set_style_bg_color(g_saver, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_saver, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_saver, 0, 0);
+    lv_obj_set_style_radius(g_saver, 0, 0);
+    lv_obj_set_style_pad_all(g_saver, 0, 0);
+    lv_obj_set_scrollbar_mode(g_saver, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_add_flag(g_saver, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_saver, saver_press_cb, LV_EVENT_PRESSED, NULL);
+
+    g_saver_clock = lv_label_create(g_saver);
+    lv_label_set_text(g_saver_clock, "--:--");
+    lv_obj_set_style_text_font(g_saver_clock, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(g_saver_clock, lv_color_hex(0x8A8F9E), 0);
+    lv_obj_align(g_saver_clock, LV_ALIGN_CENTER, 0, -10);
+
+    g_saver_batt = lv_label_create(g_saver);
+    lv_label_set_text(g_saver_batt, "");
+    lv_obj_set_style_text_font(g_saver_batt, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(g_saver_batt, lv_color_hex(0x5A5F6E), 0);
+    lv_obj_align(g_saver_batt, LV_ALIGN_CENTER, 0, 34);
+
+    g_saver_dot = lv_obj_create(g_saver);
+    lv_obj_set_size(g_saver_dot, 12, 12);
+    lv_obj_set_style_radius(g_saver_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(g_saver_dot, lv_color_hex(0x7C5CFF), 0);
+    lv_obj_set_style_bg_opa(g_saver_dot, LV_OPA_40, 0);
+    lv_obj_set_style_border_width(g_saver_dot, 0, 0);
+    lv_obj_clear_flag(g_saver_dot, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_pad_all(g_saver_dot, 0, 0);
+
+    lv_timer_create(saver_tick, 1000, NULL);
+    g_key_activity_us = esp_timer_get_time();
+}
+
+/* ---- 实体键：去抖 ISR → 事件位 → 唤醒/UI 分发任务 ---- */
+static void IRAM_ATTR key_gpio_isr(void *arg)
+{
+    /* 机械抖动去抖 200ms（一次按压的多个沿只取第一个） */
+    static int64_t last_us = 0;
+    int64_t now = esp_timer_get_time();
+    if (now - last_us < 200000) return;
+    last_us = now;
+
+    BaseType_t wakeup = pdFALSE;
+    xEventGroupSetBitsFromISR(g_ev, (uint32_t)(uintptr_t)arg, &wakeup);
+    portYIELD_FROM_ISR(wakeup);
+}
+
+static void key_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        EventBits_t bits = xEventGroupWaitBits(g_ev, EV_KEY3_BIT | EV_BOOT_BIT,
+                                               pdTRUE, pdFALSE, portMAX_DELAY);
+        g_key_activity_us = esp_timer_get_time();
+        bsp_display_lock(0); /* BSP 语义：0=无限等；有限超时会触发断言 */
+        if (g_saver_on) {
+            saver_exit(); /* 屏保态按键仅唤醒，不进 App 分发 */
+        } else if (bits & EV_BOOT_BIT) {
+            ui_key_dispatch(UI_KEY_BOOT); /* 默认=返回（Web 可配） */
+        } else {
+            ui_key_dispatch(UI_KEY_KEY3); /* 默认=App 自定义（Web 可配） */
+        }
+        bsp_display_unlock();
+    }
+}
+
+/* ---- Wi-Fi：GOT_IP → SNTP 对时 + ds_init 切 bridge ---- */
 static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        g_wifi_retry++;
-        ESP_LOGW(TAG, "wifi disconnected, retry #%d", g_wifi_retry);
-        if (g_wifi_retry <= 20) {
-            esp_wifi_connect();
-        } else {
-            set_status("WiFi: FAILED\n(check ssid/pass)");
-        }
+        ESP_LOGW(TAG, "wifi disconnected, retry");
+        esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
-        set_status("WiFi: " IPSTR "\nbridge...", IP2STR(&evt->ip_info.ip));
-        /* SNTP 对时（充电屏保时钟用；CST-8 = 中国标准时间） */
+        ESP_LOGI(TAG, "wifi got ip: " IPSTR, IP2STR(&evt->ip_info.ip));
+        xEventGroupSetBits(g_ev, EV_NET_BIT);
+    }
+}
+
+static void net_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        xEventGroupWaitBits(g_ev, EV_NET_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
+        /* SNTP 对时（屏保时钟/会话时间戳） */
         setenv("TZ", "CST-8", 1);
         tzset();
         esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
         esp_sntp_setservername(0, "ntp.aliyun.com");
         esp_sntp_setservername(1, "pool.ntp.org");
         esp_sntp_init();
-        xEventGroupSetBits(g_audio_ev, EV_NET_BIT);
+
+        /* 切 bridge 数据源：UI 各页轮询将逐步拿到真实数据
+         *（launcher 布局/按键映射/天气/订阅/AstrBot 会话） */
+        if (strlen(BRIDGE_HOST) > 0) {
+            ds_init("bridge", BRIDGE_HOST, NULL);
+            ESP_LOGI(TAG, "data source -> bridge(%s)", BRIDGE_HOST);
+        }
     }
 }
 
 static void wifi_start(void)
 {
     if (strlen(WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi 测试");
+        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi");
         return;
     }
     esp_err_t err = nvs_flash_init();
@@ -519,191 +445,57 @@ static void wifi_start(void)
     ESP_LOGI(TAG, "wifi connecting to \"%s\" ...", WIFI_SSID);
 }
 
-static void net_task(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        xEventGroupWaitBits(g_audio_ev, EV_NET_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-
-        /* Bridge 探活（§2.10）：HTTP GET /api/v1/device/status */
-        char url[96];
-        snprintf(url, sizeof(url), "%s/api/v1/device/status", BRIDGE_HOST);
-        esp_http_client_config_t cfg = {
-            .url = url,
-            .timeout_ms = 5000,
-        };
-        esp_http_client_handle_t c = esp_http_client_init(&cfg);
-        esp_err_t err = esp_http_client_perform(c);
-        int code = (err == ESP_OK) ? esp_http_client_get_status_code(c) : 0;
-        int64_t len = (err == ESP_OK) ? esp_http_client_get_content_length(c) : 0;
-        esp_http_client_cleanup(c);
-        set_status("Bridge: HTTP %d\n(len=%d)%s", code, (int)len,
-                   code == 200 ? " OK!" : " FAIL");
-        /* PSRAM 全屏重绘压力测试已移除（bring-up 一次性探针，数据已采集）：
-          真机实测全屏 4fps×30s 连续重绘会卡死显示管线——白屏、LVGL
-          任务挂起（系统/Wi-Fi/音频正常，ping 通），需断电重启恢复。
-          结论（HARDWARE.md §2.7）：UI 必须局部重绘 + 帧率节流。 */
-    }
-}
-
-static void build_ui(void)
-{
-    lv_obj_t *root = lv_screen_active();
-    lv_obj_set_style_bg_color(root, lv_color_hex(0x0B1020), 0);
-
-    /* 标题（用户反馈“字小”→ 32 号） */
-    lv_obj_t *title = lv_label_create(root);
-    lv_label_set_text(title, "AI Gadget");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xEAF0FF), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 26);
-
-    lv_obj_t *sub = lv_label_create(root);
-    lv_label_set_text(sub, "bringup 2: touch / audio / brightness");
-    lv_obj_set_style_text_font(sub, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(sub, lv_color_hex(0x7F8CBB), 0);
-    lv_obj_align(sub, LV_ALIGN_TOP_MID, 0, 68);
-
-    /* 状态区（中央） */
-    g_lbl_status = lv_label_create(root);
-    lv_label_set_text(g_lbl_status, "ready");
-    lv_obj_set_style_text_font(g_lbl_status, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(g_lbl_status, lv_color_hex(0x9FE870), 0);
-    lv_obj_center(g_lbl_status);
-    lv_obj_set_y(g_lbl_status, -30);
-
-    /* 亮度滑条 */
-    lv_obj_t *slider = lv_slider_create(root);
-    lv_obj_set_width(slider, 300);
-    lv_slider_set_range(slider, 10, 100);
-    lv_slider_set_value(slider, 100, LV_ANIM_OFF);
-    lv_obj_add_event_cb(slider, slider_brightness_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    lv_obj_align(slider, LV_ALIGN_BOTTOM_MID, 0, -130);
-
-    /* 按钮行 */
-    lv_obj_t *row = lv_obj_create(root);
-    lv_obj_remove_style_all(row);
-    lv_obj_set_size(row, 400, 60);
-    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, -50);
-    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_t *b1 = make_btn(row, "TONE", btn_tone_cb);
-    lv_obj_t *b2 = make_btn(row, "REC", btn_rec_cb);
-    (void)b1;
-    (void)b2;
-
-    /* 触摸指示器（默认隐藏） */
-    g_touch_dot = lv_obj_create(root);
-    lv_obj_set_size(g_touch_dot, 36, 36);
-    lv_obj_set_style_radius(g_touch_dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(g_touch_dot, lv_color_hex(0x7C5CFF), 0);
-    lv_obj_set_style_bg_opa(g_touch_dot, LV_OPA_60, 0);
-    lv_obj_set_style_border_width(g_touch_dot, 0, 0);
-    lv_obj_set_hidden(g_touch_dot, true);
-    lv_obj_set_clickable(g_touch_dot, false);
-    lv_obj_set_style_pad_all(g_touch_dot, 0, 0);
-    lv_obj_t *dot_lbl = lv_label_create(g_touch_dot);
-    lv_label_set_text(dot_lbl, "");
-    lv_obj_set_style_text_font(dot_lbl, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(dot_lbl, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_center(dot_lbl);
-
-    /* 屏幕级触摸事件（ bubbled from indev） */
-    lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_PRESSED, NULL);
-    lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_PRESSING, NULL);
-    lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_RELEASED, NULL);
-
-    /* ---- 充电屏保层（置顶、默认隐藏；PLAN §13.4） ---- */
-    g_saver = lv_obj_create(root);
-    lv_obj_set_size(g_saver, 480, 480);
-    lv_obj_set_pos(g_saver, 0, 0);
-    lv_obj_set_style_bg_color(g_saver, lv_color_hex(0x000000), 0);
-    lv_obj_set_style_border_width(g_saver, 0, 0);
-    lv_obj_set_style_radius(g_saver, 0, 0);
-    lv_obj_set_style_pad_all(g_saver, 0, 0);
-    lv_obj_set_scrollbar_mode(g_saver, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_set_hidden(g_saver, true);
-    lv_obj_add_event_cb(g_saver, saver_press_cb, LV_EVENT_PRESSED, NULL);
-
-    g_saver_clock = lv_label_create(g_saver);
-    lv_label_set_text(g_saver_clock, "--:--");
-    lv_obj_set_style_text_font(g_saver_clock, &lv_font_montserrat_32, 0);
-    lv_obj_set_style_text_color(g_saver_clock, lv_color_hex(0x8A8F9E), 0);
-    lv_obj_align(g_saver_clock, LV_ALIGN_CENTER, 0, -10);
-
-    g_saver_batt = lv_label_create(g_saver);
-    lv_label_set_text(g_saver_batt, "");
-    lv_obj_set_style_text_font(g_saver_batt, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(g_saver_batt, lv_color_hex(0x5A5F6E), 0);
-    lv_obj_align(g_saver_batt, LV_ALIGN_CENTER, 0, 34);
-
-    g_saver_dot = lv_obj_create(g_saver);
-    lv_obj_set_size(g_saver_dot, 12, 12);
-    lv_obj_set_style_radius(g_saver_dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(g_saver_dot, lv_color_hex(0x7C5CFF), 0);
-    lv_obj_set_style_bg_opa(g_saver_dot, LV_OPA_40, 0);
-    lv_obj_set_style_border_width(g_saver_dot, 0, 0);
-    lv_obj_set_clickable(g_saver_dot, false);
-    lv_obj_set_style_pad_all(g_saver_dot, 0, 0);
-
-    lv_timer_create(saver_tick, 1000, NULL);
-    saver_mark_activity(); /* 启动即开始计时 idle */
-}
-
 void app_main(void)
 {
     i2c_scan();
 
     esp_err_t pm_err = power_manager_init(bsp_i2c_get_handle());
     if (pm_err != ESP_OK) {
-        ESP_LOGW(TAG, "power_manager unavailable: %s（UI 显示 USB/-- 兜底）",
-                 esp_err_to_name(pm_err));
+        ESP_LOGW(TAG, "power_manager unavailable: %s", esp_err_to_name(pm_err));
     }
     probe_rtc();
     probe_pmu_raw();
     probe_sdcard();
 
-    /* 音频：I2S + codec（speaker 的 pa_pin=46 由 BSP 管理） */
-    ESP_ERROR_CHECK(bsp_audio_init(NULL)); /* 默认 mono duplex 16bit 22050Hz */
-    g_spk = bsp_audio_codec_speaker_init();
-    g_mic = bsp_audio_codec_microphone_init();
-    ESP_LOGI(TAG, "codec: spk=%p mic=%p", (void *)g_spk, (void *)g_mic);
+    /* 音频 codec 预初始化（语音链路后续阶段接入 voice_session） */
+    ESP_ERROR_CHECK(bsp_audio_init(NULL));
+    (void)bsp_audio_codec_speaker_init();
+    (void)bsp_audio_codec_microphone_init();
 
-    g_aud_buf = heap_caps_malloc(TONE_SAMPLES * 2, MALLOC_CAP_SPIRAM);
-    if (g_aud_buf == NULL) {
-        /* PSRAM 分配失败兜底内部 RAM（tone 与 rec 取大者） */
-        g_aud_buf = heap_caps_malloc(TONE_SAMPLES * 2, MALLOC_CAP_INTERNAL);
-    }
-    assert(g_aud_buf != NULL);
+    g_ev = xEventGroupCreate();
+    xTaskCreate(key_task, "key_dispatch", 4096, NULL, 5, NULL);
+    xTaskCreate(net_task, "net_switch", 5120, NULL, 5, NULL);
 
-    g_audio_ev = xEventGroupCreate();
-    xTaskCreate(audio_task, "audio_test", 4096, NULL, 5, NULL);
-    xTaskCreate(net_task, "net_test", 6144, NULL, 5, NULL);
-
-    /* KEY3（GPIO18）：外部上拉 3V3，按下接地 */
+    /* 实体键输入：KEY3(GPIO18) 短按=App 自定义；BOOT(GPIO0) 短按=返回。
+     * （PWRON 为 PMU 键，IRQ 未接 ESP32——Muse 坑#2，短按检测待 AXP2101
+     * IRQ 状态轮询方案，PLAN §13.3。）长按语义在固件侧：BOOT 长按=下载，
+     * PWRON 长按=PMU 关机，均不可配置。 */
     gpio_config_t io = {
-        .pin_bit_mask = 1ULL << 18,
+        .pin_bit_mask = (1ULL << 18) | (1ULL << 0),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .intr_type = GPIO_INTR_NEGEDGE,
     };
     ESP_ERROR_CHECK(gpio_config(&io));
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
-    ESP_ERROR_CHECK(gpio_isr_handler_add(18, key3_isr, NULL));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(18, key_gpio_isr, (void *)(uintptr_t)EV_KEY3_BIT));
+    ESP_ERROR_CHECK(gpio_isr_handler_add(0, key_gpio_isr, (void *)(uintptr_t)EV_BOOT_BIT));
 
-    /* 显示与 UI 先于 Wi-Fi 启动：GOT_IP 事件会跨任务更新 UI 标签，
-     * 必须保证标签与显示锁已就绪（真机崩溃教训：NVS 缓存凭据后
-     * Wi-Fi 2.4s 内拿到 IP，早于 UI 构建触发竞态） */
-    bsp_display_start();
+    /* 显示 + 共享 UI（mock 数据源起步）+ 屏保，先于 Wi-Fi（竞态教训） */
+    heap_report("pre-display");
+    if (display_start_custom() == NULL) {
+        ESP_LOGE(TAG, "display_start_custom failed");
+        return;
+    }
     bsp_display_backlight_on();
+    heap_report("post-display");
 
-    /* 显示锁：0=无限等待（LVGL 任务已启动，必能拿到；首帧渲染中会稍等） */
     bsp_display_lock(0);
-    build_ui();
+    ui_init();
+    saver_build();
     bsp_display_unlock();
+    heap_report("post-ui");
 
     wifi_start();
-
-    ESP_LOGI(TAG, "bringup4 ready: 触摸/滑条/TONE/REC + WiFi/Bridge/stress");
+    ESP_LOGI(TAG, "gadget up: shared UI + screensaver; wifi last");
 }

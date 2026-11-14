@@ -186,7 +186,7 @@ static void detail_tile_build(lv_obj_t *tile, const gadget_server_t *srv)
     pill_add(card, srv->online);
 
     if (srv->online) {
-        char vb[4][16];
+        char vb[4][32]; /* "xxx.xK↓ xxx.xK↑"：↑↓ 为 3 字节 UTF-8，上限 ~26 字节 */
         snprintf(vb[0], sizeof(vb[0]), "%d%%", srv->cpu_pct);
         snprintf(vb[1], sizeof(vb[1]), "%d%%", srv->mem_pct);
         snprintf(vb[2], sizeof(vb[2]), "%d%%", srv->disk_pct);

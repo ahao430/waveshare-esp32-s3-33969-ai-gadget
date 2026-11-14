@@ -37,8 +37,12 @@ static void tile_click_cb(lv_event_t *e);
 
 static uint16_t rgb565_pack(int r, int g, int b)
 {
-    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
-    if (r < 0) r = 0; if (g < 0) g = 0; if (b < 0) b = 0;
+    if (r > 255) r = 255;
+    if (g > 255) g = 255;
+    if (b > 255) b = 255;
+    if (r < 0) r = 0;
+    if (g < 0) g = 0;
+    if (b < 0) b = 0;
     /* RGB565：R5=bit11-15，G6=bit5-10（<<5，曾误写 <<7 侵入 R 区，
      * G/R 互相污染——橙系主题下暴露为整体偏绿） */
     return (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
@@ -367,7 +371,7 @@ void ui_launcher_build(void)
     ui_dots_update(g_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
     lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);
 
-        /* 时钟定时器：rebuild 时先删旧    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
+    /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
     static lv_timer_t *clock_timer;
     if (clock_timer) lv_timer_delete(clock_timer);
     clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);

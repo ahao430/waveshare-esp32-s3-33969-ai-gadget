@@ -1,4 +1,45 @@
-idf_component_register(SRCS "main.c" INCLUDE_DIRS ".")
+# ---- ADR-001：与模拟器共享 UI 源码（Phase 6 UI 移植）----
+# 模拟器侧新增 .c 文件时，此处与 simulator/lvgl-pc/CMakeLists.txt 同步追加。
+set(SIM_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../simulator/lvgl-pc/src)
 
-# Phase 1 起，把模拟器共享 UI 源编入固件（ADR-001）：
-# esp_add_component_source? 届时直接把 simulator/lvgl-pc/src/ui/*.c 追加到 SRCS。
+set(UI_SRC_LIST
+    # UI（Launcher / 状态栏 / 各 App 页）
+    ${SIM_SRC_DIR}/ui/app_manager.c
+    ${SIM_SRC_DIR}/ui/companion.c
+    ${SIM_SRC_DIR}/ui/ui_app_pages.c
+    ${SIM_SRC_DIR}/ui/ui_conversation.c
+    ${SIM_SRC_DIR}/ui/ui_gesture.c
+    ${SIM_SRC_DIR}/ui/ui_keys.c
+    ${SIM_SRC_DIR}/ui/ui_launcher.c
+    ${SIM_SRC_DIR}/ui/ui_monitor.c
+    ${SIM_SRC_DIR}/ui/ui_settings.c
+    ${SIM_SRC_DIR}/ui/ui_statusbar.c
+    ${SIM_SRC_DIR}/ui/ui_theme.c
+    ${SIM_SRC_DIR}/ui/ui_weather.c
+    # 中文字体子集（GB2312-L1，gen_cn_font.sh 生成；flash 预算见 PLAN §14）
+    ${SIM_SRC_DIR}/ui/fonts/font_cn_12.c
+    ${SIM_SRC_DIR}/ui/fonts/font_cn_14.c
+    ${SIM_SRC_DIR}/ui/fonts/font_cn_16.c
+    ${SIM_SRC_DIR}/ui/fonts/font_cn_20.c
+    # 数据源（mock 起步；Wi-Fi 就绪后 ds_init 切 bridge）
+    ${SIM_SRC_DIR}/data/data_source.c
+    ${SIM_SRC_DIR}/data/data_source_mock.c
+    ${SIM_SRC_DIR}/data/data_source_bridge.c
+    ${SIM_SRC_DIR}/data/http_client.c
+    ${SIM_SRC_DIR}/data/mock_data.c
+    # 语音会话（模拟器为 mock 音频；真机编解码 Phase 6 后接）
+    ${SIM_SRC_DIR}/voice/voice_session.c
+    ${SIM_SRC_DIR}/voice/audio_mock.c
+)
+
+idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
+    INCLUDE_DIRS "." "${SIM_SRC_DIR}" "${SIM_SRC_DIR}/ui" "${SIM_SRC_DIR}/ui/fonts"
+    "${SIM_SRC_DIR}/data" "${SIM_SRC_DIR}/voice"
+    PRIV_REQUIRES
+        cjson                                   # data_source_bridge.c 解析 Bridge 响应
+        waveshare__esp32_s3_touch_amoled_2_16   # BSP（显示/触摸/音频/I2C）
+        power_manager                           # AXP2101 电池/充电
+        esp_wifi esp_event esp_netif nvs_flash  # Wi-Fi/NVS
+        esp_timer                               # esp_timer_get_time
+        esp_driver_gpio esp_driver_i2c          # KEY3 ISR / I2C 扫描探针
+        lwip)                                   # esp_sntp 对时

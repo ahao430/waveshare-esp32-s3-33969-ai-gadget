@@ -45,7 +45,13 @@ static void *wx_worker(void *arg)
 static void wx_fetch_start(void)
 {
     pthread_t tid;
-    pthread_create(&tid, NULL, wx_worker, NULL);
+    /* ESP32 worker 栈预算：HTTP 链（host/path/req/chunk≈5KB）+ cJSON
+     * 递归 + 帧开销，给 16KB（栈上大缓冲已全部改为堆分配） */
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 16 * 1024);
+    pthread_create(&tid, &attr, wx_worker, NULL);
+    pthread_attr_destroy(&attr);
     pthread_detach(tid);
 }
 

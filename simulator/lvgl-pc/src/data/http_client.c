@@ -160,7 +160,7 @@ static int read_chunked_body(int fd, http_stream_cb_t on_data, void *user)
             return -8;
         }
 
-        char chunk[8192];
+        char chunk[2048]; /* 勿超 2KB：ESP32 worker 栈预算紧（多次小拷贝换栈安全） */
         while (sz > 0) {
             size_t take = sz < sizeof(chunk) ? sz : sizeof(chunk);
             if (read_exact(fd, chunk, take) < 0) return -7;
@@ -202,7 +202,7 @@ int http_post_json_stream(const char *url, const char *body,
         int rc = read_chunked_body(fd, on_data, user);
         if (rc != 0) { close(fd); return rc; }
     } else {
-        char buf[8192];
+        char buf[2048]; /* 勿超 2KB：ESP32 worker 栈预算紧 */
         ssize_t n;
         while ((n = read(fd, buf, sizeof(buf))) > 0) {
             if (on_data) on_data(buf, (size_t)n, user);
@@ -374,7 +374,7 @@ int http_post_raw_stream(const char *url, const char *content_type,
         int rc = read_chunked_body(fd, on_data, user);
         if (rc != 0) { close(fd); return rc; }
     } else {
-        char buf[8192];
+        char buf[2048]; /* 勿超 2KB：ESP32 worker 栈预算紧 */
         ssize_t n;
         while ((n = read(fd, buf, sizeof(buf))) > 0) {
             if (on_data) on_data(buf, (size_t)n, user);
