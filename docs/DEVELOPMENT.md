@@ -307,6 +307,37 @@ AI 气泡逐字追加；provider 下拉来自 `/chat/providers`。
   规则触发 "prefixed in the build directory" 生成错误），改挂
   gadget_sim PRIVATE；且必须在 `add_executable` 之后。
 
+## 电源与电池（2026-11-14 第五批）：全局状态栏 + 设备信息电源卡 + power_manager
+
+**全局状态栏**（ui_statusbar.c，lv_layer_top overlay 点击穿透）：所有屏幕
+顶部统一 Wi-Fi + 电池（五档图标 ≥80/60/40/20/<20；色档 20/10；充电绿
+闪电；USB 供电无电池显示 USB 图标不伪造 100%）。规则与低电策略见
+PLAN §13.3（<15% 提醒、<5% 节能，用户可调）。
+
+**设备信息页**新增"电源与电池"卡（电压/电量/充电状态/USB，模拟器
+mock 演示值）。**数据层**：gadget_state_t 补 battery_present/usb_connected/
+charging/battery_voltage_mv；`GADGET_DEMO_BATTERY="pct,mv,idle|charging|usb|none"`
+场景钩子；`GADGET_DEMO_SETTINGS_PAGE=device` 直达子页钩子。
+
+**固件**：`firmware/components/power_manager/`——battery.h 统一接口
+（battery_get_status）+ battery_axp2101.c（0x34 探测 + 寄存器 TODO 表，
+bring-up 按数据手册核对）+ power_manager.c（esp_timer 轮询 30s/15s、
+状态突变回调、低电策略钩子）。main.c 接入（PMU 探测失败仅告警不阻塞）。
+
+踩坑：
+
+- **lv_snapshot 不含图层**：快照只渲染传入对象子树，lv_layer_top 上的
+  状态栏 overlay 拍不到——snap 改为屏幕+图层双快照 alpha 合成。
+- **LVGL 内存池耗尽**：屏幕与图层两张 921KB 快照超出 1MB 池，第二张
+  lv_snapshot_take 静默返回 NULL（状态栏"消失"根因）——改 lv_draw_buf_init
+  包裹 static 系统缓冲（snap_take），绕开池分配。
+- **idf v6 i2c 字段改名**：i2c_device_config_t 的 dev_addr → device_address。
+- **设备信息硬件卡豆腐**：含中文的值（"双核 LX7 · 240 MHz"）误用
+  montserrat 字体；cn 字体含 ASCII range（0x20-0x7F）可整行用 cn_14。
+- Write 长文件时路径少一个连字符，头文件落到了隔壁目录（编译 fatal
+  才暴露）；同名字幕 cache-busting 也会掩盖"没重编"——构建后用
+  nm/像素数验证产物为准。
+
 ## UI 精修（2026-11-14 第四批）：四页按定稿图对齐 + 离屏截图钩子
 
 **桌面**：彩色磁贴（三 AI 头像 + 六彩色符号，网格序按定稿 3×3）；

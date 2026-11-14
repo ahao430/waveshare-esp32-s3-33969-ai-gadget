@@ -143,6 +143,7 @@ Conversation
 | DMA 可用 | `MALLOC_CAP_DMA` |
 | Flash 分区 | `esp_partition` |
 | CPU 频率 | `esp_clk_cpu_freq()` |
+| 电源与电池 | AXP2101 经 Power Manager（电压/电量/充电/USB，PLAN §13.3） |
 
 模拟器阶段显示模拟值并标注；真机（Phase 6）接真实采集。
 

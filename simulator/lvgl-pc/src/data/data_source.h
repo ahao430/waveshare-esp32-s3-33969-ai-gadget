@@ -63,6 +63,13 @@ typedef struct {
     bool wifi_ok;
     long updated_unix; /* 额度最近一次成功刷新时间 */
 
+    /* 电源（设备本地：模拟器=mock（GADGET_DEMO_BATTERY 可配）；固件=AXP2101
+     * 经 Power Manager 轮询回填，PLAN §13.3。UI 统一走状态栏规则表） */
+    bool battery_present;
+    bool usb_connected;
+    bool charging;
+    int battery_voltage_mv;
+
     /* 设备设置（模拟器/内存；真机走 device_config NVS，Phase 6） */
     int brightness;         /* 10~100 */
     int volume;             /* 0~100 */

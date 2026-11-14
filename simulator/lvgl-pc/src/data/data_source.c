@@ -35,12 +35,49 @@ static gadget_state_t g_state = {
     .battery_pct  = 82,
     .wifi_ok      = true,
     .updated_unix = 0,
+    .battery_present    = true,
+    .usb_connected      = true,
+    .charging           = true,
+    .battery_voltage_mv = 4120,
 
     .brightness        = 80,
     .volume            = 55,
     .display_timeout_s = 60,
     .sub_refresh_interval_s = 900,
 };
+
+/* GADGET_DEMO_BATTERY="pct,mv,state"（state: idle|charging|usb|none）
+ * —— 状态栏/设备信息页的电源场景演示钩子 */
+static void demo_battery_apply(void)
+{
+    const char *v = getenv("GADGET_DEMO_BATTERY");
+    if (!v || !v[0]) return;
+
+    int pct = g_state.battery_pct;
+    int mv = g_state.battery_voltage_mv;
+    char state[12] = "";
+    if (sscanf(v, "%d,%d,%11s", &pct, &mv, state) < 1) return;
+
+    if (pct >= 0 && pct <= 100) g_state.battery_pct = pct;
+    if (mv > 2500 && mv < 5000) g_state.battery_voltage_mv = mv;
+    if (strcmp(state, "charging") == 0) {
+        g_state.battery_present = true;
+        g_state.usb_connected = true;
+        g_state.charging = true;
+    } else if (strcmp(state, "usb") == 0) {
+        g_state.battery_present = false; /* USB 供电、未检到电池 */
+        g_state.usb_connected = true;
+        g_state.charging = false;
+    } else if (strcmp(state, "none") == 0) {
+        g_state.battery_present = false;
+        g_state.usb_connected = false;
+        g_state.charging = false;
+    } else { /* idle：电池供电不充电 */
+        g_state.battery_present = true;
+        g_state.usb_connected = false;
+        g_state.charging = false;
+    }
+}
 
 void ds_config_update(int brightness, int volume, int timeout_s)
 {
@@ -81,6 +118,7 @@ void ds_init(const char *source, const char *bridge_url, const char *provider)
         g_impl = ds_mock_impl();
     }
     if (g_impl->init) g_impl->init();
+    demo_battery_apply();
 }
 
 const gadget_state_t *ds_state(void)

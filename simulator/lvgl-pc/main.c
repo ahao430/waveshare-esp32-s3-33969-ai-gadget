@@ -16,31 +16,74 @@
 #include "lvgl.h"
 #include "ui.h"
 
+/* 离屏快照到调用方提供的缓冲（绕开 LVGL 内存池：屏幕+图层两张
+ * 921KB 快照超出 1MB 池，池内二次分配必失败——lv_snapshot_take
+ * 返回 NULL 的根因）。缓冲为 480×480×4，栈放不下用 static。 */
+static uint8_t g_snap_scr_buf[480 * 480 * 4];
+static uint8_t g_snap_top_buf[480 * 480 * 4];
+
+static lv_draw_buf_t *snap_take(lv_obj_t *obj, lv_color_format_t cf,
+                                uint8_t *mem)
+{
+    lv_draw_buf_t *db = malloc(sizeof(*db));
+    if (!db) return NULL;
+    lv_draw_buf_init(db, 480, 480, cf, LV_STRIDE_AUTO, mem, 480 * 480 * 4);
+    if (lv_snapshot_take_to_draw_buf(obj, cf, db) != LV_RESULT_OK) {
+        free(db);
+        return NULL;
+    }
+    return db;
+}
+
+static void snap_buf_free(lv_draw_buf_t *db)
+{
+    /* 缓冲是 static 包装，只释放包裹结构本身（lv_draw_buf_destroy 会
+     * 尝试 free 数据指针，不可用于外部缓冲） */
+    free(db);
+}
+
 static void snap_write(const char *path)
 {
-    lv_draw_buf_t *buf = lv_snapshot_take(lv_screen_active(),
-                                          LV_COLOR_FORMAT_XRGB8888);
-    if (!buf) {
+    /* 屏幕本体 + lv_layer_top（全局状态栏 overlay 挂在这里）分别快照，
+     * 再按 alpha 合成——lv_snapshot 只渲染传入对象子树，不含图层。 */
+    lv_draw_buf_t *scr = snap_take(lv_screen_active(),
+                                   LV_COLOR_FORMAT_XRGB8888, g_snap_scr_buf);
+    lv_draw_buf_t *top = snap_take(lv_layer_top(),
+                                   LV_COLOR_FORMAT_ARGB8888, g_snap_top_buf);
+    if (!scr) {
         fprintf(stderr, "GADGET_SNAP: lv_snapshot_take failed\n");
+        snap_buf_free(top);
         return;
     }
 
+    uint32_t w = scr->header.w, h = scr->header.h;
     FILE *f = fopen(path, "wb");
     if (f) {
-        fprintf(f, "P6\n%u %u\n255\n", buf->header.w, buf->header.h);
-        for (uint32_t y = 0; y < buf->header.h; y++) {
-            const uint8_t *row = buf->data + y * buf->header.stride;
-            for (uint32_t x = 0; x < buf->header.w; x++) {
-                const uint8_t *p = row + x * 4; /* XRGB8888 小端：B,G,R,X */
-                uint8_t rgb[3] = { p[2], p[1], p[0] };
+        fprintf(f, "P6\n%u %u\n255\n", w, h);
+        for (uint32_t y = 0; y < h; y++) {
+            const uint8_t *srow = scr->data + y * scr->header.stride;
+            const uint8_t *trow = top ? top->data + y * top->header.stride : NULL;
+            for (uint32_t x = 0; x < w; x++) {
+                const uint8_t *sp = srow + x * 4; /* B,G,R,X */
+                int r = sp[2], g = sp[1], b = sp[0];
+                if (trow) {
+                    const uint8_t *tp = trow + x * 4; /* B,G,R,A */
+                    int a = tp[3];
+                    if (a > 0) {
+                        r = (tp[2] * a + r * (255 - a)) / 255;
+                        g = (tp[1] * a + g * (255 - a)) / 255;
+                        b = (tp[0] * a + b * (255 - a)) / 255;
+                    }
+                }
+                uint8_t rgb[3] = { (uint8_t)r, (uint8_t)g, (uint8_t)b };
                 fwrite(rgb, 1, 3, f);
             }
         }
         fclose(f);
-        fprintf(stderr, "GADGET_SNAP: %s (%ux%u)\n", path,
-                buf->header.w, buf->header.h);
+        fprintf(stderr, "GADGET_SNAP: %s (%ux%u)\n", path, w, h);
     }
-    lv_draw_buf_destroy(buf);
+    snap_buf_free(scr);
+    snap_buf_free(top);
 }
 
 static void snap_timer_cb(lv_timer_t *t)

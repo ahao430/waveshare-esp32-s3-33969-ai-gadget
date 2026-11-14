@@ -1525,6 +1525,46 @@ ACTIVE -> DIMMED -> SLEEP -> DEEP_SLEEP (later)
 
 采用租约或引用计数，App 异常退出时自动释放，防止屏幕常亮或网络长期占用。
 
+## 13.3 电池与充电（AXP2101）
+
+板载 AXP2101 PMU（共享 I²C，地址 0x34 待验证，HARDWARE §2.6）提供
+电压/电量/充电/USB 状态——**不走 GPIO 估算**。统一由 Power Manager
+管理（`firmware/components/power_manager/`），App 不得直接访问 PMU。
+
+**轮询策略**：正常 30s / 充电中 15s / 状态突变立即回调 / 低电触发通知。
+
+**全局状态栏显示规则**（所有屏幕顶部 overlay，`ui_statusbar.c`）：
+
+| 状态 | 显示 |
+|------|------|
+| 60–100% | 五档电池图标 + % |
+| 10–19% | 低电色（WARN）+ % |
+| 0–9% | 紧急色（ERR）+ % |
+| 充电中 | 电池图标 + 绿色闪电 |
+| USB 供电、未检到电池 | USB 图标（不显示虚假 100%） |
+
+**设备信息页**：电源与电池卡（电压/电量/充电状态/USB），真机数值
+由 Power Manager 采集；模拟器为演示值并标注。
+
+**低电策略**（用户可关闭/调整）：
+
+- < 15%：提醒充电（系统通知）。
+- < 5%：节能策略——降亮度、缩短息屏、暂停高耗任务。
+- 低电量自动息屏/降亮度，避免影响正常语音交互。
+
+固件接口（bring-up 寄存器按数据手册核对）：
+
+```c
+typedef struct {
+    bool battery_present;
+    bool usb_connected;
+    bool charging;
+    int battery_percent;
+    int battery_voltage_mv;
+} battery_status_t;
+esp_err_t battery_get_status(battery_status_t *status);
+```
+
 ------------------------------------------------------------------------
 
 # 14. 资源预算

@@ -18,8 +18,6 @@
 static lv_obj_t *g_launcher;
 static lv_obj_t *g_lbl_clock;
 static lv_obj_t *g_lbl_date;
-static lv_obj_t *g_lbl_battery;
-static lv_obj_t *g_lbl_wifi;
 
 static void clock_timer_cb(lv_timer_t *t);
 static void tile_click_cb(lv_event_t *e);
@@ -221,10 +219,7 @@ void ui_launcher_build(void)
     g_lbl_date = ui_label(bar, "", &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(g_lbl_date, LV_ALIGN_LEFT_MID, 0, 16);
 
-    g_lbl_wifi = ui_label(bar, LV_SYMBOL_WIFI, &lv_font_montserrat_16, UI_TEXT_DIM);
-    lv_obj_align(g_lbl_wifi, LV_ALIGN_RIGHT_MID, -58, 0);
-    g_lbl_battery = ui_label(bar, LV_SYMBOL_BATTERY_FULL " 82%", &lv_font_montserrat_16, UI_TEXT_DIM);
-    lv_obj_align(g_lbl_battery, LV_ALIGN_RIGHT_MID, 0, 0);
+    /* Wi-Fi/电池由全局状态栏 overlay 统一显示（ui_statusbar），此处不再重复 */
 
     /* ---- App 磁贴网格（3×3，条目来自 app_manager 注册表） ---- */
     static lv_coord_t col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
@@ -290,11 +285,6 @@ static void clock_timer_cb(lv_timer_t *t)
     lv_label_set_text(g_lbl_clock, buf);
     snprintf(buf, sizeof(buf), "%d月%02d日 周%s", tmv.tm_mon + 1, tmv.tm_mday, week_cn[tmv.tm_wday]);
     lv_label_set_text(g_lbl_date, buf);
-
-    const gadget_state_t *s = ds_state();
-    lv_obj_set_style_text_color(g_lbl_wifi, s->wifi_ok ? UI_TEXT_DIM : UI_ERR, 0);
-    snprintf(buf, sizeof(buf), LV_SYMBOL_BATTERY_FULL " %d%%", s->battery_pct);
-    lv_label_set_text(g_lbl_battery, buf);
 }
 
 lv_obj_t *ui_launcher_screen(void)

@@ -305,8 +305,8 @@ static void page_device(lv_obj_t *scr)
     page_title(scr, "设备信息");
 
     lv_obj_t *card1 = lv_obj_create(scr);
-    lv_obj_set_size(card1, LV_PCT(100), 88);
-    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_set_size(card1, LV_PCT(100), 80);
+    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 52);
     ui_style_card(card1);
     lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *dot = lv_obj_create(card1);
@@ -321,6 +321,49 @@ static void page_device(lv_obj_t *scr)
     lv_obj_t *fw2 = ui_label(card1, "构建 2026-11-14 · 运行正常", &lv_font_cn_12, UI_TEXT_DIM);
     lv_obj_align(fw2, LV_ALIGN_LEFT_MID, 22, 14);
 
+    /* 电源与电池（PLAN §13.3；模拟器为 mock 演示值，真机 AXP2101 采集） */
+    const gadget_state_t *s = ds_state();
+    lv_obj_t *pwr = lv_obj_create(scr);
+    lv_obj_set_size(pwr, LV_PCT(100), 148);
+    lv_obj_align(pwr, LV_ALIGN_TOP_MID, 0, 140);
+    ui_style_card(pwr);
+    lv_obj_clear_flag(pwr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *pt = ui_label(pwr, "电源与电池", &lv_font_cn_14, UI_TEXT_DIM);
+    lv_obj_align(pt, LV_ALIGN_TOP_LEFT, 2, 0);
+
+    char vbuf[16], pbuf[16];
+    snprintf(vbuf, sizeof(vbuf), "%.2f V", s->battery_voltage_mv / 1000.0);
+    snprintf(pbuf, sizeof(pbuf), "%d%%", s->battery_pct);
+    if (s->battery_present) {
+        lv_obj_t *pv = ui_label(pwr, pbuf, &lv_font_montserrat_20,
+                                s->battery_pct < 20 ? UI_WARN : UI_TEXT);
+        lv_obj_align(pv, LV_ALIGN_TOP_RIGHT, -2, -4);
+        if (s->charging) {
+            lv_obj_t *bolt = ui_label(pwr, LV_SYMBOL_CHARGE, &lv_font_montserrat_14, UI_OK);
+            lv_obj_align(bolt, LV_ALIGN_TOP_RIGHT, -56, 0);
+        }
+    } else {
+        lv_obj_t *pv = ui_label(pwr, s->usb_connected ? "USB" : "--",
+                                &lv_font_montserrat_16, UI_TEXT_DIM);
+        lv_obj_align(pv, LV_ALIGN_TOP_RIGHT, -2, 0);
+    }
+
+    const char *chg = s->battery_present
+                          ? (s->charging ? "充电中" : (s->usb_connected ? "USB 供电" : "电池供电"))
+                          : "未检测到电池";
+    const char *rows_pwr[][2] = {
+        { "电池电压", s->battery_present ? vbuf : "--" },
+        { "电池电量", s->battery_present ? pbuf : "--" },
+        { "充电状态", chg },
+        { "USB 供电", s->usb_connected ? "已连接" : "未连接" },
+    };
+    for (int i = 0; i < 4; i++) {
+        lv_obj_t *k = ui_label(pwr, rows_pwr[i][0], &lv_font_cn_12, UI_TEXT_DIM);
+        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 2, 26 + i * 26);
+        lv_obj_t *v = ui_label(pwr, rows_pwr[i][1], &lv_font_cn_12, UI_TEXT);
+        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -2, 26 + i * 26);
+    }
+
     /* 硬件表（规格固定；内存/Flash 动态指标真机采集，PRODUCT_SPEC §4.2） */
     static const char *rows[][2] = {
         { "芯片",  "ESP32-S3" },
@@ -330,19 +373,21 @@ static void page_device(lv_obj_t *scr)
         { "屏幕",  "480 × 480 AMOLED" },
     };
     lv_obj_t *card2 = lv_obj_create(scr);
-    lv_obj_set_size(card2, LV_PCT(100), 230);
-    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 152);
+    lv_obj_set_size(card2, LV_PCT(100), 136);
+    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 296);
     ui_style_card(card2);
     lv_obj_clear_flag(card2, LV_OBJ_FLAG_SCROLLABLE);
     for (int i = 0; i < 5; i++) {
         lv_obj_t *k = ui_label(card2, rows[i][0], &lv_font_cn_14, UI_TEXT_DIM);
-        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 6, 12 + i * 42);
-        lv_obj_t *v = ui_label(card2, rows[i][1], &lv_font_montserrat_14, UI_TEXT);
-        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -6, 10 + i * 42);
+        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 6, 6 + i * 22);
+        /* 值含中文/×/·（"双核 LX7 · 240 MHz"）→ 必须用 cn 字体
+         * （montserrat 无 CJK，曾整行豆腐） */
+        lv_obj_t *v = ui_label(card2, rows[i][1], &lv_font_cn_14, UI_TEXT);
+        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -6, 6 + i * 22);
     }
 
     lv_obj_t *note = ui_label(scr,
-        "内存/Flash 动态指标真机接入（Phase 6 heap_caps 采集）",
+        "电源为模拟值（真机 AXP2101 采集）；内存/Flash 动态指标 Phase 6 接入",
         &lv_font_cn_12, UI_TEXT_DIM);
     lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -4);
 }
@@ -401,6 +446,17 @@ void ui_settings_build(lv_obj_t *scr, int app_id)
     (void)app_id;
     g_root = scr;
     g_page = SP_HOME;
+
+    /* 验收钩子：GADGET_DEMO_SETTINGS_PAGE=display|network|service|device
+     * 直达子页（与 GADGET_DEMO_APP 同族，仅演示/截图用） */
+    const char *sp = getenv("GADGET_DEMO_SETTINGS_PAGE");
+    if (sp && sp[0]) {
+        if (strcmp(sp, "display") == 0) g_page = SP_DISPLAY;
+        else if (strcmp(sp, "network") == 0) g_page = SP_NETWORK;
+        else if (strcmp(sp, "service") == 0) g_page = SP_SERVICE;
+        else if (strcmp(sp, "device") == 0) g_page = SP_DEVICE;
+    }
+
     ui_settings_build_page(scr);
 }
 

@@ -362,10 +362,11 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_t *icon = ui_label(back, LV_SYMBOL_LEFT, &lv_font_montserrat_16, UI_TEXT);
     lv_obj_center(icon);
 
-    /* 历史不直接展示：顶部"历史"按钮 → 全屏滚动查看 */
+    /* 历史不直接展示：顶部"历史"按钮 → 全屏滚动查看
+     * （y28：避开全局状态栏 overlay，PLAN §13.3） */
     lv_obj_t *hist_btn = lv_button_create(scr);
     lv_obj_set_size(hist_btn, 56, 44);
-    lv_obj_align(hist_btn, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_align(hist_btn, LV_ALIGN_TOP_RIGHT, 0, 28);
     ui_style_card(hist_btn);
     lv_obj_set_style_radius(hist_btn, 14, 0);
     lv_obj_add_event_cb(hist_btn, hist_open_cb, LV_EVENT_CLICKED, NULL);

@@ -11,6 +11,7 @@
 #include "data_source.h"
 #include "ui.h"
 #include "ui_launcher.h"
+#include "ui_statusbar.h"
 #include "ui_theme.h"
 
 /* ---------------- 公共入口 ---------------- */
@@ -27,6 +28,9 @@ void ui_init(void)
     lv_obj_t *home = ui_launcher_screen();
     app_manager_set_home(home);
     lv_screen_load(home); /* Launcher 是启动屏幕（常驻系统 UI） */
+
+    /* 全局状态栏 overlay（PLAN §13.3）：所有屏幕顶部统一 Wi-Fi/电量 */
+    ui_statusbar_init();
 
     /* 演示/测试钩子：GADGET_DEMO_APP=<id> 启动即进入指定 App */
     const char *demo = getenv("GADGET_DEMO_APP");
@@ -232,7 +236,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *prev = lv_button_create(scr);
     lv_obj_set_size(prev, 44, 44);
-    lv_obj_align(prev, LV_ALIGN_TOP_LEFT, 64, 0);
+    lv_obj_align(prev, LV_ALIGN_TOP_LEFT, 64, 28); /* y28：避开全局状态栏 */
     ui_style_card(prev);
     lv_obj_set_style_radius(prev, 14, 0);
     lv_obj_add_event_cb(prev, quota_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)-1);
@@ -241,7 +245,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *next = lv_button_create(scr);
     lv_obj_set_size(next, 44, 44);
-    lv_obj_align(next, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_align(next, LV_ALIGN_TOP_RIGHT, 0, 28); /* y28：避开全局状态栏 */
     ui_style_card(next);
     lv_obj_set_style_radius(next, 14, 0);
     lv_obj_add_event_cb(next, quota_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)1);

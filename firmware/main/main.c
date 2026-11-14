@@ -13,6 +13,7 @@
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "power_manager.h"
 
 static const char *TAG = "gadget";
 
@@ -58,6 +59,14 @@ static void i2c_scan(void)
 void app_main(void)
 {
     i2c_scan();
+
+    /* 电源管理（PLAN §13.3）：AXP2101 轮询 30s/15s + 低电策略。
+     * PMU 探测失败只告警不阻塞启动（UI 显示 USB/-- 兜底）。 */
+    esp_err_t pm_err = power_manager_init(bsp_i2c_get_handle());
+    if (pm_err != ESP_OK) {
+        ESP_LOGW(TAG, "power_manager unavailable: %s（UI 显示 USB/-- 兜底）",
+                 esp_err_to_name(pm_err));
+    }
 
     /* BSP: CO5300 QSPI 显示 + LVGL 任务（缓冲策略见 sdkconfig.defaults） */
     bsp_display_start();
