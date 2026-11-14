@@ -18,6 +18,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_sntp.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -33,6 +34,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 /* bring-up Wi-Fi 凭据（gitignore，不进仓库）；缺文件则跳过联网测试 */
 #if __has_include("wifi_secret.h")
@@ -57,6 +59,21 @@ static const char *TAG = "gadget";
 #define EV_TONE_BIT BIT0
 #define EV_REC_BIT BIT1
 #define EV_NET_BIT BIT2 /* Wi-Fi 拿到 IP → 联网任务做 Bridge 探活+压力测试 */
+#define EV_KEY3_BIT BIT3 /* KEY3：屏保态=退出屏保；正常态=播 TONE */
+
+/* ---- 充电屏保（PLAN §13.4，用户 2026-11-14 拍板）----
+ * USB 供电态（充电中/充满未拔）屏幕常亮，但 idle 2 分钟后进屏保：
+ * 纯黑背景 + 亮度 15% + 时钟/电量/缓慢绕圆呼吸点（分散像素负载防烧屏）。
+ * 触摸或 KEY3 退出，再 idle 再进。USB 断开则不再进入。 */
+static lv_obj_t *g_saver;
+static lv_obj_t *g_saver_clock;
+static lv_obj_t *g_saver_batt;
+static lv_obj_t *g_saver_dot;
+static volatile bool g_saver_on;
+static int64_t g_last_activity_us;
+static int g_user_brightness = 100;
+#define SAVER_IDLE_MS (2 * 60 * 1000)
+#define SAVER_BRIGHTNESS 15
 
 static EventGroupHandle_t g_audio_ev;
 static esp_codec_dev_handle_t g_spk;
@@ -112,11 +129,103 @@ static void set_status(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(g_status_buf, sizeof(g_status_buf), fmt, ap);
     va_end(ap);
-    bsp_display_lock(0);
-    lv_label_set_text(g_lbl_status, g_status_buf);
-    lv_obj_center(g_lbl_status);
-    bsp_display_unlock();
     ESP_LOGI(TAG, "status: %s", g_status_buf);
+    /* BSP 语义：bsp_display_lock(0) = 无限等待（头文件 "0 will block
+     * indefinitely"）。注意：有限超时一旦超时会触发 FreeRTOS 递归互斥量
+     * 断言 vTaskPriorityDisinheritAfterTimeout（真机三次复现），禁用。 */
+    bsp_display_lock(0);
+    if (g_lbl_status != NULL) {
+        lv_label_set_text(g_lbl_status, g_status_buf);
+        lv_obj_center(g_lbl_status);
+    }
+    bsp_display_unlock();
+}
+
+/* ---- 充电屏保状态机 ---- */
+static void saver_mark_activity(void)
+{
+    g_last_activity_us = esp_timer_get_time();
+}
+
+/* 只做 LVGL 操作；跨任务调用需自备显示锁（本文件内在 LVGL 线程跑） */
+static void saver_enter(void)
+{
+    if (g_saver_on) return;
+    g_saver_on = true;
+    lv_obj_set_hidden(g_saver, false);
+    lv_obj_move_to_index(g_saver, -1); /* 置顶 */
+    bsp_display_brightness_set(SAVER_BRIGHTNESS);
+    ESP_LOGI(TAG, "screensaver ON (brightness %d%%)", SAVER_BRIGHTNESS);
+}
+
+static void saver_exit(void)
+{
+    if (!g_saver_on) return;
+    g_saver_on = false;
+    lv_obj_set_hidden(g_saver, true);
+    bsp_display_brightness_set(g_user_brightness);
+    saver_mark_activity();
+    ESP_LOGI(TAG, "screensaver OFF (brightness %d%%)", g_user_brightness);
+}
+
+/* 1s 周期：进入判定 + 时钟/电量/呼吸点更新（LVGL 定时器上下文） */
+static void saver_tick(lv_timer_t *t)
+{
+    (void)t;
+    battery_status_t st = power_manager_snapshot();
+    int64_t idle_ms = (esp_timer_get_time() - g_last_activity_us) / 1000;
+
+    static int beat = 0; /* bring-up 心跳：60s 一行，观测快照值与 idle 计时 */
+    if (++beat >= 60) {
+        beat = 0;
+        ESP_LOGI(TAG, "saver-tick: usb=%d bat=%d chg=%d pct=%d vmV=%d idle=%lldms",
+                 st.usb_connected, st.battery_present, st.charging,
+                 st.battery_percent, st.battery_voltage_mv, (long long)idle_ms);
+    }
+
+    if (!g_saver_on) {
+        if (st.usb_connected && idle_ms >= SAVER_IDLE_MS) {
+            saver_enter();
+        }
+        return;
+    }
+
+    /* 时钟（SNTP 对时后为真实时间） */
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char buf[8];
+    strftime(buf, sizeof(buf), "%H:%M", &tmv);
+    lv_label_set_text(g_saver_clock, buf);
+
+    /* 电量行：充电中闪电语义 / USB 在位 / 纯电池 */
+    if (st.charging) {
+        lv_label_set_text_fmt(g_saver_batt, "%d%% charging", st.battery_percent);
+    } else if (st.usb_connected) {
+        lv_label_set_text_fmt(g_saver_batt, "%d%% usb", st.battery_percent);
+    } else {
+        lv_label_set_text_fmt(g_saver_batt, "%d%%", st.battery_percent);
+    }
+
+    /* 呼吸点：绕屏中心缓慢公转（~9 分钟一圈）+ 透明度呼吸，
+     * 避免固定亮区（AMOLED 烧屏防护核心） */
+    static float angle = 0;
+    static int phase = 0;
+    angle += 0.7f;
+    phase++;
+    const int cx = 240, cy = 225, r = 185;
+    float rad = angle * (float)M_PI / 180.0f;
+    lv_obj_set_pos(g_saver_dot,
+                   (int)(cx + r * cosf(rad)) - 6, (int)(cy + r * sinf(rad)) - 6);
+    lv_obj_set_style_bg_opa(g_saver_dot,
+                            (lv_opa_t)(110 + 90 * sinf(phase * 0.12f)), 0);
+}
+
+/* 屏保层触摸 → 退出（首次触摸仅唤醒） */
+static void saver_press_cb(lv_event_t *e)
+{
+    (void)e;
+    saver_exit();
 }
 
 /* ---- 音频任务：TONE / REC ---- */
@@ -130,8 +239,19 @@ static void audio_task(void *arg)
     };
 
     for (;;) {
-        EventBits_t bits = xEventGroupWaitBits(g_audio_ev, EV_TONE_BIT | EV_REC_BIT,
+        EventBits_t bits = xEventGroupWaitBits(g_audio_ev,
+                                               EV_TONE_BIT | EV_REC_BIT | EV_KEY3_BIT,
                                                pdTRUE, pdFALSE, portMAX_DELAY);
+        if (bits & EV_KEY3_BIT) {
+            saver_mark_activity();
+            if (g_saver_on) {
+                bsp_display_lock(0); /* 跨任务操作 LVGL：持显示锁（0=无限等） */
+                saver_exit();
+                bsp_display_unlock();
+                continue; /* 屏保态按键仅唤醒，不播音 */
+            }
+            xEventGroupSetBits(g_audio_ev, EV_TONE_BIT);
+        }
         if (bits & EV_TONE_BIT) {
             if (g_spk == NULL) {
                 set_status("spk init failed");
@@ -188,23 +308,32 @@ static void audio_task(void *arg)
     }
 }
 
-/* ---- KEY3（GPIO18，低有效）→ TONE ---- */
+/* ---- KEY3（GPIO18，低有效）：屏保态=退出屏保；正常态=播 TONE ---- */
 static void IRAM_ATTR key3_isr(void *arg)
 {
+    /* 机械抖动去抖 200ms：一次按压的多个下降沿只取第一个
+     * （否则屏保唤醒后的第二个抖动事件会误触发 TONE，真机踩过） */
+    static int64_t last_us = 0;
+    int64_t now = esp_timer_get_time();
+    if (now - last_us < 200000) return;
+    last_us = now;
+
     BaseType_t wakeup = pdFALSE;
-    xEventGroupSetBitsFromISR(g_audio_ev, EV_TONE_BIT, &wakeup);
+    xEventGroupSetBitsFromISR(g_audio_ev, EV_KEY3_BIT, &wakeup);
     portYIELD_FROM_ISR(wakeup);
 }
 
 static void btn_tone_cb(lv_event_t *e)
 {
     (void)e;
+    saver_mark_activity();
     xEventGroupSetBits(g_audio_ev, EV_TONE_BIT);
 }
 
 static void btn_rec_cb(lv_event_t *e)
 {
     (void)e;
+    saver_mark_activity();
     xEventGroupSetBits(g_audio_ev, EV_REC_BIT);
 }
 
@@ -212,7 +341,9 @@ static void slider_brightness_cb(lv_event_t *e)
 {
     lv_obj_t *slider = lv_event_get_target(e);
     int v = (int)lv_slider_get_value(slider);
+    g_user_brightness = v; /* 记住用户亮度，屏保退出时恢复 */
     bsp_display_brightness_set(v);
+    saver_mark_activity();
     ESP_LOGI(TAG, "brightness -> %d%%", v);
 }
 
@@ -226,7 +357,10 @@ static void screen_touch_cb(lv_event_t *e)
     lv_indev_get_point(indev, &p);
 
     if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
-        if (code == LV_EVENT_PRESSED) g_touch_count++;
+        if (code == LV_EVENT_PRESSED) {
+            g_touch_count++;
+            saver_mark_activity();
+        }
         /* 回调在 LVGL 线程内，直接操作控件（无需再加显示锁） */
         lv_obj_set_pos(g_touch_dot, p.x - 18, p.y - 18);
         lv_obj_set_hidden(g_touch_dot, false);
@@ -346,6 +480,13 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         set_status("WiFi: " IPSTR "\nbridge...", IP2STR(&evt->ip_info.ip));
+        /* SNTP 对时（充电屏保时钟用；CST-8 = 中国标准时间） */
+        setenv("TZ", "CST-8", 1);
+        tzset();
+        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+        esp_sntp_setservername(0, "ntp.aliyun.com");
+        esp_sntp_setservername(1, "pool.ntp.org");
+        esp_sntp_init();
         xEventGroupSetBits(g_audio_ev, EV_NET_BIT);
     }
 }
@@ -398,23 +539,10 @@ static void net_task(void *arg)
         esp_http_client_cleanup(c);
         set_status("Bridge: HTTP %d\n(len=%d)%s", code, (int)len,
                    code == 200 ? " OK!" : " FAIL");
-
-        /* PSRAM 全屏重绘压力测试（Muse 坑 #1，Wi-Fi 开启状态）：
-         * 30s 内每 250ms 全屏失效一次，观察花屏/crash/内存泄漏。 */
-        int frames = 0;
-        uint32_t heap0 = esp_get_free_heap_size();
-        set_status("stress 30s...");
-        for (int t = 0; t < 120; t++) {
-            bsp_display_lock(0);
-            lv_obj_invalidate(lv_screen_active());
-            bsp_display_unlock();
-            vTaskDelay(pdMS_TO_TICKS(250));
-            frames++;
-        }
-        set_status("stress done\n%d frames, heap %u->%u B\n(screen ok?)",
-                   frames, (unsigned)heap0, (unsigned)esp_get_free_heap_size());
-        ESP_LOGI(TAG, "psram stress done: %d frames, heap %u -> %u",
-                 frames, (unsigned)heap0, (unsigned)esp_get_free_heap_size());
+        /* PSRAM 全屏重绘压力测试已移除（bring-up 一次性探针，数据已采集）：
+          真机实测全屏 4fps×30s 连续重绘会卡死显示管线——白屏、LVGL
+          任务挂起（系统/Wi-Fi/音频正常，ping 通），需断电重启恢复。
+          结论（HARDWARE.md §2.7）：UI 必须局部重绘 + 帧率节流。 */
     }
 }
 
@@ -485,6 +613,42 @@ static void build_ui(void)
     lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(root, screen_touch_cb, LV_EVENT_RELEASED, NULL);
+
+    /* ---- 充电屏保层（置顶、默认隐藏；PLAN §13.4） ---- */
+    g_saver = lv_obj_create(root);
+    lv_obj_set_size(g_saver, 480, 480);
+    lv_obj_set_pos(g_saver, 0, 0);
+    lv_obj_set_style_bg_color(g_saver, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_border_width(g_saver, 0, 0);
+    lv_obj_set_style_radius(g_saver, 0, 0);
+    lv_obj_set_style_pad_all(g_saver, 0, 0);
+    lv_obj_set_scrollbar_mode(g_saver, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_hidden(g_saver, true);
+    lv_obj_add_event_cb(g_saver, saver_press_cb, LV_EVENT_PRESSED, NULL);
+
+    g_saver_clock = lv_label_create(g_saver);
+    lv_label_set_text(g_saver_clock, "--:--");
+    lv_obj_set_style_text_font(g_saver_clock, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(g_saver_clock, lv_color_hex(0x8A8F9E), 0);
+    lv_obj_align(g_saver_clock, LV_ALIGN_CENTER, 0, -10);
+
+    g_saver_batt = lv_label_create(g_saver);
+    lv_label_set_text(g_saver_batt, "");
+    lv_obj_set_style_text_font(g_saver_batt, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(g_saver_batt, lv_color_hex(0x5A5F6E), 0);
+    lv_obj_align(g_saver_batt, LV_ALIGN_CENTER, 0, 34);
+
+    g_saver_dot = lv_obj_create(g_saver);
+    lv_obj_set_size(g_saver_dot, 12, 12);
+    lv_obj_set_style_radius(g_saver_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(g_saver_dot, lv_color_hex(0x7C5CFF), 0);
+    lv_obj_set_style_bg_opa(g_saver_dot, LV_OPA_40, 0);
+    lv_obj_set_style_border_width(g_saver_dot, 0, 0);
+    lv_obj_set_clickable(g_saver_dot, false);
+    lv_obj_set_style_pad_all(g_saver_dot, 0, 0);
+
+    lv_timer_create(saver_tick, 1000, NULL);
+    saver_mark_activity(); /* 启动即开始计时 idle */
 }
 
 void app_main(void)
@@ -516,7 +680,6 @@ void app_main(void)
     g_audio_ev = xEventGroupCreate();
     xTaskCreate(audio_task, "audio_test", 4096, NULL, 5, NULL);
     xTaskCreate(net_task, "net_test", 6144, NULL, 5, NULL);
-    wifi_start();
 
     /* KEY3（GPIO18）：外部上拉 3V3，按下接地 */
     gpio_config_t io = {
@@ -529,12 +692,18 @@ void app_main(void)
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));
     ESP_ERROR_CHECK(gpio_isr_handler_add(18, key3_isr, NULL));
 
+    /* 显示与 UI 先于 Wi-Fi 启动：GOT_IP 事件会跨任务更新 UI 标签，
+     * 必须保证标签与显示锁已就绪（真机崩溃教训：NVS 缓存凭据后
+     * Wi-Fi 2.4s 内拿到 IP，早于 UI 构建触发竞态） */
     bsp_display_start();
     bsp_display_backlight_on();
 
+    /* 显示锁：0=无限等待（LVGL 任务已启动，必能拿到；首帧渲染中会稍等） */
     bsp_display_lock(0);
     build_ui();
     bsp_display_unlock();
+
+    wifi_start();
 
     ESP_LOGI(TAG, "bringup4 ready: 触摸/滑条/TONE/REC + WiFi/Bridge/stress");
 }

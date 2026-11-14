@@ -138,8 +138,16 @@
 | factory | app/factory | 0x200000 | 0x800000 | 原厂应用（8MB） |
 | storage | data/efuse | 0xa00000 | 0x600000 | 原厂用户存储 |
 
-**bring-up 修过的坑**：`esp_timer_start_periodic` 周期单位是 **µs**，
-power_manager 按 ms 传入导致电池轮询 30s→30ms 刷屏（已修，×1000）。
+**bring-up 修过的坑**：
+- `esp_timer_start_periodic` 周期单位是 **µs**，power_manager 按 ms 传入导致
+  电池轮询 30s→30ms 刷屏（已修，×1000）。
+- **显示管线全屏重绘堵死**（2026-11-14，三次复现）：Wi-Fi 开启态全屏
+  480×480 @4fps 连续重绘 30s，结束后 LVGL 任务挂起（等 flush 完成）、面板
+  白屏；芯片/Wi-Fi/音频/中断均正常（KEY3 触发音、ping 通），断电重启恢复。
+  esp_lv_adapter TEAR_AVOID_NONE + PSRAM 帧缓冲路径。**UI 移植约束：
+  局部失效 + 节流，全屏刷新仅页面切换低频使用**（同 Muse 坑 #1 机理）。
+- GOT_IP 等跨任务 UI 更新必须持显示锁且带超时；UI 构建必须先于 Wi-Fi
+  启动（NVS 缓存凭据后 2.4s 即拿到 IP，会早于 UI 构建触发竞态崩溃）。
 
 ## 3. BSP 与上游版本
 
