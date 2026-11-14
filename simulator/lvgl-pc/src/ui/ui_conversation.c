@@ -19,6 +19,7 @@
 
 #include "app_manager.h"
 #include "audio_mock.h"
+#include "companion.h"
 #include "data_source.h"
 #include "voice_session.h"
 #include "ui.h"
@@ -43,7 +44,6 @@ static lv_obj_t *g_reply_lbl;
 static lv_obj_t *g_wave[32];
 static lv_obj_t *g_ptt_btn;
 static lv_obj_t *g_poll_timer;
-static lv_obj_t *g_mascot;
 static int g_app_id = -1;
 static bool g_voice_enabled;
 
@@ -120,27 +120,12 @@ static void *voice_worker(void *arg)
     return NULL;
 }
 
-/* 大肥鱼素材状态动画（PC2005-cloud/dsh-pet，MIT）：按会话状态切换 */
-static void set_mascot_for_state(vs_state_t st)
-{
-    if (!g_mascot) return;
-    if (g_app_id == UI_APP_CHAT) {
-        const char *path;
-        switch (st) {
-        case VS_THINKING: path = "A:simulator/lvgl-pc/assets/dsh/dsh-typing.gif"; break;
-        case VS_SPEAKING: path = "A:simulator/lvgl-pc/assets/dsh/dsh-sparkle.gif"; break;
-        default:          path = "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif"; break;
-        }
-        lv_gif_set_src(g_mascot, path);
-    }
-}
-
 static void on_vs_state(vs_state_t st, const char *detail, void *user)
 {
     (void)user;
     if (!g_status_lbl) return;
     lv_label_set_text(g_status_lbl, state_text(st));
-    set_mascot_for_state(st);
+    companion_set_state(g_app_id, st);
 
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
@@ -359,36 +344,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_t *hicon = ui_label(hist_btn, LV_SYMBOL_LIST, &lv_font_montserrat_16, UI_TEXT);
     lv_obj_center(hicon);
 
-    /* 形象（放大）：大肥鱼=dsh 状态动画 / 小智=Q 版台湾女生（gpt-image
-     * 生成，深蓝底融合 UI）/ Muse=吉祥物 GIF */
-    if (app_id == UI_APP_XIAOZHI) {
-        g_mascot = lv_image_create(scr);
-        lv_image_set_src(g_mascot, "A:simulator/lvgl-pc/assets/xiaozhi/xiaozhi-220.png");
-        lv_obj_set_size(g_mascot, 220, 220); /* 预缩 220px，无需 zoom */
-        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 60);
-    } else if (app_id == UI_APP_CHAT) {
-        lv_obj_t *stage = lv_obj_create(scr);
-        lv_obj_set_size(stage, 216, 130);
-        lv_obj_set_style_bg_color(stage, lv_color_hex(0x000000), 0);
-        lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(stage, 16, 0);
-        lv_obj_set_style_border_width(stage, 0, 0);
-        lv_obj_set_style_shadow_width(stage, 0, 0);
-        lv_obj_clear_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_align(stage, LV_ALIGN_TOP_MID, 0, 80);
-
-        g_mascot = lv_gif_create(scr);
-        lv_obj_set_size(g_mascot, 200, 114);
-        lv_image_set_scale(g_mascot, (256 * 200) / 144);
-        lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif");
-        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 88);
-    } else {
-        g_mascot = lv_gif_create(scr);
-        lv_obj_set_size(g_mascot, 150, 150);
-        lv_image_set_scale(g_mascot, (256 * 150) / 439);
-        lv_gif_set_src(g_mascot, "A:simulator/lvgl-pc/assets/mascot.gif");
-        lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 90);
-    }
+    companion_create(scr, app_id, 80);
 
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
     lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 296);
@@ -451,7 +407,7 @@ void ui_conversation_on_exit(void)
     g_status_lbl = NULL;
     g_reply_lbl = NULL;
     g_ptt_btn = NULL;
-    g_mascot = NULL;
+    companion_delete();
     for (int i = 0; i < WAVE_BARS_MAX; i++) g_wave[i] = NULL;
     g_wave_data = false;
     g_app_id = -1;

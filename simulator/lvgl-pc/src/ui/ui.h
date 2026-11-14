@@ -15,6 +15,7 @@ enum ui_app_id {
     UI_APP_XIAOZHI,
     UI_APP_MUSIC,
     UI_APP_SETTINGS,
+    UI_APP_WEATHER, /* 天气（ADR-005 清单，Phase 5+） */
     UI_APP_COUNT,
 };
 

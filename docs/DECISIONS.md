@@ -4,6 +4,50 @@
 
 ---
 
+## ADR-005 三个独立 AI App + 共用 Assistant UI / Companion Engine
+
+日期：2026-11-14　状态：已接受（用户拍板）
+
+**背景**：Muse（官方 SDK）、大肥鱼（OpenAI 兼容 Model Router）、小智
+（自有协议/服务端）三者服务接入方式完全不同。塞进一个 App 会导致
+聊天引擎里大量协议分支判断；各写一套前端则三倍维护成本。
+
+**决策**：
+
+1. **三个独立业务 App 入口**（Muse / 大肥鱼 / 小智），各自实现服务
+   适配器（网络/认证/会话生命周期/协议转换/音频传输/服务端配置）。
+2. **共用一套 Assistant UI**：消息气泡、消息列表、语音按钮、状态与
+   错误呈现、会话布局交互。文字输入框按形态裁剪（设备端以语音为主）。
+3. **共用 Companion Engine（角色动画引擎）**：统一状态接口
+   idle / listening / thinking / speaking / success / error——
+   与 voice_session 状态机同源；每角色独立资源集
+   （Muse=吉祥物 GIF / 大肥鱼=dsh-pet 状态动画 / 小智=Q 版形象）。
+   换形象/加动作不动聊天引擎。
+4. **音频独占**：三个助手共用 Audio Manager，同一时刻仅一个占用
+   采集/播放链路（voice_session 租约，ADR-003 落实）。
+5. 大肥鱼 App 内部可动态创建 N 个模型/人设（经 Bridge Model Router），
+   不影响另外两个 App。
+
+**代码组织**（固件目录，PLAN §4.2 同步）：
+
+```
+apps/assistant/          共用聊天 UI（chat_view/message_list/companion_renderer）
+apps/{muse,bigfish,xiaozhi}/  三套服务适配器
+components/assistant_core/    公共助手接口（状态事件、消息抽象）
+components/companion_engine/  公共动画引擎
+```
+
+模拟器侧映射：`ui_conversation.c` = Shared Assistant UI；
+`companion.c` = Companion Engine；voice_session = 状态事件源。
+
+**桌面 App 清单（定稿）**：Muse、大肥鱼、小智、音乐播放器、订阅中心、
+ZCode Remote、天气（新增）、Komari 服务器监控、文件管理器、系统设置。
+
+**后果**：PLAN §4.2/§5.1/§8.5 已同步；新增天气 App（Phase 5+ 占位）；
+后续增加第四个 AI 助手 = 新增一个适配器 + 一套形象资源。
+
+---
+
 ## ADR-004 Firmware 基线选择 ESP-IDF v6.0.x
 
 日期：2026-11-14　状态：已接受

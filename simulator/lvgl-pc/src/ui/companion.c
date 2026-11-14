@@ -1,0 +1,117 @@
+/* companion — 见 companion.h（ADR-005 角色动画引擎）。 */
+#include "companion.h"
+
+#include <string.h>
+
+#include "ui.h" /* UI_APP_* 枚举 */
+
+/* 每 App 形象形态 */
+#define KIND_NONE  0 /* 不显示形象 */
+#define KIND_DSH   1 /* dsh 状态动画（黑底屏幕卡） */
+#define KIND_GIF   2 /* 单 GIF（Muse/robot） */
+#define KIND_IMAGE 3 /* 静态 PNG（小智） */
+
+static const uint8_t g_kinds[UI_APP_COUNT] = {
+    [UI_APP_CHAT]    = KIND_DSH,
+    [UI_APP_MUSE]    = KIND_GIF,
+    [UI_APP_XIAOZHI] = KIND_IMAGE,
+    /* 其余（launcher/zcode/monitor/...）：无形象 */
+};
+
+static lv_obj_t *g_obj;
+static lv_obj_t *g_stage;
+static int g_app = -1;
+
+/* dsh 资源按状态 */
+static const char *dsh_path(vs_state_t st)
+{
+    switch (st) {
+    case VS_THINKING: return "A:simulator/lvgl-pc/assets/dsh/dsh-typing.gif";
+    case VS_SPEAKING: return "A:simulator/lvgl-pc/assets/dsh/dsh-sparkle.gif";
+    default:          return "A:simulator/lvgl-pc/assets/dsh/dsh-idle.gif";
+    }
+}
+
+static void create_dsh(lv_obj_t *parent, int16_t y)
+{
+    g_stage = lv_obj_create(parent);
+    lv_obj_set_size(g_stage, 216, 130);
+    lv_obj_set_style_bg_color(g_stage, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_stage, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(g_stage, 16, 0);
+    lv_obj_set_style_border_width(g_stage, 0, 0);
+    lv_obj_set_style_shadow_width(g_stage, 0, 0);
+    lv_obj_clear_flag(g_stage, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(g_stage, LV_ALIGN_TOP_MID, 0, y);
+
+    g_obj = lv_gif_create(parent);
+    lv_obj_set_size(g_obj, 200, 114);
+    lv_image_set_scale(g_obj, (256 * 200) / 144);
+    lv_gif_set_src(g_obj, dsh_path(VS_IDLE));
+    lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y + 8);
+}
+
+static void create_gif(lv_obj_t *parent, int16_t y)
+{
+    g_obj = lv_gif_create(parent);
+    lv_obj_set_size(g_obj, 150, 150);
+    lv_image_set_scale(g_obj, (256 * 150) / 439); /* robot 439×391 → 150 */
+    lv_gif_set_src(g_obj, "A:simulator/lvgl-pc/assets/mascot.gif");
+    lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y);
+}
+
+static void create_image(lv_obj_t *parent, int16_t y)
+{
+    g_obj = lv_image_create(parent);
+    lv_image_set_src(g_obj, "A:simulator/lvgl-pc/assets/xiaozhi/xiaozhi-220.png");
+    lv_obj_set_size(g_obj, 220, 220);
+    lv_obj_align(g_obj, LV_ALIGN_TOP_MID, 0, y);
+}
+
+void companion_create(lv_obj_t *parent, int app_id, int16_t y)
+{
+    companion_delete();
+
+    g_app = app_id;
+    uint8_t kind = (app_id >= 0 && app_id < UI_APP_COUNT)
+                       ? g_kinds[app_id]
+                       : KIND_NONE;
+
+    switch (kind) {
+    case KIND_DSH:
+        create_dsh(parent, y);
+        break;
+    case KIND_GIF:
+        create_gif(parent, y);
+        break;
+    case KIND_IMAGE:
+        create_image(parent, y);
+        break;
+    case KIND_NONE:
+    default:
+        g_obj = NULL;
+        break;
+    }
+}
+
+void companion_set_state(int app_id, vs_state_t st)
+{
+    if (app_id != g_app || !g_obj) return;
+    if (g_kinds[app_id] == KIND_DSH) {
+        lv_gif_set_src(g_obj, dsh_path(st));
+    }
+    /* GIF/IMAGE 单资源形态：状态由波形/字幕表达，不切资源 */
+}
+
+void companion_delete(void)
+{
+    if (g_stage) {
+        lv_obj_delete(g_stage);
+        g_stage = NULL;
+    }
+    if (g_obj) {
+        lv_obj_delete(g_obj);
+        g_obj = NULL;
+    }
+    g_app = -1;
+}

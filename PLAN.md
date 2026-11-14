@@ -222,19 +222,24 @@ Komari API 路径以部署版本的文档和服务端代码为准。历史讨论
 ``` text
 firmware/
 ├── main/
-├── apps/
+├── apps/                        # 业务 App（ADR-005：三 AI 独立入口 + 共用壳）
 │   ├── launcher/
-│   ├── settings/
-│   ├── muse/
-│   ├── xiaozhi/
-│   ├── bigfish_chat/
-│   ├── zhipu_quota/
+│   ├── assistant/               # ★ 共用聊天 UI（chat_view / message_list /
+│   │                           #   companion_renderer / voice_panel）
+│   ├── muse/                    # Muse 适配（官方 SDK）
+│   ├── bigfish/                 # 大肥鱼适配（Model Router，可切 N 模型人设）
+│   ├── xiaozhi/                 # 小智适配（小智协议）
+│   ├── subscription/            # 订阅中心（多 Provider 聚合）
 │   ├── zcode_remote/
-│   ├── server_monitor/
+│   ├── weather/                 # 天气（新增）
+│   ├── server_monitor/          # Komari 监控
 │   ├── music_player/
-│   └── file_manager/
+│   ├── file_manager/
+│   └── settings/
 └── components/
     ├── app_manager/
+    ├── assistant_core/          # ★ 公共助手接口（状态事件/消息抽象）
+    ├── companion_engine/        # ★ 公共角色动画引擎（统一状态→资源映射）
     ├── display_manager/
     ├── touch_manager/
     ├── audio_manager/
@@ -265,18 +270,23 @@ firmware/
 
 ## 5.1 App 总览
 
-| App            | 功能                          | 优先级 |
-|----------------|-------------------------------|--------|
-| Launcher       | 桌面、状态栏、App 入口        | P0     |
-| Settings       | Wi-Fi、显示、音频、电源、存储 | P0     |
-| Zhipu Quota    | 智谱订阅额度和预热            | P1     |
-| ZCode Remote   | Agent 会话与待确认状态        | P1     |
-| Server Monitor | Komari 多服务器监控           | P1     |
-| Bigfish Chat   | 自部署 AI Chat                | P1     |
-| Muse AI        | Muse 语音助手                 | P2     |
-| Xiaozhi AI     | 小智语音助手                  | P2     |
-| Music Player   | TF 卡本地音乐                 | P2     |
-| File Manager   | TF 卡文件管理                 | P2     |
+| App            | 功能                          | 实现方式           | 优先级 |
+|----------------|-------------------------------|--------------------|--------|
+| Launcher       | 桌面、状态栏、App 入口        | —                  | P0     |
+| Settings       | Wi-Fi、显示、音频、电源、存储 | —                  | P0     |
+| Subscription   | 订阅中心（多 Provider 聚合）  | Bridge quota 域    | P1     |
+| ZCode Remote   | Agent 会话与待确认状态        | Bridge zcode 域    | P1     |
+| Server Monitor | Komari 多服务器监控           | Bridge komari 域   | P1     |
+| 大肥鱼         | 通用 AI 聊天，可切模型/人设   | Bigfish Adapter    | P1     |
+| Muse           | Muse 专属 AI 伙伴             | Muse Adapter(SDK)  | P2     |
+| 小智           | 独立语音 AI 助手              | Xiaozhi Adapter    | P2     |
+| Weather        | 天气                          | Bridge 天气源      | P3     |
+| Music Player   | TF 卡本地音乐                 | —                  | P2     |
+| File Manager   | TF 卡文件管理                 | —                  | P2     |
+
+> 三个 AI App（Muse/大肥鱼/小智）共用一套 Assistant UI 与 Companion
+> Engine，服务接入各自适配（ADR-005）；音频链路统一由 Audio Manager
+> 独占管理（同一时刻仅一个助手占用，ADR-003）。
 
 ## 5.2 Launcher
 
@@ -1170,17 +1180,18 @@ alt="Muse AI 伙伴动画概念" />
 - 不建议在 480×480 屏幕上持续播放高分辨率 GIF。
 - 设备端根据状态播放不同短动画。
 
-建议动画状态：
+Companion Engine 统一状态接口（ADR-005；与 voice_session 状态机同源）：
+idle / listening / thinking / speaking / success / error——
+服务适配器只发状态事件，UI 按当前 App 加载各自形象资源：
 
-| 状态      | 动画                |
-|-----------|---------------------|
-| Idle      | 轻微呼吸/眨眼       |
-| Listening | 耳朵/光环脉冲       |
-| Thinking  | 头部轻微摆动/思考点 |
-| Speaking  | 嘴部/光环节奏变化   |
-| Success   | 短暂开心动作        |
-| Error     | 困惑表情后恢复      |
-| Sleep     | 闭眼休眠            |
+| App    | idle        | listening | thinking  | speaking    |
+|--------|-------------|-----------|-----------|-------------|
+| Muse   | 吉祥物 GIF  | 同左+波形 | 同左      | 同左+字幕   |
+| 大肥鱼 | dsh 东张西望 | 同左      | dsh 写代码 | dsh 凭空生花 |
+| 小智   | Q 版形象    | 同左+波形 | 同左      | 同左+字幕   |
+
+（每角色资源独立；换形象/加动作不改聊天引擎。旧状态表保留作
+单角色细化参考：）
 
 资源格式建议：
 

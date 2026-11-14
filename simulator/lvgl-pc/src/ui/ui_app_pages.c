@@ -318,8 +318,9 @@ typedef struct {
 } placeholder_meta_t;
 
 static const placeholder_meta_t g_placeholders[] = {
-    { UI_APP_ZCODE,  "ZCode 会话", "Phase 4（数据源待定）" },
-    { UI_APP_MUSIC,  "音乐播放",   "Phase 5+" },
+    { UI_APP_ZCODE,   "ZCode 会话", "Phase 4（数据源待定）" },
+    { UI_APP_WEATHER, "天气",       "Phase 5+（Bridge 天气源）" },
+    { UI_APP_MUSIC,   "音乐播放",   "Phase 5+" },
 };
 
 static void placeholder_build(lv_obj_t *scr, int app_id)
@@ -363,6 +364,7 @@ static void register_apps(void)
         { UI_APP_XIAOZHI,  "小智",       LV_SYMBOL_VOLUME_MID,    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_MUSIC,    "音乐播放",   LV_SYMBOL_SD_CARD,       false, placeholder_build,     NULL },
         { UI_APP_SETTINGS, "系统设置",   LV_SYMBOL_SETTINGS,      true,  ui_settings_build,     NULL },
+        { UI_APP_WEATHER,  "天气",       LV_SYMBOL_IMAGE,         false, placeholder_build,     NULL },
     };
     for (size_t i = 0; i < sizeof(defs) / sizeof(defs[0]); i++) {
         if (!app_manager_register(&defs[i])) {

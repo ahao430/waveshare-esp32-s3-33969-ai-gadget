@@ -43,6 +43,7 @@ add_executable(gadget_sim
   src/ui/ui_app_pages.c
   src/ui/ui_monitor.c
   src/ui/ui_conversation.c
+  src/ui/companion.c
   src/ui/ui_settings.c
   src/voice/voice_session.c
   src/voice/audio_mock.c
