@@ -82,4 +82,9 @@ void vs_set_mock_timing(int think_ms, int speak_ms_per_char);
  * 自带真实采集，保持关闭。 */
 void vs_set_mock_capture(bool enable);
 
+/* 真机采集喂帧（audio_esp32 采集任务调用）：Listening 时转发 on_pcm
+ * （回调在采集线程执行——消费方只做数据追加/标志写，勿碰 LVGL 对象），
+ * 非 Listening 静默丢弃。 */
+void vs_feed_pcm(const int16_t *pcm, int frames);
+
 #endif /* VOICE_SESSION_H */

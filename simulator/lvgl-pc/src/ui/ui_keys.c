@@ -11,6 +11,8 @@
 /* KEY3 短按/长按的 App 自定义处理（App 可注册；聊天=连续对话/PTT） */
 static void (*g_key3_cb)(void);
 static void (*g_key3_long_cb)(void);
+/* 长按释放（真机按住 KEY3 说话、松开提交的收口；模拟器无释放事件源） */
+static void (*g_key3_long_rel_cb)(void);
 
 /* Web 可下发映射（默认=出厂行为，POWER_MANAGEMENT §13.4） */
 static struct {
@@ -28,6 +30,11 @@ void ui_key_set_key3_handler(void (*cb)(void))
 void ui_key_set_key3_long_handler(void (*cb)(void))
 {
     g_key3_long_cb = cb;
+}
+
+void ui_key_set_key3_long_release_handler(void (*cb)(void))
+{
+    g_key3_long_rel_cb = cb;
 }
 
 /* 动作执行：home/back/none 之外由调用方处理（app → 回调） */
@@ -63,6 +70,14 @@ void ui_key_dispatch_long(ui_key_t key)
     if (strcmp(g_cfg.key3_long, UI_KEY_ACT_PTT) == 0) {
         if (g_key3_long_cb) g_key3_long_cb();
     } /* none：无操作 */
+}
+
+void ui_key_dispatch_long_release(ui_key_t key)
+{
+    if (key != UI_KEY_KEY3) return;
+    if (strcmp(g_cfg.key3_long, UI_KEY_ACT_PTT) == 0) {
+        if (g_key3_long_rel_cb) g_key3_long_rel_cb();
+    }
 }
 
 /* 只接受已知动作值，未知/NULL 保留现值 */

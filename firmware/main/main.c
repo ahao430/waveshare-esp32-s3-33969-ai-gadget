@@ -2,7 +2,7 @@
  *
  * 启动序（顺序是踩坑结论，勿调整）：
  *   1. I2C 扫描（证据）+ PMU + 探针（RTC/PMU/TF）
- *   2. 音频 codec 预初始化（后续语音用）
+ *   2. 音频 codec 初始化（audio_esp32：ES7210 采/ES8311 播，语音链路）
  *   3. 显示 + ds_init 切 bridge（首屏空态而非 mock）+ ui_init()
  *      （模拟器共享 UI）+ 充电屏保挂 lv_layer_top（跨 App 屏常驻）
  *   4. Wi-Fi 最后启动；GOT_IP → SNTP 对时
@@ -12,9 +12,11 @@
  * PWR/BOOT 短按接入与 KEY3 长按（PTT）：待按键输入服务阶段。
  */
 #include "bsp/esp-bsp.h"
+#include "voice/audio_esp32.h"
 #include "bsp/touch.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "hal/gpio_ll.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -48,9 +50,10 @@
 static const char *TAG = "gadget";
 
 /* 事件位 */
-#define EV_KEY3_BIT BIT0  /* KEY3 短按（去抖后） */
-#define EV_NET_BIT BIT1   /* Wi-Fi 拿到 IP → 对时 + 切 bridge 数据源 */
+#define EV_KEY3_BIT BIT0  /* KEY3 按下沿（去抖后；key_task 判短/长按） */
+#define EV_NET_BIT BIT1   /* Wi-Fi 拿到 IP → 对时 */
 #define EV_BOOT_BIT BIT2  /* BOOT(GPIO0) 短按 = 返回 */
+#define EV_KEY3_REL_BIT BIT3 /* KEY3 释放沿（长按 PTT 收口） */
 
 static EventGroupHandle_t g_ev;
 
@@ -349,33 +352,86 @@ static void saver_build(void)
 /* ---- 实体键：去抖 ISR → 事件位 → 唤醒/UI 分发任务 ---- */
 static void IRAM_ATTR key_gpio_isr(void *arg)
 {
-    /* 机械抖动去抖 200ms（一次按压的多个沿只取第一个） */
+    /* 机械抖动去抖 200ms（一次按压的多个沿只取第一个；按/放沿共用窗口） */
     static int64_t last_us = 0;
     int64_t now = esp_timer_get_time();
     if (now - last_us < 200000) return;
     last_us = now;
 
+    uint32_t bits = (uint32_t)(uintptr_t)arg;
+    /* KEY3 配 ANYEDGE：低电平=按下、高电平=释放（释放沿供 PTT 收口）。
+     * gpio_ll 内联读寄存器=IRAM 安全（gpio_get_level 在 flash） */
+    if (bits & EV_KEY3_BIT) {
+        bits = gpio_ll_get_level(&GPIO, 18) == 0 ? EV_KEY3_BIT : EV_KEY3_REL_BIT;
+    } else if (bits & EV_BOOT_BIT) {
+        if (gpio_ll_get_level(&GPIO, 0) != 0) return; /* BOOT 释放沿忽略 */
+    }
     BaseType_t wakeup = pdFALSE;
-    xEventGroupSetBitsFromISR(g_ev, (uint32_t)(uintptr_t)arg, &wakeup);
+    xEventGroupSetBitsFromISR(g_ev, bits, &wakeup);
     portYIELD_FROM_ISR(wakeup);
 }
+
+/* KEY3 短/长按状态机（key_task 内）：按下沿起算，<600ms 释放=短按；
+ * ≥600ms=长按（PTT begin），松开沿=长按释放（PTT end） */
+#define KEY3_LONG_MS 600
+static int s_key3_state; /* 0=空闲 1=按下未定 2=长按中 */
+static int64_t s_key3_down_us;
 
 static void key_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        EventBits_t bits = xEventGroupWaitBits(g_ev, EV_KEY3_BIT | EV_BOOT_BIT,
-                                               pdTRUE, pdFALSE, portMAX_DELAY);
-        g_key_activity_us = esp_timer_get_time();
-        bsp_display_lock(0); /* BSP 语义：0=无限等；有限超时会触发断言 */
-        if (g_saver_on) {
-            saver_exit(); /* 屏保态按键仅唤醒，不进 App 分发 */
-        } else if (bits & EV_BOOT_BIT) {
-            ui_key_dispatch(UI_KEY_BOOT); /* 默认=返回（Web 可配） */
-        } else {
-            ui_key_dispatch(UI_KEY_KEY3); /* 默认=App 自定义（Web 可配） */
+        /* 按下未定时按剩余毫秒等待（到点即判长按），其余无限等 */
+        TickType_t wait = portMAX_DELAY;
+        if (s_key3_state == 1) {
+            int64_t remain_us = KEY3_LONG_MS * 1000LL -
+                                (esp_timer_get_time() - s_key3_down_us);
+            if (remain_us <= 0) wait = 0;
+            else wait = (TickType_t)(remain_us / 1000 / portTICK_PERIOD_MS) + 1;
         }
-        bsp_display_unlock();
+        EventBits_t bits = xEventGroupWaitBits(
+            g_ev, EV_KEY3_BIT | EV_KEY3_REL_BIT | EV_BOOT_BIT,
+            pdTRUE, pdFALSE, wait);
+        g_key_activity_us = esp_timer_get_time();
+        int64_t now = esp_timer_get_time();
+
+        if (bits & EV_KEY3_BIT) {
+            s_key3_state = 1;
+            s_key3_down_us = now;
+            if (g_saver_on) { /* 屏保态按键立即唤醒（不进本次按压分发） */
+                bsp_display_lock(0);
+                saver_exit();
+                bsp_display_unlock();
+            }
+        }
+        if (bits & EV_BOOT_BIT) {
+            bsp_display_lock(0);
+            if (g_saver_on) {
+                saver_exit();
+            } else {
+                ui_key_dispatch(UI_KEY_BOOT); /* 默认=返回（Web 可配） */
+            }
+            bsp_display_unlock();
+        }
+        if (bits & EV_KEY3_REL_BIT) {
+            if (s_key3_state == 1) { /* 短按：松开即分发 */
+                s_key3_state = 0;
+                bsp_display_lock(0);
+                ui_key_dispatch(UI_KEY_KEY3);
+                bsp_display_unlock();
+            } else if (s_key3_state == 2) { /* 长按释放：PTT 收口 */
+                s_key3_state = 0;
+                bsp_display_lock(0);
+                ui_key_dispatch_long_release(UI_KEY_KEY3);
+                bsp_display_unlock();
+            }
+        }
+        if (s_key3_state == 1 && now - s_key3_down_us >= KEY3_LONG_MS * 1000LL) {
+            s_key3_state = 2; /* 长按达成（屏保已由按下沿唤醒） */
+            bsp_display_lock(0);
+            ui_key_dispatch_long(UI_KEY_KEY3);
+            bsp_display_unlock();
+        }
     }
 }
 
@@ -450,10 +506,10 @@ void app_main(void)
     probe_pmu_raw();
     probe_sdcard();
 
-    /* 音频 codec 预初始化（语音链路后续阶段接入 voice_session） */
-    ESP_ERROR_CHECK(bsp_audio_init(NULL));
-    (void)bsp_audio_codec_speaker_init();
-    (void)bsp_audio_codec_microphone_init();
+    /* 音频：codec+I2S+定标一步到位（真机语音 ops 的采集/播放句柄） */
+    if (audio_esp32_init() != 0) {
+        ESP_LOGW(TAG, "audio init failed，语音链路降级");
+    }
 
     g_ev = xEventGroupCreate();
     xTaskCreate(key_task, "key_dispatch", 4096, NULL, 5, NULL);
@@ -467,7 +523,8 @@ void app_main(void)
         .pin_bit_mask = (1ULL << 18) | (1ULL << 0),
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
+        .intr_type = GPIO_INTR_ANYEDGE, /* KEY3 按住 PTT 需释放沿；
+                                           BOOT 释放沿被状态机忽略 */
     };
     ESP_ERROR_CHECK(gpio_config(&io));
     ESP_ERROR_CHECK(gpio_install_isr_service(ESP_INTR_FLAG_IRAM));

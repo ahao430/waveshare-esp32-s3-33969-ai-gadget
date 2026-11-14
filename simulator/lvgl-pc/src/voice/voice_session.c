@@ -192,6 +192,18 @@ void vs_set_mock_capture(bool enable)
     g_mock_capture = enable;
 }
 
+/* 真机 real ops 采集任务喂帧入口（audio_esp32 调用；vs_tick 不驱动真采集，
+ * 见 tick 内 LISTENING 分支注释）。仅 Listening 转发，其余状态静默丢弃——
+ * stop_capture 与任务退出间的尾部帧安全。回调在采集线程执行，
+ * 消费方（ui_conversation 的 g_capture/波形）为共享数据+标志写，
+ * 真机实测路径；LVGL 对象操作勿在此回调里做（锁纪律）。 */
+void vs_feed_pcm(const int16_t *pcm, int frames)
+{
+    if (g_state == VS_LISTENING && g_listener.on_pcm && pcm && frames > 0) {
+        g_listener.on_pcm(pcm, frames, g_listener.user);
+    }
+}
+
 vs_state_t vs_state(void)
 {
     return g_state;

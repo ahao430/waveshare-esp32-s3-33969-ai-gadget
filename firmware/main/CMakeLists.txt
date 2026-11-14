@@ -27,9 +27,10 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/data/data_source_bridge.c
     ${SIM_SRC_DIR}/data/http_client.c
     ${SIM_SRC_DIR}/data/mock_data.c
-    # 语音会话（模拟器为 mock 音频；真机编解码 Phase 6 后接）
+    # 语音会话：voice_session 状态机 + mock（模拟器双端兼容）+ esp32 真机 ops
     ${SIM_SRC_DIR}/voice/voice_session.c
     ${SIM_SRC_DIR}/voice/audio_mock.c
+    ${SIM_SRC_DIR}/voice/audio_esp32.c
 )
 
 idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
@@ -38,6 +39,8 @@ idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
     PRIV_REQUIRES
         cjson                                   # data_source_bridge.c 解析 Bridge 响应
         waveshare__esp32_s3_touch_amoled_2_16   # BSP（显示/触摸/音频/I2C）
+        espressif__esp_codec_dev                # audio_esp32：ES8311/ES7210 读写
+        freertos                                # audio_esp32：采集/播放任务
         power_manager                           # AXP2101 电池/充电
         esp_wifi esp_event esp_netif nvs_flash  # Wi-Fi/NVS
         esp_timer                               # esp_timer_get_time

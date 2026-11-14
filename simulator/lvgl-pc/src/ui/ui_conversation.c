@@ -18,7 +18,12 @@
 #include <string.h>
 
 #include "app_manager.h"
+
+#ifdef ESP_PLATFORM
+#include "audio_esp32.h"
+#else
 #include "audio_mock.h"
+#endif
 
 #include "companion.h"
 #include "data_source.h"
@@ -139,8 +144,12 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
 {
     (void)user;
     if (!g_status_lbl) return;
+    /* 真机播放完成通知来自播放任务线程（vs_notify_play_done 链），
+     * 回调内触碰 LVGL 必须持显示锁（ui.h；模拟器 no-op） */
+    ui_lock();
     lv_label_set_text(g_status_lbl, state_text(st));
     companion_set_state(g_app_id, st);
+    ui_unlock();
 
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
@@ -159,7 +168,9 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
 static void on_vs_speak(const char *visible, void *user)
 {
     (void)user;
+    ui_lock();
     if (g_reply_lbl) lv_label_set_text(g_reply_lbl, visible);
+    ui_unlock();
 }
 
 static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
@@ -250,18 +261,29 @@ static void ptt_pressed_cb(lv_event_t *e)
     if (g_voice_enabled) vs_ptt_begin();
 }
 
-/* KEY3 长按（Web 配置 ptt）：模拟按住说话 0.9s 后松手发出 */
-static void key3_ptt_release_cb(lv_timer_t *t)
+/* KEY3 长按（Web 配置 ptt）：真机=按住期间说话，松开沿收口提交
+ * （main key_task 分发 long_release）；模拟器无释放事件源，
+ * 0.9s 定时器自动收尾（演示语义）。 */
+static void key3_ptt_end_cb(void)
+{
+    if (g_voice_enabled) vs_ptt_end();
+}
+
+#ifndef ESP_PLATFORM
+static void key3_ptt_auto_release_cb(lv_timer_t *t)
 {
     lv_timer_del(t);
     vs_ptt_end();
 }
+#endif
 
 static void key3_long_ptt_cb(void)
 {
     if (!g_voice_enabled) return;
     vs_ptt_begin();
-    lv_timer_create(key3_ptt_release_cb, 900, NULL);
+#ifndef ESP_PLATFORM
+    lv_timer_create(key3_ptt_auto_release_cb, 900, NULL);
+#endif
 }
 
 static void ptt_released_cb(lv_event_t *e)
@@ -373,11 +395,18 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     g_voice_enabled = g_meta[app_id].voice;
     ui_key_set_key3_handler(continuous_toggle_cb_void); /* KEY3 短按：连续对话 */
     ui_key_set_key3_long_handler(key3_long_ptt_cb);     /* KEY3 长按：语音说话 */
+    ui_key_set_key3_long_release_handler(key3_ptt_end_cb); /* 真机松开：收口提交 */
 
     if (!g_vs_inited) {
+#ifdef ESP_PLATFORM
+        /* 真机：ES7210 采集 / ES8311 播 TTS（audio_esp32） */
+        vs_init(audio_esp32_ops());
+#else
+        /* 模拟器：mock ops + 伪采集波形 */
         vs_init(audio_mock_ops());
-        vs_set_listener(&g_listener);
         vs_set_mock_capture(true);
+#endif
+        vs_set_listener(&g_listener);
         g_vs_inited = true;
     }
     if (!vs_acquire(g_meta[app_id].engine)) {

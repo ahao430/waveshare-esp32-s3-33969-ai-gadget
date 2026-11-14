@@ -711,14 +711,24 @@ static int bridge_fetch_background(const char *save_path)
 
 /* 语音一步式交互（PLAN §5.3）：POST 原始 PCM（audio/l16;rate=16000），
  * 一次请求同时捕获 X-Voice-Transcript / X-Voice-Reply 文本头；
- * WAV 响应体丢弃（模拟器不真播，字幕推进；真机 Phase 6 交 audio ops）。
+ * WAV 响应体：真机经 audio_esp32_tts_write 攒 PCM 缓冲（SPEAKING 时
+ * ops->play 消费）；模拟器不真播（字幕推进），丢弃。
  * 超时 30s。 */
-static void voice_discard_cb(const char *data, size_t len, void *user)
+#ifdef ESP_PLATFORM
+#include "voice/audio_esp32.h"
+static void voice_tts_cb(const char *data, size_t len, void *user)
+{
+    (void)user;
+    audio_esp32_tts_write(data, len);
+}
+#else
+static void voice_tts_cb(const char *data, size_t len, void *user)
 {
     (void)data;
     (void)len;
     (void)user;
 }
+#endif
 
 static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
@@ -728,11 +738,14 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
         snprintf(reply, (size_t)reply_len, "(未录到音频)");
         return DS_VOICE_ERROR;
     }
+#ifdef ESP_PLATFORM
+    audio_esp32_tts_reset();
+#endif
     int status = http_post_raw_stream(g_voice_url, "audio/l16;rate=16000",
                                       (const char *)pcm, (size_t)frames * 2,
                                       "X-Voice-Transcript", transcript, (size_t)transcript_len,
                                       "X-Voice-Reply", reply, (size_t)reply_len,
-                                      voice_discard_cb, NULL, 30000);
+                                      voice_tts_cb, NULL, 30000);
     if (status != 200) {
         snprintf(reply, (size_t)reply_len, "语音请求失败（HTTP %d）", status);
         return DS_VOICE_ERROR;

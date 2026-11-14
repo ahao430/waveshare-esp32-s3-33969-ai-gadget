@@ -31,6 +31,10 @@ void ui_key_dispatch(ui_key_t key);
 /* 分发一次长按（仅 KEY3 有可配置语义；PWR/BOOT 长按在固件侧） */
 void ui_key_dispatch_long(ui_key_t key);
 
+/* 长按释放收口（真机固件在 KEY3 松开时调用：按住说话、松开提交）。
+ * 模拟器无释放事件源，GADGET_DEMO_KEYS 路径不经此（自动收尾）。 */
+void ui_key_dispatch_long_release(ui_key_t key);
+
 /* 应用 Web 下发的按键映射（NULL/未知值=保留默认；见 /api/v1/keys） */
 void ui_keys_apply_config(const char *pwr_short, const char *boot_short,
                           const char *key3_short, const char *key3_long);
@@ -40,6 +44,9 @@ void ui_key_set_key3_handler(void (*cb)(void));
 
 /* KEY3 长按的 App 处理器（映射=ptt 时触发；聊天=按住说话松手发出） */
 void ui_key_set_key3_long_handler(void (*cb)(void));
+
+/* KEY3 长按释放的 App 处理器（真机松开沿触发；映射=ptt 时收口录音） */
+void ui_key_set_key3_long_release_handler(void (*cb)(void));
 
 /* 模拟器：装载 GADGET_DEMO_KEYS 计划（ui_init 末尾调用；无钩子时无副作用） */
 void ui_keys_demo_init(void);

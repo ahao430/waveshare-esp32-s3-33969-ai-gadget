@@ -4,6 +4,18 @@
 
 #include "lvgl.h"
 
+/* 显示锁抽象：非 LVGL 线程（音频 worker/播放任务）触碰 LVGL 对象时
+ * 必须持有（真机坑#1：bsp_display_lock(0)=无限等待的递归互斥量，
+ * 有限超时 take 会触发 FreeRTOS 断言——只许 lock(0)+成对 unlock）。
+ * 模拟器单线程 no-op。 */
+#ifdef ESP_PLATFORM
+void ui_lock(void);
+void ui_unlock(void);
+#else
+static inline void ui_lock(void) {}
+static inline void ui_unlock(void) {}
+#endif
+
 /* App 目录（与 PLAN §5.1 对应；顺序即桌面网格顺序） */
 enum ui_app_id {
     UI_APP_ZHIPU = 0,
