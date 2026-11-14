@@ -40,6 +40,16 @@ static bool mock_ds_refresh(gadget_state_t *st)
     snprintf(st->subs[0].plan, sizeof(st->subs[0].plan), "%s", st->zhipu_plan);
     st->subs[0].valid = true;
 
+    /* 演示服务器首刷填充（g_state 零初值——真机 bridge 无配置显示空态，
+     * 演示数据只属于 mock 数据源） */
+    if (st->server_count == 0) {
+        st->server_count = 4;
+        st->servers[0] = (gadget_server_t){ "hk-01", true,  23, 55, 38,  540, 1560, 120 };
+        st->servers[1] = (gadget_server_t){ "hk-02", true,  48, 66, 41,  890, 2450, 730 };
+        st->servers[2] = (gadget_server_t){ "jp-01", false,  0,  0,  0,    0,    0,   0 };
+        st->servers[3] = (gadget_server_t){ "us-01", true,  71, 82, 77, 1320, 3980, 240 };
+    }
+
     /* 服务器队列伪随机波动 */
     for (int i = 0; i < st->server_count && i < DS_SERVER_MAX; i++) {
         gadget_server_t *s = &st->servers[i];

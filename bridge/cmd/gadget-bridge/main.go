@@ -134,7 +134,8 @@ func main() {
 	prewarmZhipu := prewarmer.Prewarm
 
 	// Komari 监控源（动态解析，每次抓取现读配置）：Web 后台配置
-	// （app_settings.monitor）优先 → 环境变量 KOMARI_URL → Mock。
+	// （app_settings.monitor）优先 → 环境变量 KOMARI_URL → 空（不回退
+	// mock：未配置就返回空列表，设备/Web 显示空态引导去后台配置）。
 	resolveKomari := func() komari.Source {
 		if db != nil && masterKey != nil {
 			if raw, err := db.GetSetting(storage.SettingKeyMonitor); err == nil {
@@ -156,10 +157,10 @@ func main() {
 		if u := os.Getenv("KOMARI_URL"); u != "" {
 			return komari.NewClient(u, os.Getenv("KOMARI_TOKEN"))
 		}
-		return komari.NewMockSource()
+		return nil
 	}
 	komariSvc := komari.NewService(komari.NewDynamicSource(resolveKomari))
-	logger.Info("komari source = dynamic (web config > KOMARI_URL > mock)")
+	logger.Info("komari source = dynamic (web config > KOMARI_URL > none)")
 
 	// Bigfish Chat Model Router（PLAN §7.4）：OpenAI 兼容 upstream。
 	// 环境变量示例：CHAT_UPSTREAM_ZHIPU="https://open.bigmodel.cn/api/paas/v4,ZHIPU_KEY"

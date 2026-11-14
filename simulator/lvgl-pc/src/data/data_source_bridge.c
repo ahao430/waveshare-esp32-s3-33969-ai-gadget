@@ -192,7 +192,9 @@ static void fetch_servers(gadget_state_t *st)
             s->net_down_kbps = cJSON_IsNumber(ndn) ? (int)(ndn->valuedouble / 1024.0 + 0.5) : 0;
             n++;
         }
-        if (n > 0) st->server_count = n;
+        /* 空列表也是有效状态（后台删光 → 设备空态提示），无条件覆写；
+         * 走到这里 = snapshot/servers 结构校验已通过，解析失败早退保留旧值 */
+        st->server_count = n;
     } while (0);
 
     cJSON_Delete(root);

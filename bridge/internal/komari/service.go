@@ -76,7 +76,8 @@ type dynamicSource struct {
 }
 
 // NewDynamicSource 把"按配置现取 Source"适配为 Source；
-// resolve 返回 nil 时回退 MockSource。
+// resolve 返回 nil（未配置）→ 空快照 source="none"。
+// 不回退 mock：设备/Web 端「空的就显示空的」，提示去后台配置。
 func NewDynamicSource(resolve func() Source) Source {
 	return &dynamicSource{resolve: resolve}
 }
@@ -85,13 +86,15 @@ func (d *dynamicSource) Name() string {
 	if s := d.resolve(); s != nil {
 		return s.Name()
 	}
-	return "mock"
+	return "none"
 }
 
 func (d *dynamicSource) Fetch(ctx context.Context) (*Snapshot, error) {
 	s := d.resolve()
 	if s == nil {
-		s = NewMockSource()
+		// Servers 必须显式空 slice：nil slice 序列化为 null，设备端
+		// cJSON_IsArray 判 false 会走「结构异常」路径不清 server_count
+		return &Snapshot{FetchedAt: time.Now(), Source: "none", Servers: []Server{}}, nil
 	}
 	return s.Fetch(ctx)
 }

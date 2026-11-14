@@ -1,6 +1,9 @@
 /* ui_monitor — 服务器监控页（ADR-008 横滑范式）：
  * 列表 = 紧凑行卡（点击进详情）；详情 = 每服务器一 tile 横滑 + 页点。
  * 无返回按钮：列表上滑退出 App；详情上滑回列表（层级返回）。
+ * 数据语义（去 mock）：真机 bridge 模式未联网/未配置 → 空态提示
+ * 「去 Web 后台配置」，不用演示数据冒充；单台服务器直达详情
+ * （列表仅一行无意义，此时上滑=退出 App）。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,6 +99,16 @@ static void build_list(lv_obj_t *scr, const gadget_state_t *s, int app_id)
     lv_obj_t *title = ui_label(scr, "服务器监控", &lv_font_cn_20, UI_TEXT);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
     monitor_refresh_btn(scr);
+
+    if (s->server_count == 0) {
+        /* 空态：真机 bridge 未配置/未联网——不拿 mock 冒充（用户要求） */
+        lv_obj_t *empty = ui_label(scr,
+                                   "暂无服务器\n\n在 Web 后台 → 服务器监控\n添加 Komari 地址\n\n配置后点右上刷新",
+                                   &lv_font_cn_14, UI_TEXT_DIM);
+        lv_obj_align(empty, LV_ALIGN_CENTER, 0, 20);
+        lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
+        return;
+    }
 
     int online = 0;
     for (int i = 0; i < s->server_count; i++) {
@@ -226,14 +239,25 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
     if (dt && dt[0]) g_detail = atoi(dt);
 
     const gadget_state_t *s = ds_state();
-    if (g_detail < 0) {
+    /* 单台服务器直达详情（列表只有一行没有意义）；0 台走空态 */
+    if (g_detail < 0 && s->server_count == 1) g_detail = 0;
+
+    if (g_detail < 0 || s->server_count == 0) {
+        g_detail = -1;
         build_list(scr, s, app_id);
         return;
     }
 
-    /* 详情 = tileview 横滑（每服务器一 tile），上滑回列表 */
-    ui_gesture_back_add_ex(scr, detail_back_to_list, NULL);
-    lv_obj_t *title = ui_label(scr, "服务器 · 横滑查看", &lv_font_cn_20, UI_TEXT);
+    /* 详情 = tileview 横滑（每服务器一 tile）。多台：上滑回列表；
+     * 单台：回列表会被「直进详情」弹回 → 上滑直接退出 App */
+    if (s->server_count > 1) {
+        ui_gesture_back_add_ex(scr, detail_back_to_list, NULL);
+    } else {
+        ui_gesture_back_add(scr);
+    }
+    lv_obj_t *title = ui_label(scr, s->server_count > 1 ? "服务器 · 横滑查看"
+                                                        : "服务器详情",
+                               &lv_font_cn_20, UI_TEXT);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
     monitor_refresh_btn(scr);
 
@@ -253,8 +277,13 @@ void ui_monitor_build(lv_obj_t *scr, int app_id)
      * 在布局完成前调用曾崩——lv_tileview_get_tile_active 返回未就绪指针） */
     lv_tileview_set_tile_by_index(tv, (uint32_t)g_detail, 0, LV_ANIM_OFF);
 
-    ui_dots_create(scr, g_dots, UI_DOTS_MAX, s->server_count,
-                   LV_ALIGN_BOTTOM_MID, -8);
-    ui_dots_update(g_dots, s->server_count, g_detail); /* set_tile 早于 cb 挂载 */
+    /* 旧 dots 随旧屏销毁，数组指针先清空（ui_dots_create 的清理 delete
+     * 遇悬垂指针会 UAF）；单台无横滑，不建页点 */
+    for (int i = 0; i < UI_DOTS_MAX; i++) g_dots[i] = NULL;
+    if (s->server_count > 1) {
+        ui_dots_create(scr, g_dots, UI_DOTS_MAX, s->server_count,
+                       LV_ALIGN_BOTTOM_MID, -8);
+        ui_dots_update(g_dots, s->server_count, g_detail); /* set_tile 早于 cb 挂载 */
+    }
     lv_obj_add_event_cb(tv, detail_scroll_cb, LV_EVENT_SCROLL, NULL);
 }

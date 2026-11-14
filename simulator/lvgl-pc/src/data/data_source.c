@@ -21,13 +21,9 @@ static gadget_state_t g_state = {
     .sub_count = 0, /* subs 未列出 = 零填充（designated init 语义，
                        显式 {{0}} 反触发新 GCC missing-braces 告警） */
 
-    .server_count = 4,
-    .servers = {
-        { "hk-01", true,  23, 55, 38,  540, 1560, 120 },
-        { "hk-02", true,  48, 66, 41,  890, 2450, 730 },
-        { "jp-01", false,  0,  0,  0,    0,    0,   0 },
-        { "us-01", true,  71, 82, 77, 1320, 3980, 240 },
-    },
+    /* servers 零初值：mock 演示数据由 mock 实现首刷填充——真机 bridge
+     * 模式首屏（未联网/未配置）读到「空」→ UI 空态提示，不冒充数据 */
+    .server_count = 0,
 
     .battery_pct  = 82,
     .wifi_ok      = true,

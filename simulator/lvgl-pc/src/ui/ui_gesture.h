@@ -9,8 +9,9 @@
 
 #define UI_DOTS_MAX 12
 
-/* 二级页上滑返回：给屏幕根对象挂手势监听（LV_DIR_TOP → app_manager_back）。
- * 所有 app 页面统一调用（替代原左上 back 按钮）。 */
+/* 二级页上滑返回：注册该屏的「快甩返回」监听（→ app_manager_back）。
+ * 所有 app 页面统一调用（替代原左上 back 按钮）。
+ * 交互口径：慢拖 = 页面滚动，快甩（≥70px、≤400ms、纵向主导）= 返回。 */
 void ui_gesture_back_add(lv_obj_t *scr);
 
 /* 自定义上滑行为（如设置子页上滑 = 回设置首页的层级返回） */

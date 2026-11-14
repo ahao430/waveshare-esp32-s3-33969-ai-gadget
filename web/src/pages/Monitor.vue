@@ -72,6 +72,8 @@ async function testConn() {
     if (r.snapshot?.servers?.length) {
       const online = r.snapshot.servers.filter((s) => s.online).length
       testMsg.value = `✓ 连接成功：${r.snapshot.servers.length} 台服务器，${online} 台在线（${r.snapshot.source}）`
+    } else if (r.snapshot?.source === 'none') {
+      testMsg.value = '未配置监控源（保存地址后自动生效）'
     } else if (r.snapshot === null || r.snapshot === undefined) {
       testMsg.value = `✗ 抓取失败：${r.last_error ?? '未知错误'}`
     } else {

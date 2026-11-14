@@ -3,9 +3,9 @@
  * 启动序（顺序是踩坑结论，勿调整）：
  *   1. I2C 扫描（证据）+ PMU + 探针（RTC/PMU/TF）
  *   2. 音频 codec 预初始化（后续语音用）
- *   3. 显示 + ui_init()（模拟器共享 UI，mock 数据源起步）
- *      + 充电屏保挂 lv_layer_top（跨 App 屏常驻）
- *   4. Wi-Fi 最后启动；GOT_IP → SNTP 对时 + ds_init 切 bridge 数据源
+ *   3. 显示 + ds_init 切 bridge（首屏空态而非 mock）+ ui_init()
+ *      （模拟器共享 UI）+ 充电屏保挂 lv_layer_top（跨 App 屏常驻）
+ *   4. Wi-Fi 最后启动；GOT_IP → SNTP 对时
  *      （UI 构建必须先于 Wi-Fi：NVS 缓存凭据 2.4s 拿 IP 的竞态教训）
  *
  * KEY3（GPIO18）：屏保态=唤醒；正常态=ui_key_dispatch（Web 可配映射）。
@@ -379,7 +379,7 @@ static void key_task(void *arg)
     }
 }
 
-/* ---- Wi-Fi：GOT_IP → SNTP 对时 + ds_init 切 bridge ---- */
+/* ---- Wi-Fi：GOT_IP → SNTP 对时 ---- */
 static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
@@ -407,13 +407,6 @@ static void net_task(void *arg)
         esp_sntp_setservername(0, "ntp.aliyun.com");
         esp_sntp_setservername(1, "pool.ntp.org");
         esp_sntp_init();
-
-        /* 切 bridge 数据源：UI 各页轮询将逐步拿到真实数据
-         *（launcher 布局/按键映射/天气/订阅/AstrBot 会话） */
-        if (strlen(BRIDGE_HOST) > 0) {
-            ds_init("bridge", BRIDGE_HOST, NULL);
-            ESP_LOGI(TAG, "data source -> bridge(%s)", BRIDGE_HOST);
-        }
     }
 }
 
@@ -481,7 +474,10 @@ void app_main(void)
     ESP_ERROR_CHECK(gpio_isr_handler_add(18, key_gpio_isr, (void *)(uintptr_t)EV_KEY3_BIT));
     ESP_ERROR_CHECK(gpio_isr_handler_add(0, key_gpio_isr, (void *)(uintptr_t)EV_BOOT_BIT));
 
-    /* 显示 + 共享 UI（mock 数据源起步）+ 屏保，先于 Wi-Fi（竞态教训） */
+    /* 显示 + 共享 UI + 屏保，先于 Wi-Fi（竞态教训）。
+     * 数据源在 ui_init 前即切 bridge：首屏读到的是「空」而非 mock
+     * 演示数据（无配置 → 空态提示），联网后各页轮询拿真实数据；
+     * 同任务切换也消除了原 GOT_IP 后跨任务改 g_impl 的竞态 */
     heap_report("pre-display");
     if (display_start_custom() == NULL) {
         ESP_LOGE(TAG, "display_start_custom failed");
@@ -489,6 +485,11 @@ void app_main(void)
     }
     bsp_display_backlight_on();
     heap_report("post-display");
+
+    if (strlen(BRIDGE_HOST) > 0) {
+        ds_init("bridge", BRIDGE_HOST, NULL);
+        ESP_LOGI(TAG, "data source -> bridge(%s)", BRIDGE_HOST);
+    }
 
     bsp_display_lock(0);
     ui_init();

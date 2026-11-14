@@ -4,31 +4,126 @@
 #include "app_manager.h"
 #include "ui_theme.h"
 
-/* 上滑返回（原厂范式：二级页无返回按钮） */
-static void gesture_cb(lv_event_t *e)
+/* ---- 上滑返回（自研快甩检测，不依赖 LVGL 手势系统） ----
+ * 真机排障记录：LV_EVENT_GESTURE 由 indev 发给「按下的对象」（详情页里
+ * 是内容卡片/label），挂在 screen 根上的回调收不到；滚动容器接管后
+ * lv_indev_get_gesture_dir 也不再报 LV_DIR_TOP（开 LV_USE_FLOAT +
+ * GESTURE_RECOGNITION 实测无效）。改为 30ms 轮询指针 indev 的 proc
+ * 轨迹，RELEASED 时按「快甩」判定——dy 大且时间短、纵向主导，
+ * 与页面慢拖滚动天然区分：慢拖=滚动，快甩=返回。 */
+
+#define GB_MAX_SCREENS 6
+typedef struct {
+    lv_obj_t *scr;
+    void (*cb)(void *);
+    void *user;
+} gb_entry_t;
+static gb_entry_t g_gb[GB_MAX_SCREENS];
+static lv_timer_t *g_gb_timer;
+static lv_indev_t *g_indev;
+static bool g_pressed;
+static lv_point_t g_start, g_last;
+static uint32_t g_t0;
+static uint32_t g_last_fire;
+
+/* 快甩阈值：480px 圆屏上 70px/400ms 相当温和，纵向 2:1 排除斜滑误触 */
+#define GB_SWIPE_MIN_DY 70
+#define GB_SWIPE_MAX_MS 400
+#define GB_SWIPE_DOMINANCE 2
+
+static void gb_fire(void)
 {
-    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        app_manager_back();
+    lv_obj_t *scr = lv_screen_active();
+    for (int i = 0; i < GB_MAX_SCREENS; i++) {
+        if (g_gb[i].scr == scr && g_gb[i].cb) {
+            g_gb[i].cb(g_gb[i].user);
+            return;
+        }
     }
+}
+
+static void gb_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!g_indev) {
+        /* 第一个指针类 indev：9.x 触摸/鼠标统一 LV_INDEV_TYPE_POINTER，
+         * 真机=触摸，模拟器=SDL 鼠标（行为一致）。
+         * 只用公开 API（9.2 起 lv_indev_t 结构私有化） */
+        for (lv_indev_t *i = lv_indev_get_next(NULL); i; i = lv_indev_get_next(i)) {
+            if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER) {
+                g_indev = i;
+                break;
+            }
+        }
+        if (!g_indev) return;
+    }
+
+    if (lv_indev_get_state(g_indev) == LV_INDEV_STATE_PRESSED) {
+        lv_point_t p;
+        lv_indev_get_point(g_indev, &p);
+        if (!g_pressed) {
+            g_pressed = true;
+            g_start = g_last = p;
+            g_t0 = lv_tick_get();
+        } else {
+            g_last = p;
+        }
+    } else if (g_pressed) {
+        /* RELEASED 结算 */
+        g_pressed = false;
+        int32_t dx = g_last.x - g_start.x;
+        int32_t dy = g_last.y - g_start.y;
+        int32_t adx = dx < 0 ? -dx : dx;
+        uint32_t dt = lv_tick_elaps(g_t0);
+        if (dy <= -GB_SWIPE_MIN_DY && dt <= GB_SWIPE_MAX_MS &&
+            -dy >= GB_SWIPE_DOMINANCE * adx &&
+            lv_tick_elaps(g_last_fire) > 400) {
+            g_last_fire = lv_tick_get();
+            gb_fire();
+        }
+    }
+}
+
+static void gb_unregister(lv_event_t *e)
+{
+    lv_obj_t *scr = lv_event_get_target(e);
+    for (int i = 0; i < GB_MAX_SCREENS; i++) {
+        if (g_gb[i].scr == scr) g_gb[i].scr = NULL;
+    }
+}
+
+static void gb_register(lv_obj_t *scr, void (*cb)(void *), void *user)
+{
+    /* 同屏重复注册：覆盖（back_add 与 back_add_ex 不同时用） */
+    int slot = -1;
+    for (int i = 0; i < GB_MAX_SCREENS; i++) {
+        if (g_gb[i].scr == scr) { slot = i; break; }
+        if (g_gb[i].scr == NULL && slot < 0) slot = i;
+    }
+    if (slot < 0) return; /* 表满：详情页等场景不会超 6 屏 */
+
+    g_gb[slot].scr = scr;
+    g_gb[slot].cb = cb;
+    g_gb[slot].user = user;
+    lv_obj_add_event_cb(scr, gb_unregister, LV_EVENT_DELETE, NULL);
+
+    if (!g_gb_timer) g_gb_timer = lv_timer_create(gb_timer_cb, 30, NULL);
+}
+
+static void gb_back_cb(void *user)
+{
+    (void)user;
+    app_manager_back();
 }
 
 void ui_gesture_back_add(lv_obj_t *scr)
 {
-    lv_obj_add_event_cb(scr, gesture_cb, LV_EVENT_GESTURE, NULL);
-}
-
-static void gesture_ex_cb(lv_event_t *e)
-{
-    if (lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_TOP) {
-        void (*cb)(void *) = (void (*)(void *))lv_event_get_user_data(e);
-        if (cb) cb(NULL);
-    }
+    gb_register(scr, gb_back_cb, NULL);
 }
 
 void ui_gesture_back_add_ex(lv_obj_t *scr, void (*cb)(void *), void *user)
 {
-    lv_obj_add_event_cb(scr, gesture_ex_cb, LV_EVENT_GESTURE, (void *)cb);
-    (void)user;
+    gb_register(scr, cb, user);
 }
 
 void ui_dots_create(lv_obj_t *x, lv_obj_t *dots[], int max_dots, int count,
