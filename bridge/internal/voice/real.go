@@ -318,3 +318,109 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	}
 	return beepWav(text) // 音质降级，会话不断
 }
+
+// previewDefaultText 试听样例（短、含常见字，便于比较音色）。
+const previewDefaultText = "你好，我是你的语音助手，很高兴见到你。"
+
+// Preview 按显式引擎/音色合成一段试听音频（Web 后台音色选择旁的
+// 「试听」按钮）。与 Synthesize 的区别：
+//   - 不读 App 偏好（调用方直接给 provider/voice）
+//   - 不读写冷却状态（后台点一次就该真打一次，失败也不影响设备回合）
+//   - 不做哔声降级（后台要看到"没配 Key / 音色不可用"的真实原因）
+func (r *RealInteractor) Preview(ctx context.Context, provider, voice, text string) ([]byte, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		text = previewDefaultText
+	}
+	// 后台误传长文不把 TTS 配额吃满：试听只取前 60 字
+	if runes := []rune(text); len(runes) > 60 {
+		text = string(runes[:60])
+	}
+
+	switch provider {
+	case "deepseek", "volcengine", "edge":
+		return r.previewEngine(ctx, provider, voice, text)
+	}
+	// 自动档：与 Synthesize 同序逐个试，全失败才报错（附每段原因）
+	var errs []string
+	for _, eng := range r.previewOrder(voice) {
+		wav, err := r.previewEngine(ctx, eng, voice, text)
+		if err == nil {
+			return wav, nil
+		}
+		errs = append(errs, eng+": "+err.Error())
+	}
+	return nil, fmt.Errorf("试听失败：%s", strings.Join(errs, "；"))
+}
+
+// previewOrder 自动档试听顺序（与 Synthesize 的自动分支一致，另认
+// TTS_PROVIDER env：设备实际会用它，试听也要听同一家）。
+func (r *RealInteractor) previewOrder(voice string) []string {
+	switch os.Getenv("TTS_PROVIDER") {
+	case "deepseek":
+		return []string{"deepseek", "edge"}
+	case "volcengine":
+		return []string{"volcengine", "edge"}
+	case "edge":
+		return []string{"edge"}
+	}
+	switch {
+	case strings.Contains(voice, "Neural"):
+		return []string{"edge"}
+	case strings.HasPrefix(voice, "BV"):
+		return []string{"volcengine"}
+	case r.asr.Deepseek != nil && r.asr.Deepseek() != "":
+		return []string{"deepseek", "edge"}
+	case r.asr.Volcengine != nil && volcCredsOK(r.asr.Volcengine()):
+		return []string{"volcengine", "edge"}
+	default:
+		return []string{"edge"}
+	}
+}
+
+// previewEngine 单个引擎合成（失败直接返回原因，不降级）。
+func (r *RealInteractor) previewEngine(ctx context.Context, eng, voice, text string) ([]byte, error) {
+	switch eng {
+	case "volcengine":
+		vkey := ""
+		if r.asr.Volcengine != nil {
+			vkey = r.asr.Volcengine()
+		}
+		if !volcCredsOK(vkey) {
+			return nil, fmt.Errorf("火山 TTS 未配置（本页火山引擎卡片保存 AppID:AccessToken）")
+		}
+		pcm, err := volcengineTTS(ctx, vkey, text, voice)
+		if err != nil {
+			return nil, err
+		}
+		return wrapWav(pcm), nil
+	case "deepseek":
+		key := ""
+		if r.asr.Deepseek != nil {
+			key = r.asr.Deepseek()
+		}
+		if key == "" {
+			return nil, fmt.Errorf("DeepSeek Key 未配置（本页 DeepSeek 卡片保存 Key）")
+		}
+		voiceID := voice
+		if voiceID == "" {
+			voiceID = deepseekVoiceID()
+		}
+		pcm, err := deepseekTTS(ctx, key, text, voiceID)
+		if err != nil {
+			return nil, err
+		}
+		return wrapWav(pcm), nil
+	case "edge":
+		edgeVoice := voice
+		if edgeVoice == "" {
+			edgeVoice = r.ttsVoice
+		}
+		pcm, err := edgeSynthesize(ctx, text, edgeVoice)
+		if err != nil {
+			return nil, err
+		}
+		return wrapWav(pcm), nil
+	}
+	return nil, fmt.Errorf("未知引擎 %q", eng)
+}

@@ -148,6 +148,12 @@ func NewHandler(d Deps) http.Handler {
 		mux.Handle("DELETE /api/v1/appearance/background", appearanceDelBG(d, logger))
 	}
 
+	// 语音试听（Web 后台音色选择旁「试听」）：只依赖语音引擎，
+	// 不要求聊天路由——试听只走 TTS，不经过 LLM。
+	if d.VoiceHandler != nil {
+		mux.HandleFunc("POST /api/v1/voice/preview", d.VoiceHandler.ServePreview)
+	}
+
 	// Bigfish Chat：OpenAI 兼容透传（model = "<provider>/<model>"）。
 	if d.ChatRouter != nil {
 		mux.HandleFunc("GET /api/v1/chat/providers", func(w http.ResponseWriter, r *http.Request) {

@@ -15,6 +15,7 @@ package voice
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -185,6 +186,61 @@ func (h *Handler) museFor(app string) bool {
 }
 
 func NewHandler(eng Interactor) *Handler { return &Handler{eng: eng} }
+
+// PreviewInteractor 可选能力：Web 后台按引擎+音色试听（RealInteractor 实现）。
+type PreviewInteractor interface {
+	Preview(ctx context.Context, provider, voice, text string) ([]byte, error)
+}
+
+// ServePreview 处理 POST /api/v1/voice/preview：
+//
+//	body {provider?, voice?, text?}（provider 空=自动档）
+//	200 → audio/wav；失败 → JSON {error, message}
+//
+// 不落配置、不依赖聊天路由；"没配 Key / 音色不可用"等真实原因直接
+// 回给后台展示（错误信息不含密钥与请求头）。
+func (h *Handler) ServePreview(w http.ResponseWriter, r *http.Request) {
+	pi, ok := h.eng.(PreviewInteractor)
+	if !ok {
+		writePreviewErr(w, http.StatusNotImplemented, "preview_unsupported", "当前语音引擎不支持试听")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
+	var body struct {
+		Provider string `json:"provider"`
+		Voice    string `json:"voice"`
+		Text     string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writePreviewErr(w, http.StatusBadRequest, "bad_request", "want {provider, voice, text}")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	t0 := time.Now()
+	wav, err := pi.Preview(ctx, body.Provider, body.Voice, body.Text)
+	if err != nil {
+		log.Printf("voice preview: provider=%q voice=%q failed after %v: %v",
+			body.Provider, body.Voice, time.Since(t0).Round(time.Millisecond), err)
+		writePreviewErr(w, http.StatusBadGateway, "preview_failed", err.Error())
+		return
+	}
+	// 只记引擎/音色/耗时/大小（不记文本；保持日志纪律）
+	log.Printf("voice preview: provider=%q voice=%q %dKB in %v",
+		body.Provider, body.Voice, len(wav)/1024, time.Since(t0).Round(time.Millisecond))
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(wav)
+}
+
+func writePreviewErr(w http.ResponseWriter, code int, kind, msg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	body, _ := json.Marshal(map[string]string{"error": kind, "message": msg})
+	_, _ = w.Write(body)
+}
 
 // ServeInteract 处理 POST /api/v1/voice/interact。
 // ctxKeyVoiceApp 承载调用方 App 标识（chat/xiaozhi/muse/zcode），供 TTS

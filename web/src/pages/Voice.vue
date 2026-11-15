@@ -3,9 +3,10 @@
 // 设备语音能力实际调用的 Key（ASR）与各 App 的朗读音色。
 // Muse 云端连接移到「Muse」页；聊天人设在「AstrBot」页。
 // Key 经 AES-256-GCM 加密落库（需 BRIDGE_MASTER_KEY），明文不回显。
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { playVoicePreview, stopVoicePreview } from '@/api/voicePreview'
 
 interface CredentialInfo {
   provider_id: string
@@ -56,6 +57,23 @@ const appRows = [
   { key: 'xiaozhi', label: '小智' },
   { key: 'zcode', label: 'ZCode' },
 ] as const
+
+/* 音色试听：用当前选择的引擎/音色合成一句（不保存配置）。 */
+const previewing = ref('')
+const previewMsg = ref('')
+onUnmounted(stopVoicePreview)
+
+async function previewTTS(key: string, provider: string, voice: string) {
+  previewing.value = key
+  previewMsg.value = ''
+  try {
+    await playVoicePreview(provider, voice)
+  } catch (e) {
+    previewMsg.value = `试听失败：${e instanceof Error ? e.message : e}`
+  } finally {
+    if (previewing.value === key) previewing.value = ''
+  }
+}
 
 const engines = [
   { id: '', label: '自动（按音色归属路由；无偏好时 DeepSeek > 火山 > Edge）' },
@@ -269,6 +287,7 @@ async function remove(id: string) {
     <h3 class="mb-1 font-semibold">各 App 音色</h3>
     <p class="mb-3 text-xs text-dim">
       每个对话 App 可以有自己的引擎/音色；未配置时回退默认实例。
+      点「▶ 试听」用当前选择合成一句（不保存配置；自动档按实际路由试）。
     </p>
     <div class="space-y-2">
       <div v-for="row in appRows" :key="row.key" class="flex flex-wrap items-center gap-2">
@@ -289,6 +308,14 @@ async function remove(id: string) {
             {{ v.label }}
           </option>
         </select>
+        <button
+          class="btn-ghost !px-2 !py-1"
+          :disabled="previewing === row.key"
+          title="用当前选择的引擎/音色合成一句试听（不保存）"
+          @click="previewTTS(row.key, appVoice[row.key]?.provider ?? '', appVoice[row.key]?.voice ?? '')"
+        >
+          {{ previewing === row.key ? '试听中…' : '▶ 试听' }}
+        </button>
       </div>
       <!-- AstrBot App 的音色在机器人实例上配 -->
       <div class="flex flex-wrap items-center gap-2">
@@ -296,9 +323,10 @@ async function remove(id: string) {
         <RouterLink to="/bots" class="badge !bg-accent/15 !text-accent hover:!bg-accent/25">
           去 AstrBot 设置 →
         </RouterLink>
-        <span class="text-xs text-dim">音色跟着机器人实例走（语音链路用列表第一个实例）</span>
+        <span class="text-xs text-dim">音色跟着机器人实例走（语音链路用「当前」实例）</span>
       </div>
     </div>
+    <p v-if="previewMsg" class="mt-2 text-xs text-err">{{ previewMsg }}</p>
     <div class="mt-3 flex items-center gap-3">
       <button class="btn" :disabled="appVoiceSaving" @click="saveAppVoice">保存音色</button>
       <span v-if="appVoiceMsg" class="text-xs" :class="appVoiceMsg.startsWith('✓') ? 'text-ok' : 'text-err'">

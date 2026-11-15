@@ -2,9 +2,10 @@
 // 聊天机器人页：AstrBot 连接是公用配置（地址 + Token 只写不回），
 // 每个机器人实例只选 名称 + AstrBot 配置文件（人设/模型套餐）。
 // 增删改即时生效；Token 经 AES-256-GCM 加密落库（需 BRIDGE_MASTER_KEY）。
-import { onMounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 
 import { request } from '@/api/client'
+import { playVoicePreview, stopVoicePreview } from '@/api/voicePreview'
 
 interface BotInfo {
   id: string
@@ -125,6 +126,21 @@ const ttsVoices: Record<string, { id: string; label: string }[]> = {
   ],
 }
 const voiceOptions = (engine: string) => ttsVoices[engine] ?? ttsVoices['']
+
+/* 音色试听：用当前选择合成一句（不保存）；每行独立「试听中」状态。 */
+const previewing = ref('')
+onUnmounted(stopVoicePreview)
+
+async function previewTTS(key: string, provider: string, voice: string) {
+  previewing.value = key
+  try {
+    await playVoicePreview(provider, voice)
+  } catch (e) {
+    say(true, `试听失败：${e instanceof Error ? e.message : e}`)
+  } finally {
+    if (previewing.value === key) previewing.value = ''
+  }
+}
 
 const ttsLabel = (b: BotInfo) => {
   const eng = b.tts_provider === 'deepseek' ? 'DeepSeek' : b.tts_provider === 'edge' ? 'Edge' : '自动'
@@ -364,7 +380,15 @@ async function probe(id: string) {
           {{ v.label }}
         </option>
       </select>
-      <span class="text-xs text-dim">语音链路使用列表第一个实例的设置</span>
+      <button
+        class="btn-ghost !px-2 !py-1"
+        :disabled="previewing === 'form'"
+        title="用当前选择的引擎/音色合成一句试听（不保存）"
+        @click="previewTTS('form', form.tts_provider, form.tts_voice)"
+      >
+        {{ previewing === 'form' ? '试听中…' : '▶ 试听' }}
+      </button>
+      <span class="text-xs text-dim">语音链路使用「当前」实例的设置</span>
     </div>
     <details class="mb-2 text-xs text-dim">
       <summary class="cursor-pointer">高级：provider / 模型覆盖（通常留空）</summary>
@@ -397,6 +421,12 @@ async function probe(id: string) {
             class="btn-ghost !px-2 !py-1"
             @click="setActive(b)"
           >设为当前</button>
+          <button
+            class="btn-ghost !px-2 !py-1"
+            :disabled="previewing === b.id"
+            title="按该实例保存的引擎/音色试听"
+            @click="previewTTS(b.id, b.tts_provider ?? '', b.tts_voice ?? '')"
+          >{{ previewing === b.id ? '试听中…' : '试听' }}</button>
           <button class="btn-ghost !px-2 !py-1" :disabled="probingId !== ''" @click="probe(b.id)">测试</button>
           <button class="btn-ghost !px-2 !py-1" @click="editBot(b)">编辑</button>
           <button class="btn-ghost !text-err !px-2 !py-1" @click="removeBot(b)">删除</button>
