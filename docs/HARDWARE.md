@@ -329,3 +329,26 @@
   无需人工断电；坏启动后大概率下一次正常。
 - 仍待 root-cause：阻塞点的堆栈（需在楔死时用 TWDT panic 的 backtrace
   或 JTAG 抓 lvgl 任务栈）。
+
+**2026-11-15 另一类"一说话就重启"（已解）**：设备端日志链条
+
+```
+E spi_common: Failed to allocate priv TX buffer      ← 内部 DMA 内存分配失败
+E lcd_panel.io.spi: spi transmit (queue) color failed
+E esp_lvgl: Draw bitmap failed: ESP_ERR_NO_MEM
+E gadget: LVGL lock stuck 15s — watchdog restart      ← 自愈重启
+I ds: voice POST done: dur=14178ms rep=0              ← 语音请求正挂着
+```
+
+根因：draw buffer 在 PSRAM（非 DMA 可访问），**每次 SPI 发送都要在内部
+RAM 分配同尺寸 bounce buffer**（`spicommon_dma_setup_priv_buffer`）。
+语音一发起（16KB worker 栈 + HTTP 缓冲）内部 RAM 掉到 ~39KB 且碎片化，
+19.2KB/块（480×20）分配失败 → flush 卡死 → 看门狗重启。与字库无关（字体
+在 flash，压缩解码只用小块绘制缓冲）。
+
+修复（三管齐下，实测零 NO_MEM）：
+1. 显示分块 480×20 → **480×10（9.6KB/块）**，bounce buffer 需求减半；
+2. hangprobe 栈 12KB → **8KB**（4KB 会栈溢出——`vTaskList`+日志实测）；
+3. `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`，WiFi/LWIP 大缓冲允许落 PSRAM。
+回归：设备自检发一次 33280B 真实语音请求 → POST 完成、heap_int 52-57K、
+无 NO_MEM/无栈溢出。

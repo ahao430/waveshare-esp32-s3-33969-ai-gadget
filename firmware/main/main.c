@@ -90,7 +90,10 @@ static void net_probe_once(void)
 #ifndef GADGET_SELFTEST_BOTPICK
 #define GADGET_SELFTEST_BOTPICK 0
 #endif
-#if GADGET_SELFTEST_BOTPICK
+#ifndef GADGET_SELFTEST_VOICE
+#define GADGET_SELFTEST_VOICE 0
+#endif
+#if GADGET_SELFTEST_BOTPICK || GADGET_SELFTEST_VOICE
 static void selftest_botpick_task(void *arg)
 {
     (void)arg;
@@ -99,7 +102,25 @@ static void selftest_botpick_task(void *arg)
     ui_open_app(UI_APP_CHAT);
     display_unlock();
     vTaskDelay(pdMS_TO_TICKS(3000));
+#if GADGET_SELFTEST_BOTPICK
     ui_conversation_debug_bot_picker();
+#endif
+#if GADGET_SELFTEST_VOICE
+    /* 语音回归：模拟一次 1s PTT（16640 帧 = 与真机复现同尺寸），
+     * 验证语音期间 SPI DMA bounce buffer 不再分配失败 */
+    int16_t *pcm = heap_caps_malloc(16640 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    if (pcm) {
+        for (int i = 0; i < 16640; i++) pcm[i] = (int16_t)(12000 * sinf(i * 0.1f));
+    }
+    char tr[192] = {0}, rep[384] = {0};
+    ds_voice_result_t r = pcm
+        ? ds_voice_interact("chat", pcm, 16640, tr, sizeof(tr), rep, sizeof(rep))
+        : DS_VOICE_ERROR;
+    free(pcm);
+    ESP_LOGW(TAG, "SELFTEST voice: rc=%d tr=%u rep=%u heap_int=%u", (int)r,
+             (unsigned)strlen(tr), (unsigned)strlen(rep),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+#endif
     vTaskDelete(NULL);
 }
 #endif
@@ -270,7 +291,7 @@ static lv_display_t *display_start_custom(void)
     ESP_ERROR_CHECK(esp_lv_adapter_init(&lv_cfg));
 
     const bsp_display_config_t disp_config = {
-        .max_transfer_sz = 480 * 20 * 2, /* SPI 分块上限（内部 DMA 预算内） */
+        .max_transfer_sz = 480 * 10 * 2, /* SPI 分块上限（内部 DMA 预算内） */
     };
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_panel_io_handle_t io = NULL;
@@ -288,7 +309,7 @@ static lv_display_t *display_start_custom(void)
             .rotation = ESP_LV_ADAPTER_ROTATE_0,
             .hor_res = 480,
             .ver_res = 480,
-            .buffer_height = 20,
+            .buffer_height = 10,
             .use_psram = true,
             .enable_ppa_accel = false,
             .require_double_buffer = true,
@@ -687,9 +708,11 @@ void app_main(void)
         return;
     }
     /* 临时：开机卡死探针（定位完删除） */
-    xTaskCreate(hang_probe_task, "hangprobe", 12288, NULL, 3, NULL);
-#if GADGET_SELFTEST_BOTPICK
-    xTaskCreate(selftest_botpick_task, "botpick_test", 4096, NULL, 3, NULL);
+    /* 8KB：4KB 实测栈溢出（vTaskList + 日志），12KB→8KB 省 4KB 内部
+     * RAM 给 SPI DMA bounce buffer */
+    xTaskCreate(hang_probe_task, "hangprobe", 8192, NULL, 3, NULL);
+#if GADGET_SELFTEST_BOTPICK || GADGET_SELFTEST_VOICE
+    xTaskCreate(selftest_botpick_task, "selftest", 12288, NULL, 3, NULL);
 #endif
 
     heap_report("post-display");
