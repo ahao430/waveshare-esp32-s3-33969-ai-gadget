@@ -271,16 +271,18 @@ static void bg_attach(lv_obj_t *parent)
         }
     }
 
-    void *buf = malloc(BG_W * BG_H * 2);
-    if (!buf) return; /* 内存不足时退回纯色底（不阻塞桌面） */
+    /* 波浪背景 buffer 静态复用：ui_launcher_rebuild 会整屏删除，canvas
+     * 释放但 buffer 保留给下一次 attach（否则每次重建泄漏 BG_W*BG_H*2） */
+    static void *s_wave_buf;
+    if (s_wave_buf == NULL) s_wave_buf = malloc(BG_W * BG_H * 2);
+    if (!s_wave_buf) return; /* 内存不足时退回纯色底（不阻塞桌面） */
 
-    bg_render((uint16_t *)buf);
+    bg_render((uint16_t *)s_wave_buf);
 
     lv_obj_t *cv = lv_canvas_create(parent);
-    lv_canvas_set_buffer(cv, buf, BG_W, BG_H, LV_COLOR_FORMAT_RGB565);
+    lv_canvas_set_buffer(cv, s_wave_buf, BG_W, BG_H, LV_COLOR_FORMAT_RGB565);
     lv_obj_center(cv);
     lv_obj_clear_flag(cv, LV_OBJ_FLAG_CLICKABLE);
-    /* buf 归 canvas 所有：屏幕常驻不销毁，无需释放回调 */
 }
 
 /* ---------------- 磁贴 ---------------- */
@@ -551,8 +553,11 @@ void ui_launcher_build(void)
         }
     }
 
-    /* 页点（tileview 滚动联动） */
+    /* 页点（tileview 滚动联动）。static 数组会活过 ui_launcher_rebuild
+     * 的整屏删除——旧指针已随屏幕释放，必须清零再交给 ui_dots_create
+     * （否则对已释放对象再 delete，真机 LoadProhibited 崩溃，2026-11-15） */
     static lv_obj_t *g_page_dots[UI_DOTS_MAX];
+    memset(g_page_dots, 0, sizeof(g_page_dots));
     ui_dots_create(g_launcher, g_page_dots, UI_DOTS_MAX, pages, LV_ALIGN_BOTTOM_MID, -8);
     ui_dots_update(g_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
     lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);

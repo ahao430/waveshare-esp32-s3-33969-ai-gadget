@@ -30,26 +30,70 @@
 #endif
 
 static void register_apps(void);
-/* 联网后补拉 Web 下发配置（外观主题/自定义背景/按键映射）。
- * 由 main 在 IP_EVENT_STA_GOT_IP 之后用独立任务调用：
+static void register_apps_layout(const char *layout_csv, int lay_n);
+/* 真机：开机时 Wi-Fi 未起，register_apps 不拉 Web 排布（回落出厂），
+ * GOT_IP 后由 ui_remote_config_prefetch 置位再补拉（12KB 大栈任务里跑） */
+#ifdef ESP_PLATFORM
+static bool s_remote_layout_ready = false;
+#else
+#define s_remote_layout_ready true
+#endif
+
+/* 远端配置两段式：prefetch 只做网络/文件（不持显示锁，HTTP 超时最坏
+ * 数秒——曾把抓取放锁内，联网初期桌面冻屏 ~8s 且 probe 全程 BUSY）；
+ * refresh 持锁应用结果（改主题/按键/重建桌面，毫秒级）。
+ * 由 main 在 IP_EVENT_STA_GOT_IP 之后用独立任务先后调用：
  *  - 不能在事件回调里跑（回调栈 4KB，http_client 需要 4KB 缓冲）
  *  - 不能在 ui_init 里跑（Wi-Fi 还没起，请求必失败）
- * 调用方负责保证已持显示锁（ui_lock）——本函数会改主题/按键映射。 */
+ *  - 调用方保证 refresh 已持显示锁 */
+static struct {
+    bool done;
+    bool have_theme;
+    int theme;
+    bool have_keys;
+    char kp[8], kb[8], k3s[8], k3l[8];
+    bool have_layout;
+    char layout[192];
+    int lay_n;
+} s_rcfg;
+
+void ui_remote_config_prefetch(void)
+{
+    s_rcfg.have_theme =
+        ds_appearance_fetch_theme(&s_rcfg.theme) == 0 && s_rcfg.theme >= 0;
+    /* 背景图：HTTP 下载落文件（文件路径仅 UI 消费，无 LVGL 调用） */
+    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+    s_rcfg.have_keys = ds_keys_fetch(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l,
+                                     (int)sizeof(s_rcfg.kp)) == 0;
+#ifdef ESP_PLATFORM
+    s_remote_layout_ready = true;
+    s_rcfg.have_layout =
+        ds_launcher_fetch(s_rcfg.layout, sizeof(s_rcfg.layout), &s_rcfg.lay_n) == 0 &&
+        s_rcfg.lay_n > 0;
+#else
+    s_rcfg.have_layout = false; /* 模拟器 ui_init 已就地应用排布 */
+#endif
+    s_rcfg.done = true;
+}
+
 void ui_remote_config_refresh(void)
 {
-    int web_theme = -1;
-    bool need_theme = false;
-    if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
-        ds_config_set_theme(web_theme);
-        need_theme = true;
-    }
-    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+    if (!s_rcfg.done) ui_remote_config_prefetch(); /* 未预取（直调路径） */
 
-    char kp[8], kb[8], k3s[8], k3l[8];
-    if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
-        ui_keys_apply_config(kp, kb, k3s, k3l);
+    if (s_rcfg.have_theme) {
+        ds_config_set_theme(s_rcfg.theme);
+        ui_theme_select(ds_state()->theme_idx);
     }
-    if (need_theme) ui_theme_select(ds_state()->theme_idx);
+    if (s_rcfg.have_keys) {
+        ui_keys_apply_config(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l);
+    }
+
+    /* 主页排布：真机开机时 Wi-Fi 未起、拉不到 Web 配置（register_apps
+     * 回落出厂顺序），联网后在这里用预取结果重排并重建桌面。 */
+    if (s_rcfg.have_layout && !app_manager_in_app()) {
+        register_apps_layout(s_rcfg.layout, s_rcfg.lay_n);
+        ui_launcher_rebuild();
+    }
 }
 
 static void voice_demo_begin_cb(lv_timer_t *t);
@@ -511,6 +555,16 @@ static void placeholder_build(lv_obj_t *scr, int app_id)
 
 static void register_apps(void)
 {
+    /* 抓取与注册分离：refresh 路径用 prefetch 抓好的 csv，避免持锁跑 HTTP */
+    char layout[192];
+    int lay_n = 0;
+    bool ok = s_remote_layout_ready &&
+              ds_launcher_fetch(layout, sizeof(layout), &lay_n) == 0 && lay_n > 0;
+    register_apps_layout(ok ? layout : NULL, ok ? lay_n : 0);
+}
+
+static void register_apps_layout(const char *layout_csv, int lay_n)
+{
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
      * 页1 AI 三位 + 订阅｜页2 ZCode/天气/服务器/设置｜页3 音乐 */
     const app_def_t defs[] = {
@@ -529,15 +583,16 @@ static void register_apps(void)
     const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
 
     /* Web 后台主页排布（/api/v1/launcher）：order=可见顺序，不在列表=
-     * 隐藏；列表外的 App（目录漂移新增）追加到末尾保证不丢。 */
+     * 隐藏；列表外的 App（目录漂移新增）追加到末尾保证不丢。
+     * 可重复调用（清表重注册）：联网后 ui_remote_config_refresh 用预取
+     * 的 csv 重跑本函数 + ui_launcher_rebuild。 */
+    app_manager_clear();
     app_def_t ordered[16];
     int visible = 0;
-    char layout[192];
-    int lay_n = 0;
-    if (ds_launcher_fetch(layout, sizeof(layout), &lay_n) == 0 && lay_n > 0) {
+    if (layout_csv && lay_n > 0) {
         bool used[16] = {false};
-        char tmp[sizeof(layout)];
-        snprintf(tmp, sizeof(tmp), "%s", layout);
+        char tmp[192];
+        snprintf(tmp, sizeof(tmp), "%s", layout_csv);
         char *save = NULL;
         for (char *tok = strtok_r(tmp, ",", &save); tok && visible < 16;
              tok = strtok_r(NULL, ",", &save)) {

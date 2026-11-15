@@ -504,15 +504,17 @@ static void key_task(void *arg)
     }
 }
 
-/* GOT_IP 后补拉 Web 配置（ui_remote_config_refresh 会动 LVGL，需持锁） */
+/* GOT_IP 后补拉 Web 配置。prefetch 只跑网络（HTTP 最坏数秒，不持锁，
+ * 避免联网初期冻屏）；refresh 动 LVGL（改主题/重建桌面），需持锁 */
 static void remote_cfg_task(void *arg)
 {
     (void)arg;
     vTaskDelay(pdMS_TO_TICKS(300)); /* 让 sta 连接稳定（DHCP 后立刻发首包偶发失败） */
+    ui_remote_config_prefetch();
     display_lock();
     ui_remote_config_refresh();
     display_unlock();
-    ESP_LOGI(TAG, "remote config applied (theme/bg/keys)");
+    ESP_LOGI(TAG, "remote config applied (theme/bg/keys/launcher)");
     vTaskDelete(NULL);
 }
 

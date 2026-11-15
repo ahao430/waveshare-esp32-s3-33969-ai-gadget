@@ -18,6 +18,12 @@ bool app_manager_register(const app_def_t *def)
     return true;
 }
 
+void app_manager_clear(void)
+{
+    /* 调用方保证当前不在 App 内（g_current_def 指向表内元素） */
+    g_count = 0;
+}
+
 int app_manager_count(void) { return g_count; }
 
 const app_def_t *app_manager_get(int idx)

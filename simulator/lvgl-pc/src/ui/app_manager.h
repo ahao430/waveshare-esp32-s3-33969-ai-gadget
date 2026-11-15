@@ -24,6 +24,9 @@ typedef struct {
 /* Launcher 装配后调用一次，登记所有 App（顺序即桌面网格顺序） */
 bool app_manager_register(const app_def_t *def);
 
+/* 清空注册表（仅限不在 App 内时调用；随后重新 register + rebuild） */
+void app_manager_clear(void);
+
 int app_manager_count(void);
 const app_def_t *app_manager_get(int idx); /* 按注册序取；越界返回 NULL */
 const app_def_t *app_manager_find(int app_id); /* 按 app id（枚举）查；无则 NULL */
