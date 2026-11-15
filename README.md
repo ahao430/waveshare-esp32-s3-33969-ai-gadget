@@ -48,19 +48,21 @@ cd ../web && npm install && npm run dev         # :5173
 - 运行日志在 `/tmp/bridge.log`；Web/Bridge 改配置即时生效，不用重启设备。
 - 设备只连 Bridge（`http://<Mac IP>:8081`），不直接连 Web。
 
-### 2. 配置设备 Wi-Fi 与 Bridge 地址（编译期）
+### 2. 配置设备 Wi-Fi 与 Bridge 地址（运行期配网）
 
-当前固件不做运行期配网，Wi-Fi 和 Bridge 地址写在 `firmware/main/wifi_secret.h`：
+设备端「设置 → 网络与连接」：
 
-```c
-#define WIFI_SSID "your-2.4g-ssid"                 // 仅支持 2.4GHz
-#define WIFI_PASS "your-password"
-#define BRIDGE_HOST "http://192.168.0.100:8081"    // Mac 的局域网 IP
-```
+- **Wi-Fi 设置**：点开即扫描周围网络 → 选择 SSID → 软键盘输密码 → 连接
+  （失败可改密重试；成功存 NVS，重启记住；已连网络可改密码，可重新扫描）。
+- **Bridge 地址**：填 `http://<Bridge 主机IP或域名>:8081`，保存立即生效
+  （对话/订阅当场切新地址，无需重刷）。
 
-- 复制 `wifi_secret.h.example` 为 `wifi_secret.h`（已 gitignore），改完重新 `idf.py build flash`。
-- Mac 的 IP 变了设备就连不上 Bridge：建议在路由器给 Mac 做 DHCP 保留，或改头文件重刷。
-- Web 的「网络与配网」页目前是流程设计/演示（mock），真机运行期配网尚未实现。
+编译期 `firmware/main/wifi_secret.h`（gitignore）只是**首次出厂兜底**：
+设备 NVS 里没配过时才用它（启动日志 `creds=wifi_secret.h` 可辨认）；
+一旦在配网页保存过，NVS 优先、改头文件不再影响设备。仅支持 2.4GHz。
+
+把 Bridge 部署到常驻服务器/NAS 后设备即可脱离 Mac 独立使用，
+见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
 ### 3. 刷写固件
 
@@ -99,7 +101,13 @@ ESP-IDF 环境见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
 ### 6. 局域网打开后台
 
-Bridge 监听 `:8081` 全部网卡；Web 开发服务器已设 `host: true`：
+两种形态：
+
+- **部署形态（推荐）**：Bridge 用 `-webdir` 直接托管 Web 后台（一个进程
+  一个端口），手机访问 `http://<Bridge 主机>:8081`——设备「设置 →
+  网络与连接 → 管理后台」二维码就是这个地址。部署见
+  [docs/DEPLOY.md](docs/DEPLOY.md)。
+- **开发形态**：Mac 上 Vite 开发服务器（`host: true`）：
 
 ```bash
 ipconfig getifaddr en0        # 取 Mac 局域网 IP（例如 192.168.0.23）
@@ -116,7 +124,8 @@ ipconfig getifaddr en0        # 取 Mac 局域网 IP（例如 192.168.0.23）
 | 现象 | 处理 |
 |------|------|
 | 设备订阅页是空的 | Web「订阅中心」添加订阅实例（类型+名称+API Key）——实例才是设备显示的卡片；未建实例时设备显示"请添加订阅" |
-| 设备对话一直失败 | Mac IP 变了或 Bridge 没起：`curl http://<MacIP>:8081/api/v1/device/status`；必要时改 `wifi_secret.h` 重刷 |
+| 设备连不上 Bridge | 设置→网络与连接：确认 Wi-Fi 已连接、Bridge 地址正确（可改完立即生效）；再 `curl http://<BridgeIP>:8081/api/v1/device/status` 验证服务在跑 |
+| 设备对话一直失败 | Bridge 没起或不可达：`curl http://<BridgeIP>:8081/api/v1/device/status`；换过网络就在设备配网页改 Bridge 地址 |
 | 有文字没声音 | 设备音量/静音；或 TTS Key 没配（Web 语音设置页看「当前生效」）|
 | 说话后卡「思考中」 | 看 `/tmp/bridge.log` 的 `voice:` 分段耗时；确认 Bridge 在跑 |
 | 设备偶尔自动重启一次 | 启动期显示管线楔死，任务看门狗约 20s 自动恢复；连续发生再看串口日志 |
@@ -170,6 +179,8 @@ scripts/gen_cn_font.sh
 | 固件 UI 移植（Phase 6 后半） | ✅ 主体已在真机运行（launcher/对话/设置/订阅/天气；共享模拟器源码） |
 | 稳定性（2026-11-15 收敛） | ✅ 绘制缓冲内部 RAM + 语音静态栈任务 + LVGL 心跳看门狗；连续 6 轮完整语音回合零 NO_MEM/panic |
 | 小智官方服务（xiaozhi.me） | ✅ 已接入并真网验证：Bridge 模拟设备（OTA 激活 + WebSocket + Opus，官方 TTS 直通），未绑定自动回落本机链路，见 [ADR-005](docs/DECISIONS.md) |
+| 设备运行期配网 | ✅ 设置→网络与连接：Wi-Fi 扫描/软键盘输密码存 NVS + Bridge 地址热改（`ds_bridge_rebind` 即时生效）；`wifi_secret.h` 退为出厂兜底 |
+| Bridge 服务化部署 | ✅ `-webdir` 托管 Web 后台（API+管理页一个端口）；`scripts/build-release.sh` + [docs/DEPLOY.md](docs/DEPLOY.md)（systemd/数据迁移/设备指向） |
 | 设备端 ZCode / 音乐 | ⏳ 规划中 |
 
 里程碑与详细进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。

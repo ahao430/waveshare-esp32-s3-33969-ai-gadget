@@ -4,6 +4,36 @@
 
 ---
 
+## ADR-009 Bridge 部署常驻主机 + 设备运行期配网（脱离 Mac）
+
+日期：2026-11-16　状态：已接受（用户拍板）
+
+**背景**：Bridge/Web 一直跑在开发 Mac 上——Mac 睡眠设备就废。用户要求
+设备独立运行，且设置页配网/后台入口要真能用（配网页原是写死的演示
+二维码，扫码 404；Wi-Fi/Bridge 地址是编译期宏）。
+
+**决策**：
+
+1. **不把 Bridge 塞进设备**：ESP32-S3 跑不了 Go，且「API Key 只进
+   Bridge」的安全模型不允许几十个供应商 Key 存设备。Bridge 部署到
+   任意常驻主机（服务器/NAS/树莓派），零依赖单二进制+SQLite。
+2. **Web 后台由 Bridge 托管**（`-webdir`）：API+管理页一个端口一个
+   进程，设备「管理后台」二维码直接指向 `http://<主机>:8081`。
+   Mac 只留开发用途（Vite dev server 照旧）。
+3. **设备运行期配网**：设置→网络与连接 = Wi-Fi 扫描+软键盘输密码
+   （存 NVS）+ Bridge 地址热改（保存即 `ds_bridge_rebind` 生效）。
+   `wifi_secret.h` 退为首次出厂兜底（NVS 配过即忽略宏）。
+
+**后果**：
+
+- 部署链：`scripts/build-release.sh` + `docs/DEPLOY.md`（数据迁移
+  必须带同一个 `BRIDGE_MASTER_KEY`，否则凭据解不开）
+- 换 Wi-Fi 环境后 Bridge 不可达不再需要重刷固件——配网页改地址即可
+- 安全模型不变：设备 NVS 只存 Wi-Fi 凭据与 Bridge 地址（非 API Key）
+
+---
+
+
 ## ADR-006 会话历史统一存 Bridge，设备端只存最近列表
 
 日期：2026-11-14　状态：已接受（用户拍板）

@@ -1339,7 +1339,13 @@ Dashboard
 
 ## 9.3 首次配网
 
-使用 SoftAP + HTTP Server：
+> **落地变更（2026-11-16，ADR-009）**：本节 SoftAP+HTTP 方案已被
+> **设备端直连配网**替代——设置→网络与连接：设备自己扫描 Wi-Fi、
+> 软键盘输密码（存 NVS）、热改 Bridge 地址；管理后台二维码指向
+> Bridge 托管的 Web（`-webdir`）。SoftAP 兜底流程保留为无屏调试的
+> 可选后续。
+
+原方案（存档）使用 SoftAP + HTTP Server：
 
 1.  首次启动时检测 NVS 中是否存在 Wi-Fi 配置。
 2.  未配置则创建临时 SoftAP。

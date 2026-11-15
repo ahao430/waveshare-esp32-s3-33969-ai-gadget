@@ -23,7 +23,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 语音链路 / 音色试听 | `bridge/internal/voice/` | ASR→LLM→TTS；`POST /api/v1/voice/preview` 只读试听（不落配置/不改冷却） |
 | 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
-| 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/` | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
+| 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
 | 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c` | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块 |
 | 桌面图标 | `simulator/lvgl-pc/assets/icons/`（88×88） | 缺位自动回退符号；名字与 launcher catalog key 对齐 |
 
@@ -109,10 +109,13 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
   App 的转写/回复/音色全走官方，人设音色在官方控制台配；未绑定或官方
   失败自动回落本机 ASR→LLM→TTS（语音设置页的音色在回落时生效）。
   一个 Bridge 身份 = 官方控制台里的一台设备。
-- **Wi-Fi/Bridge 地址是编译期配置**：`firmware/main/wifi_secret.h`（2.4GHz）；
-  Web「网络与配网」页是流程设计/mock，真机运行期配网未实现。Mac IP 变了
-  要改头文件重刷（建议 DHCP 保留）。
-- 设备只连 Bridge（`http://<MacIP>:8081`），不连 Web；Mac 睡眠/关机则对话失败。
+- **运行期配网已实现**（ADR-009）：设备「设置→网络与连接」可扫 Wi-Fi、
+  软键盘输密码（存 NVS，NVS 优先于 `wifi_secret.h` 编译兜底）、热改
+  Bridge 地址（`ds_bridge_rebind` 立即生效）。`wifi_secret.h` 只在
+  NVS 从未配置过时生效（启动日志 `creds=` 可辨认来源）。
+- 设备只连 Bridge（默认 `http://<主机>:8081`），不连 Web。Bridge 可
+  部署在任意常驻主机（`-webdir` 托管 Web 后台，部署链见
+  `docs/DEPLOY.md`）；开发期在 Mac 上跑则 Mac 睡眠/关机对话失败。
 - **局域网后台**：Bridge 监听 `:8081` 全部网卡，Vite 已 `host: true`，
   手机访问 `http://<MacIP>:5173`。仅限可信局域网；设了 `BRIDGE_TOKEN` 时
   浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）。
@@ -158,6 +161,7 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 ## 服务端口（开发机常驻）
 
 - Bridge `:8081`（监听全部网卡；master key 在 `bridge/bridge.env`，日志 `/tmp/bridge.log`；
-  重启必须带同一个 `BRIDGE_MASTER_KEY`，否则加密凭据读不出来）
+  重启必须带同一个 `BRIDGE_MASTER_KEY`，否则加密凭据读不出来；
+  `-webdir <dir>` 可托管 Web 后台静态文件——API+管理页同端口）
 - Web `:5173`（Vite `host: true`，局域网 `http://<MacIP>:5173`；`/api` 服务端代理到 127.0.0.1:8081）
 - 模拟器 GUI 可常开（bridge 模式实时连）

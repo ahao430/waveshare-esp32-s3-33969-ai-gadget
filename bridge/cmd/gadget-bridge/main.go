@@ -44,6 +44,7 @@ import (
 func main() {
 	addr := flag.String("addr", envOr("BRIDGE_ADDR", ":8081"), "HTTP 监听地址")
 	dbPath := flag.String("db", envOr("BRIDGE_DB", "data/gadget.db"), "SQLite 快照缓存路径（空=纯内存）")
+	webDir := flag.String("webdir", envOr("BRIDGE_WEBDIR", ""), "Web 后台静态目录（web/dist 构建产物；空=不托管）")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -414,8 +415,9 @@ func main() {
 		},
 	})
 
-	logger.Info("gadget-bridge listening", "addr", *addr, "providers", len(reg.List()))
-	if err := http.ListenAndServe(*addr, handler); err != nil {
+	logger.Info("gadget-bridge listening", "addr", *addr, "providers", len(reg.List()),
+		"webdir", *webDir)
+	if err := http.ListenAndServe(*addr, withWebUI(handler, *webDir, logger)); err != nil {
 		logger.Error("serve", "err", err)
 		os.Exit(1)
 	}
