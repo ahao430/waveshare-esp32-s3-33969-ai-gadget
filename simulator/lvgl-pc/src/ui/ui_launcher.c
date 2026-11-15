@@ -35,6 +35,9 @@ static void clock_timer_cb(lv_timer_t *t);
 static void tileview_scroll_cb(lv_event_t *e);
 static int s_last_page = -1; /* 页点缓存（仅翻页时更新） */
 static lv_obj_t *s_tileview;   /* 当前桌面 tileview */
+/* 页点对象（build 里创建；快滑翻页路径与 SCROLL 回调共用同一组）。
+ * static：活过 ui_launcher_rebuild 的整屏删除，重建前必须清零。 */
+static lv_obj_t *s_page_dots[UI_DOTS_MAX];
 
 /* ---- 桌面快滑翻页（替代手指拖动，见 build 里禁用 SCROLLABLE 的注释）---- */
 #define SWIPE_MIN_DX 50   /* 横向位移下限 */
@@ -45,6 +48,18 @@ static bool s_swipe_pressed;
 static lv_point_t s_swipe_start, s_swipe_last;
 static uint32_t s_swipe_t0;
 static bool s_swipe_consumed; /* 本次按压已被判定为翻页 → 抑制打开 */
+
+/* 切页唯一入口（快滑 / 回归钩子共用）：set tile + 页点高亮 + 缓存页号。
+ * 只 set tile 不更新页点，SCROLL 回调又会被页号缓存短路——页点停在第
+ * 一页（用户实测"滑动时小圆点高亮不变"的根因）。 */
+static void launcher_goto_page(int pi)
+{
+    int pages = (app_manager_count() + 3) / 4;
+    if (!s_tileview || pi < 0 || pi >= pages) return;
+    s_last_page = pi;
+    lv_tileview_set_tile_by_index(s_tileview, (uint32_t)pi, 0, LV_ANIM_OFF);
+    ui_dots_update(s_page_dots, pages, pi);
+}
 
 static void launcher_swipe_timer_cb(lv_timer_t *t)
 {
@@ -79,8 +94,7 @@ static void launcher_swipe_timer_cb(lv_timer_t *t)
             int nxt = cur + (dx < 0 ? 1 : -1);
             if (nxt < 0 || nxt >= pages) return; /* 边界：不动 */
             s_swipe_consumed = true;             /* 抑制本次点击 */
-            s_last_page = nxt;
-            lv_tileview_set_tile_by_index(s_tileview, (uint32_t)nxt, 0, LV_ANIM_OFF);
+            launcher_goto_page(nxt);
         }
     }
 }
@@ -553,14 +567,14 @@ void ui_launcher_build(void)
         }
     }
 
-    /* 页点（tileview 滚动联动）。static 数组会活过 ui_launcher_rebuild
-     * 的整屏删除——旧指针已随屏幕释放，必须清零再交给 ui_dots_create
-     * （否则对已释放对象再 delete，真机 LoadProhibited 崩溃，2026-11-15） */
-    static lv_obj_t *g_page_dots[UI_DOTS_MAX];
-    memset(g_page_dots, 0, sizeof(g_page_dots));
-    ui_dots_create(g_launcher, g_page_dots, UI_DOTS_MAX, pages, LV_ALIGN_BOTTOM_MID, -8);
-    ui_dots_update(g_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
-    lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);
+    /* 页点（tileview 滚动 + 快滑翻页联动）。s_page_dots 会活过
+     * ui_launcher_rebuild 的整屏删除——旧指针已随屏幕释放，必须清零
+     * 再交给 ui_dots_create（否则对已释放对象再 delete，真机
+     * LoadProhibited 崩溃，2026-11-15） */
+    memset(s_page_dots, 0, sizeof(s_page_dots));
+    ui_dots_create(g_launcher, s_page_dots, UI_DOTS_MAX, pages, LV_ALIGN_BOTTOM_MID, -8);
+    ui_dots_update(s_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
+    lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, s_page_dots);
 
     if (!s_swipe_timer) s_swipe_timer = lv_timer_create(launcher_swipe_timer_cb, 30, NULL);
 
@@ -570,11 +584,12 @@ void ui_launcher_build(void)
     clock_timer = lv_timer_create(clock_timer_cb, 1000, NULL);
     clock_timer_cb(NULL);
 
-    /* GADGET_DEMO_PAGE=n：启动即翻到第 n 页（headless 页点回归/截图） */
+    /* GADGET_DEMO_PAGE=n：启动即翻到第 n 页（headless 页点回归/截图；
+     * 与快滑翻页共用 launcher_goto_page，验的是同一条路径） */
     const char *dpg = getenv("GADGET_DEMO_PAGE");
     if (dpg && dpg[0]) {
         int pi = atoi(dpg);
-        if (pi > 0) lv_tileview_set_tile_by_index(tv, pi, 0, LV_ANIM_OFF);
+        if (pi > 0) launcher_goto_page(pi);
     }
 
 #ifdef ESP_PLATFORM
