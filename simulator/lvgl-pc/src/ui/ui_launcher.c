@@ -18,7 +18,9 @@
 #include "ui_theme.h"
 
 #ifdef ESP_PLATFORM
-#include "icon_embed.h" /* 真机图标：嵌入固件（gen_icon_embed.sh 预解码 ARGB） */
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "icon_embed.h" /* 真机图标：嵌入固件（gen_icon_embed.sh 预解码 RGB565） */
 #endif
 
 static lv_obj_t *g_launcher;
@@ -28,6 +30,56 @@ static lv_obj_t *g_lbl_date;
 static void clock_timer_cb(lv_timer_t *t);
 static void tileview_scroll_cb(lv_event_t *e);
 static int s_last_page = -1; /* 页点缓存（仅翻页时更新） */
+static lv_obj_t *s_tileview;   /* 当前桌面 tileview */
+
+/* ---- 桌面快滑翻页（替代手指拖动，见 build 里禁用 SCROLLABLE 的注释）---- */
+#define SWIPE_MIN_DX 50   /* 横向位移下限 */
+#define SWIPE_MAX_MS 500  /* 快速滑动窗口 */
+static lv_indev_t *s_swipe_indev;
+static lv_timer_t *s_swipe_timer;
+static bool s_swipe_pressed;
+static lv_point_t s_swipe_start, s_swipe_last;
+static uint32_t s_swipe_t0;
+static bool s_swipe_consumed; /* 本次按压已被判定为翻页 → 抑制打开 */
+
+static void launcher_swipe_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!s_swipe_indev) {
+        for (lv_indev_t *i = lv_indev_get_next(NULL); i; i = lv_indev_get_next(i)) {
+            if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER) { s_swipe_indev = i; break; }
+        }
+        if (!s_swipe_indev) return;
+    }
+    lv_point_t p;
+    if (lv_indev_get_state(s_swipe_indev) == LV_INDEV_STATE_PRESSED) {
+        lv_indev_get_point(s_swipe_indev, &p);
+        if (!s_swipe_pressed) {
+            s_swipe_pressed = true;
+            s_swipe_start = s_swipe_last = p;
+            s_swipe_t0 = lv_tick_get();
+            s_swipe_consumed = false;
+        } else {
+            s_swipe_last = p;
+        }
+    } else if (s_swipe_pressed) {
+        s_swipe_pressed = false;
+        int dx = s_swipe_last.x - s_swipe_start.x;
+        int dy = s_swipe_last.y - s_swipe_start.y;
+        int adx = dx < 0 ? -dx : dx;
+        int ady = dy < 0 ? -dy : dy;
+        if (adx >= SWIPE_MIN_DX && adx >= 2 * ady &&
+            lv_tick_elaps(s_swipe_t0) <= SWIPE_MAX_MS) {
+            int pages = (app_manager_count() + 3) / 4;
+            int cur = s_last_page < 0 ? 0 : s_last_page;
+            int nxt = cur + (dx < 0 ? 1 : -1);
+            if (nxt < 0 || nxt >= pages) return; /* 边界：不动 */
+            s_swipe_consumed = true;             /* 抑制本次点击 */
+            s_last_page = nxt;
+            lv_tileview_set_tile_by_index(s_tileview, (uint32_t)nxt, 0, LV_ANIM_ON);
+        }
+    }
+}
 static void tile_press_cb(lv_event_t *e);
 static void tile_press_lost_cb(lv_event_t *e);
 static void tile_release_cb(lv_event_t *e);
@@ -296,6 +348,7 @@ void ui_launcher_build(void)
     static lv_coord_t row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
 
     lv_obj_t *tv = lv_tileview_create(g_launcher);
+    s_tileview = tv;
     lv_obj_set_size(tv, LV_PCT(100), 360);
     lv_obj_align(tv, LV_ALIGN_CENTER, 0, 16); /* 状态栏加高（76px）后下移 */
     lv_obj_set_style_bg_opa(tv, LV_OPA_TRANSP, 0);
@@ -303,8 +356,14 @@ void ui_launcher_build(void)
     lv_obj_set_style_pad_all(tv, 0, 0);
     lv_obj_set_style_pad_gap(tv, 0, 0);
     lv_obj_set_scrollbar_mode(tv, LV_SCROLLBAR_MODE_OFF);
+    /* 禁用手指直接拖动：拖动会让 tileview 每帧全屏重绘（背景图 + 4 图标
+     * 合成），持续拖拽把显示管线压垮（真机实测：60 次程序化翻页零问题，
+     * 手指连续拖拽必卡）。改为「快滑手势 → 整页动画切换」，重绘有界。 */
+    lv_obj_clear_flag(tv, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *dots[UI_DOTS_MAX];
+    /* ={0} 必须：ui_dots_create 会 delete 数组里的旧指针，
+     * 未初始化栈垃圾会被当对象删除 → 堆踩踏（滑动几次后卡死） */
+    lv_obj_t *dots[UI_DOTS_MAX] = {0};
     int count = app_manager_count();
     int pages = (count + 3) / 4;
 #ifdef ESP_PLATFORM
@@ -385,10 +444,8 @@ void ui_launcher_build(void)
                 lv_obj_set_style_border_width(holder, 0, 0);
                 lv_obj_set_style_pad_all(holder, 0, 0);
                 lv_obj_set_style_clip_corner(holder, true, 0);
-                lv_obj_set_style_shadow_width(holder, 18, 0);
-                lv_obj_set_style_shadow_opa(holder, LV_OPA_40, 0);
-                lv_obj_set_style_shadow_color(holder, lv_color_hex(0x000000), 0);
-                lv_obj_set_style_shadow_ofs_y(holder, 6, 0);
+                /* 图标容器不加阴影：滑动/转场全屏重绘时阴影 alpha
+                 * 混合是主要开销（真机管线教训） */
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
@@ -441,6 +498,8 @@ void ui_launcher_build(void)
     ui_dots_update(g_page_dots, pages, 0); /* 初始高亮（SCROLL 事件不补发） */
     lv_obj_add_event_cb(tv, tileview_scroll_cb, LV_EVENT_SCROLL, g_page_dots);
 
+    if (!s_swipe_timer) s_swipe_timer = lv_timer_create(launcher_swipe_timer_cb, 30, NULL);
+
     /* 时钟定时器：rebuild 时先删旧（timer 不随屏幕对象释放） */
     static lv_timer_t *clock_timer;
     if (clock_timer) lv_timer_delete(clock_timer);
@@ -453,6 +512,10 @@ void ui_launcher_build(void)
         int pi = atoi(dpg);
         if (pi > 0) lv_tileview_set_tile_by_index(tv, pi, 0, LV_ANIM_OFF);
     }
+
+#ifdef ESP_PLATFORM
+    (void)0;
+#endif
 }
 
 static void tileview_scroll_cb(lv_event_t *e)
@@ -477,6 +540,7 @@ static struct {
     lv_point_t start;
     uint32_t t0;
     int app_id;
+    int page;
     bool active;
 } s_press;
 
@@ -488,6 +552,7 @@ static void tile_press_cb(lv_event_t *e)
     lv_indev_get_point(indev, &s_press.start);
     s_press.t0 = lv_tick_get();
     s_press.app_id = (int)(uintptr_t)lv_event_get_user_data(e);
+    s_press.page = s_last_page;
     s_press.active = true;
 }
 
@@ -504,13 +569,21 @@ static void tile_release_cb(lv_event_t *e)
 
     lv_indev_t *indev = lv_indev_active();
     if (!indev) return;
+
+    /* 权威判定：按下期间发生过滚动位移 → 一律不打开。
+     * （LVGL 内建 press_moved，滚动接管时置位；三保险：press_moved +
+     *  位移阈值 + 页号未变，解决"滑动误开 App"反复反馈） */
+    if (lv_indev_get_press_moved(indev)) return;
+    if (s_swipe_consumed) { s_swipe_consumed = false; return; } /* 已翻页 */
+    if (s_last_page != s_press.page) return;
+
     lv_point_t p;
     lv_indev_get_point(indev, &p);
     int dx = p.x - s_press.start.x;
     int dy = p.y - s_press.start.y;
     if (dx < 0) dx = -dx;
     if (dy < 0) dy = -dy;
-    if (dx <= 14 && dy <= 14 && lv_tick_elaps(s_press.t0) <= 700) {
+    if (dx <= 10 && dy <= 10 && lv_tick_elaps(s_press.t0) <= 600) {
         ui_open_app(s_press.app_id);
     }
 }
