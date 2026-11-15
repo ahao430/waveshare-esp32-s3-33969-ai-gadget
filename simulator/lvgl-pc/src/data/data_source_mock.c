@@ -27,19 +27,17 @@ static bool mock_ds_refresh(gadget_state_t *st)
     st->kimi_used_week = m->kimi_used_week;
     st->updated_unix   = m->updated_unix;
 
-    /* mock 固定 2 条演示订阅（演示两种卡形态；空态语义属于 bridge 无配置场景）：
-     * [0] 窗口型 coding plan（智谱，可预热）；[1] 余额型按量计费（DeepSeek）。 */
-    st->sub_count = 2;
+    /* mock 固定 3 条演示订阅（演示三种卡形态；空态语义属于 bridge 无配置场景）：
+     * [0] 智谱 v1：仅 5h 窗口、无周限（真实套餐形态），可预热；
+     * [1] DeepSeek：余额型按量计费；[2] Kimi：5h+周 完整窗口形态。 */
+    st->sub_count = 3;
     st->subs[0] = (ds_subscription_t){0};
     st->subs[0].used_5h   = st->zhipu_used_5h;
-    st->subs[0].used_week = st->zhipu_used_week;
     st->subs[0].reset_5h  = st->zhipu_reset_5h;
-    st->subs[0].reset_week = st->zhipu_reset_week;
-    st->subs[0].win_5h_s  = 18000;
-    st->subs[0].week_s    = 604800;
+    st->subs[0].win_5h_s  = 18000; /* v1 套餐无周限：week_s=0 */
     st->subs[0].can_prewarm = true;
     snprintf(st->subs[0].name, sizeof(st->subs[0].name), "智谱 Coding Plan");
-    snprintf(st->subs[0].plan, sizeof(st->subs[0].plan), "GLM Coding Plan · 1月15日到期");
+    snprintf(st->subs[0].plan, sizeof(st->subs[0].plan), "GLM Coding Lite · 12月11日到期");
     st->subs[0].valid = true;
 
     st->subs[1] = (ds_subscription_t){0};
@@ -47,6 +45,17 @@ static bool mock_ds_refresh(gadget_state_t *st)
     snprintf(st->subs[1].plan, sizeof(st->subs[1].plan), "官方余额（按量计费）");
     snprintf(st->subs[1].balance, sizeof(st->subs[1].balance), "110.35");
     st->subs[1].valid = true;
+
+    st->subs[2] = (ds_subscription_t){0};
+    st->subs[2].used_5h   = 30;
+    st->subs[2].used_week = 62;
+    st->subs[2].reset_5h  = st->zhipu_reset_5h;
+    st->subs[2].reset_week = st->zhipu_reset_week;
+    st->subs[2].win_5h_s  = 18000;
+    st->subs[2].week_s    = 604800;
+    snprintf(st->subs[2].name, sizeof(st->subs[2].name), "Kimi Coding Plan");
+    snprintf(st->subs[2].plan, sizeof(st->subs[2].plan), "Kimi Coding Pro");
+    st->subs[2].valid = true;
 
     /* 演示服务器首刷填充（g_state 零初值——真机 bridge 无配置显示空态，
      * 演示数据只属于 mock 数据源） */

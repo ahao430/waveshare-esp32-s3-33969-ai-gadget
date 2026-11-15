@@ -220,40 +220,47 @@ static void quota_update_one(int idx)
     lv_label_set_text(r->title_lbl, sub->name);
     lv_label_set_text(r->plan_lbl, sub->plan);
 
-    /* 两种形态：窗口型（coding plan）= 环+百分比+倒计时+周额度；
-     * 余额型（按量计费，如 DeepSeek）= 无环，中心直接显示余额。 */
-    bool windowed = sub->win_5h_s > 0 || sub->week_s > 0;
-    if (windowed) {
-        lv_obj_clear_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(r->week_val, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(r->week_bar, LV_OBJ_FLAG_HIDDEN);
+    /* 元素级显隐（按 provider 实际返回的窗口，不补默认值）：
+     *   5h 窗口有 → 环+剩余百分比+5h 倒计时；
+     *   周窗口有 → 周额度行（智谱 v1 套餐无周限，不得显示假 168h 条）；
+     *   两者皆无 → 余额型（按量计费，中心显示余额）。
+     * 只有周限的套餐：环改显本周剩余百分比+周倒计时。 */
+    bool has_5h = sub->win_5h_s > 0;
+    bool has_week = sub->week_s > 0;
+    long now = (long)time(NULL);
 
-        int remain_5h_pct = 100 - sub->used_5h;
-        if (remain_5h_pct < 0) remain_5h_pct = 0;
-        lv_arc_set_value(r->arc, remain_5h_pct);
-        lv_obj_set_style_arc_color(r->arc, ui_pct_color(sub->used_5h), LV_PART_INDICATOR);
-        snprintf(buf, sizeof(buf), "%d%%", remain_5h_pct);
+    if (has_5h || has_week) {
+        lv_obj_clear_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
+        int remain_pct = has_5h ? 100 - sub->used_5h : 100 - sub->used_week;
+        if (remain_pct < 0) remain_pct = 0;
+        lv_arc_set_value(r->arc, remain_pct);
+        lv_obj_set_style_arc_color(r->arc,
+                                   ui_pct_color(has_5h ? sub->used_5h : sub->used_week),
+                                   LV_PART_INDICATOR);
+        snprintf(buf, sizeof(buf), "%d%%", remain_pct);
         lv_label_set_text(r->arc_lbl, buf);
-        /* 环心副题：距 5h 重置的倒计时（用户要求显示重置时间而非小时数） */
-        long now = (long)time(NULL);
-        long remain = sub->reset_5h > now ? sub->reset_5h - now : 0;
+        long reset_at = has_5h ? sub->reset_5h : sub->reset_week;
+        long remain = reset_at > now ? reset_at - now : 0;
         snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld 后重置",
                  remain / 3600, (remain % 3600) / 60, remain % 60);
         lv_label_set_text(r->arc_sub, buf);
+    } else {
+        lv_obj_add_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(r->arc_lbl, sub->balance[0] ? sub->balance : "--");
+        lv_label_set_text(r->arc_sub, "账户余额");
+    }
 
-        /* 本周额度单行：x/y 小时 · 周重置时间 */
-        int week_s = sub->week_s > 0 ? sub->week_s : 604800;
+    if (has_week) {
+        lv_obj_clear_flag(r->week_val, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(r->week_bar, LV_OBJ_FLAG_HIDDEN);
         ui_fmt_md_hhmm(sub->reset_week, tbuf, sizeof(tbuf));
         snprintf(buf, sizeof(buf), "本周 %.1f/%d h · %s 重置",
-                 week_s * sub->used_week / 100.0 / 3600.0, week_s / 3600, tbuf);
+                 sub->week_s * sub->used_week / 100.0 / 3600.0, sub->week_s / 3600, tbuf);
         lv_label_set_text(r->week_val, buf);
         lv_bar_set_value(r->week_bar, sub->used_week, LV_ANIM_OFF);
     } else {
-        lv_obj_add_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(r->week_val, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(r->week_bar, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(r->arc_lbl, sub->balance[0] ? sub->balance : "--");
-        lv_label_set_text(r->arc_sub, "账户余额");
     }
 
     ui_fmt_hhmm(s->updated_unix, tbuf, sizeof(tbuf));
@@ -486,7 +493,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
     }
 }
 
-/* 倒计时 tick：重算窗口型 tile 的环心倒计时（arc_sub） */
+/* 倒计时 tick：重算窗口型 tile 的环心倒计时（arc_sub；按 5h 或周窗口） */
 static void quota_countdown_cb(lv_timer_t *t)
 {
     (void)t;
@@ -495,10 +502,17 @@ static void quota_countdown_cb(lv_timer_t *t)
         quota_refs_t *r = &g_q[i];
         if (!r->arc_sub) continue;
         const ds_subscription_t *sub = &s->subs[i];
-        if (sub->win_5h_s <= 0 && sub->week_s <= 0) continue; /* 余额型无倒计时 */
+        long reset_at;
+        if (sub->win_5h_s > 0) {
+            reset_at = sub->reset_5h;
+        } else if (sub->week_s > 0) {
+            reset_at = sub->reset_week;
+        } else {
+            continue; /* 余额型无倒计时 */
+        }
         char buf[96];
         long now = (long)time(NULL);
-        long remain = sub->reset_5h > now ? sub->reset_5h - now : 0;
+        long remain = reset_at > now ? reset_at - now : 0;
         snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld 后重置",
                  remain / 3600, (remain % 3600) / 60, remain % 60);
         lv_label_set_text(r->arc_sub, buf);
