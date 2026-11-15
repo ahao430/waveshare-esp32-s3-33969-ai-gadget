@@ -991,6 +991,8 @@ https://github.com/facebookincubator/muse-gadget-sdk
 
 Muse 不应成为系统启动的强依赖。Muse SDK 独立验证通过后再集成。
 
+> **2026-11-15 更新（ADR-004）**：改为**云端连接放 Bridge** 的路线。上游传输是标准 Noise_XX_25519_AESGCM_SHA256，Bridge 用配对凭据建立会话、设备端零新增（Muse 页 PTT → `/api/v1/voice/interact?app=muse`）。配对仍需一次性临时刷官方固件、从设备 NVS 导出凭据（详见 ADR-004）。
+
 ## 7.2 Muse 代理范围
 
 第一版仅做 HTTP CONNECT 代理传输：

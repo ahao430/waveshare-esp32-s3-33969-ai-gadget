@@ -219,3 +219,43 @@ pause/resume 生命周期钩子。
   学习资料"；esp-brookesia 构建验证结论保留（范式可行性的证据）
 - 固件路线延续现有 firmware/（BSP bring-up 完成）+ 模拟器三件套，
   新增 input 服务（三键事件）与订阅页倒计时展示
+
+---
+
+## ADR-004 Muse 云端连接放在 Bridge，设备端不做 Muse SDK 集成
+
+日期：2026-11-15　状态：已接受（替代 ADR-002 中"Muse 集成按独立构建验证后合入主工程"的路线）
+
+**背景**：用户要求 Muse 作为 launcher 里的一个 App 接入，不整包替换
+固件。调研上游 `facebookincubator/muse-gadget-sdk` 后的事实：
+
+- 上游**已内置本板**（`devices/waveshare-s3-216.md` + `sdkconfig.muse-waveshare-s3-216`），
+  且作者实测通过；但整个聊天/语音代码锁在 `CONFIG_MUSE_ENABLED`（完整 UI 组件）内
+- 设备侧要自建的能力：NimBLE + 社区配对 v5（约 11k 行 BLE/Noise 控制面）
+  + TLS/WS + Noise + VM 语音会话；我们的固件当前 **BLE 未启用、无 TLS 使用**
+- 资源现实：app 分区仅剩 245KB、内部 RAM 运行时空闲 60KB（最大块 31KB）
+  → 直接移植需重排分区 + 内存瘦身，风险高且收益只是"复制一份上游 UI"
+- 传输是**标准 `Noise_XX_25519_AESGCM_SHA256`**（上游 `InitiatorHandshake.h`
+  明确写出），Go 有成熟实现
+- 网络：本机直连 `api.muse.ai` / `hatch.metaaivm.com` 不通，经代理 7897 可达
+
+**决策**：Muse 的 Noise 会话与回合放在 **Bridge**：
+
+1. Bridge 用配对凭据 → `GET /api.muse.ai/fetch_vms` → `vm_id` + `vm_auth_token`
+2. Bridge 建 WSS + Noise XX 会话，复用 `POST /chat/subscribe` + `/chat/stream`
+3. 语音回合走**语音消息**路径（base64 WAV 进 `/chat/stream` 的 `items`）——
+   `/api/voice/dictation` 对该凭据返回 403，且上游注释写明该路由暂无 ASR
+4. 设备端**零新增**：Muse 页 PTT 仍打 `/api/v1/voice/interact?app=muse`，
+   Bridge 内部路由到 Muse；回复文本由本项目 TTS 朗读（上游只显示文字）
+5. Muse 不可用时自动回落常规 ASR+LLM+TTS 链路
+
+**理由**：符合项目硬约束（云端凭据只进 Bridge）与 ADR-003（每生态一个
+App，UI 共用）；设备端零 BLE/TLS/分区改造；全部可在 Mac 上验证。
+
+**后果**：
+- 配对仍需一次性完成：临时刷官方固件 → Muse app 配对 → 从设备 NVS
+  （0x11000, 0xC000）导出 `access_token`/`refresh_token`/`node_id`/
+  `noise_host` → 刷回本固件。凭据失效（revoke）需重做这一步
+- Bridge 必须能访问 Muse 云端（本机用 `proxy_url` 走 Clash；部署环境需
+  相应网络条件）
+- 上游的 avatar/相册等 UI 能力不引入；Muse 页沿用本项目伴宠与对话 UI

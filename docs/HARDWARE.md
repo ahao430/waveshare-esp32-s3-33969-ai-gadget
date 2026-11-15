@@ -266,3 +266,33 @@
 - BSP 组件页：<https://components.espressif.com/components/waveshare/esp32_s3_touch_amoled_2_16>
 - Muse Gadget SDK：<https://github.com/facebookincubator/muse-gadget-sdk>（esp32/README.md、devices/waveshare-s3-216.md、devices/ 目录）
 - xiaozhi-esp32：<https://github.com/78/xiaozhi-esp32>（README.md）
+
+### 2.9 Muse 官方固件实测与 NVS 布局（2026-11-15）
+
+上游 `muse-gadget-sdk` 已内置本板（`devices/waveshare-s3-216.md`），
+`tools/muse/board.sh build s3-216` 在 IDF v6.0.3 下一次通过，2.17MB。
+
+实机验证（USB 供电、无电池）：
+
+- 启动正常：`link.identity: node_id=homelink-79bac4 ble_name=MuseGadget-79BAC4`
+- 音频自检：`capture 16132 Hz, playback 16161 Hz`（ES8311/ES7210 均 OK）
+- Wi-Fi 扫描 7 AP、BLE 广播待配对；配对后 `setup=done ws=up`（Noise 会话连通）
+- 内部 RAM：启动后 `int=33K/18K`（扫描时 `min=7K`）——远紧于本固件（空闲 72K）
+
+**Muse 固件分区表**（与我们的不同，刷回本固件后此表失效）：
+
+| 分区 | 偏移 | 大小 |
+|------|------|------|
+| nvs | 0x11000 | 0xC000（48KB） |
+| otadata | 0x1D000 | 0x2000 |
+| ota_0 | 0x20000 | 4M |
+| ota_1 | 0x420000 | 4M |
+| apps/files (LittleFS) | 0x830000 / 0xA30000 | 2M / 4M |
+
+**凭据导出**（配对后，Bridge 用）：`esptool read-flash 0x11000 0xC000`，
+再用 IDF 的 `nvs_tool.py -d minimal` 取 `homehub:` 命名空间下的
+`access_token` / `refresh_token` / `node_id` / `noise_host` / `api_url_v2`。
+
+注意：Muse 的 `files` LittleFS（0xA30000–0xE30000）与我们的 `assets`
+分区（0xC10000–0xF90000）重叠——刷回本固件后必须重跑
+`scripts/flash_companion.sh`，否则伴宠资源被清。
