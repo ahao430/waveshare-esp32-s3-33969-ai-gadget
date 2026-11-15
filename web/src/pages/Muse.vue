@@ -98,6 +98,23 @@ onMounted(loadMuse)
     朗读音色在「语音设置」页按 App 配置；未配置凭据时 Muse 页走常规语音链路。
   </p>
 
+  <div class="card mb-4">
+    <h3 class="mb-2 font-semibold">首次使用前提：先刷官方 SDK 配对授权</h3>
+    <ol class="list-decimal space-y-1 pl-5 text-sm text-dim">
+      <li>确认原厂全片备份存在，刷官方 Muse Gadget SDK 固件
+        （<code>sdkconfig.muse-waveshare-s3-216</code>，ESP-IDF v6.0.3）。</li>
+      <li>手机 Muse App 配对设备并完成授权（屏上出现 <code>setup=done ws=up</code>）。</li>
+      <li>从设备 NVS（<code>0x11000, 0xC000</code>）导出
+        <code>access_token</code> / <code>refresh_token</code> / <code>node_id</code> / <code>noise_host</code>。</li>
+      <li>刷回本项目固件，并重烧伴宠资源分区（官方固件的 files 会覆盖 <code>assets</code>）。</li>
+      <li>回到本页填写凭据 → 保存 → 连通性测试。</li>
+    </ol>
+    <p class="mt-2 text-xs text-warn">
+      当前固件无法发起 Muse 配对；凭据被 revoke/过期时需要重做上述 1–3 步。
+      详细记录见 docs/HARDWARE.md §2.9 与 ADR-004。
+    </p>
+  </div>
+
   <div class="card">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
       <h3 class="font-semibold">云端连接</h3>

@@ -340,13 +340,12 @@ ESP32 不保存 Provider API Key。所有密钥由 Bridge 管理。
 
 ## 5.4 Muse AI
 
-- Muse SDK 单独验证。
-- 验证 BLE 配对和 Wi-Fi 配网。
-- 验证 Noise 会话。
-- 验证语音输入和输出。
-- 适配 Audio Manager。
-- 默认直连。
-- 第一版只提供可选 HTTP CONNECT 代理。
+- **授权前提**：Muse 云端凭据必须先用**官方 Muse Gadget SDK 固件**配对取得
+  ——手机 Muse App 授权 → `esptool read-flash 0x11000 0xC000` 导出 NVS →
+  刷回本项目固件 + 重烧伴宠 assets。本项目固件不能发起配对，凭据失效需重做。
+- 连接在 Bridge（ADR-004）：Noise 会话与回合由 Bridge 完成，设备端零改动；
+  回复文本由本项目 TTS 朗读。
+- 默认直连；VM 需要时用可选 HTTP CONNECT 代理（proxy_url）。
 - 不实现 V2Ray 客户端。
 
 ## 5.5 Xiaozhi AI

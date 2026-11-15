@@ -106,6 +106,10 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 - **局域网后台**：Bridge 监听 `:8081` 全部网卡，Vite 已 `host: true`，
   手机访问 `http://<MacIP>:5173`。仅限可信局域网；设了 `BRIDGE_TOKEN` 时
   浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）。
+- **Muse 授权必须先刷官方 SDK**：本项目固件不能发起 Muse 配对。流程是
+  刷官方 Muse SDK 固件 → 手机 Muse App 配对授权 → `esptool read-flash
+  0x11000 0xC000` 导出 NVS 凭据 → 刷回本项目固件 + 重烧伴宠 assets →
+  Web Muse 页填凭据。官方固件会覆盖伴宠资源分区。
 - **USB 线**：只负责供电/串口日志；接了电池可拔线独立运行，没接电池拔线即断电。
 
 ### LVGL 版本差异（移植期主要摩擦）

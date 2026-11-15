@@ -119,6 +119,22 @@ ipconfig getifaddr en0        # 取 Mac 局域网 IP（例如 192.168.0.23）
 | 刷写失败 | 先 `pkill -9 -f esp-idf-monitor`，再确认 `/dev/cu.usbmodem*` |
 | flash 余量告警 | app 分区只剩 5%（232KB）；加功能前先裁剪字体/素材 |
 
+### 8. Muse 首次使用（必须先刷官方 SDK 配对）
+
+Muse 的云端授权**不能在本固件里完成**，必须先走一次官方流程：
+
+1. 确认原厂全片备份存在，然后刷**官方 Muse Gadget SDK 固件**
+   （`sdkconfig.muse-waveshare-s3-216`，ESP-IDF v6.0.3）。
+2. 手机 Muse App 配对设备并完成授权（设备屏出现 `setup=done ws=up` 即成功）。
+3. 导出 NVS：`esptool read-flash 0x11000 0xC000 nvs.bin`，取出
+   `access_token` / `refresh_token` / `node_id` / `noise_host`。
+4. **刷回本项目固件**，并重烧伴宠资源分区（官方固件的 files 会覆盖
+   `assets`，`scripts/flash_companion.sh`）。
+5. Web「Muse」页填四项凭据 → 保存 →「连通性测试」。
+
+凭据被 revoke/过期需要重做第 1–3 步。详细步骤与实测记录见
+[docs/HARDWARE.md §2.9](docs/HARDWARE.md) 与 [ADR-004](docs/DECISIONS.md)。
+
 ## 开发与检查命令
 
 ```bash
