@@ -27,7 +27,10 @@ static lv_obj_t *g_lbl_date;
 
 static void clock_timer_cb(lv_timer_t *t);
 static void tileview_scroll_cb(lv_event_t *e);
-static void tile_click_cb(lv_event_t *e);
+static int s_last_page = -1; /* 页点缓存（仅翻页时更新） */
+static void tile_press_cb(lv_event_t *e);
+static void tile_press_lost_cb(lv_event_t *e);
+static void tile_release_cb(lv_event_t *e);
 
 /* ---------------- 波浪渐变背景（canvas 预渲染） ----------------
  * 480×480 RGB565 直写像素（一次性，启动几 ms）：
@@ -181,24 +184,18 @@ static void bg_attach(lv_obj_t *parent)
 #define LAZY_ICONS_MAX 12
 static struct { lv_obj_t *img; const void *src; } s_lazy[LAZY_ICONS_MAX];
 static int s_lazy_n;
+static int s_lazy_i;
 
 static void lazy_icon_cb(lv_timer_t *t)
 {
-    static int i;
-    if (i >= s_lazy_n) {
+    if (s_lazy_i >= s_lazy_n) {
         lv_timer_del(t);
         return;
     }
-    lv_obj_t *img = s_lazy[i].img;
-    lv_image_set_src(img, s_lazy[i].src);
-    lv_obj_update_layout(img);
-    int32_t src_w = lv_obj_get_width(img);
-    if (src_w <= 0) src_w = 88;
-    lv_obj_set_size(img, 108, 108);
-    lv_image_set_scale(img, (256 * 108) / src_w);
-    lv_obj_center(img);
-    i++;
-    lv_timer_set_period(t, 60);
+    /* 素材 108×108 与控件 1:1，只挂 src（无缩放/无重新布局） */
+    lv_image_set_src(s_lazy[s_lazy_i].img, s_lazy[s_lazy_i].src);
+    s_lazy_i++;
+    lv_timer_set_period(t, 40);
 }
 #endif
 
@@ -216,7 +213,7 @@ static void tile_add(lv_obj_t *grid, const app_def_t *def, int cell)
     lv_obj_set_style_shadow_opa(tile, LV_OPA_20, 0);
     lv_obj_set_style_shadow_color(tile, lv_color_hex(0x000000), 0);
     lv_obj_set_style_pad_all(tile, 0, 0);
-    lv_obj_add_event_cb(tile, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
+    lv_obj_add_event_cb(tile, tile_press_cb, LV_EVENT_PRESSED, (void *)(uintptr_t)def->id);
 
     if (def->avatar) {
         /* AI 磁贴：圆角方形头像（88×88 素材缩到 TILE_ICON） */
@@ -310,6 +307,12 @@ void ui_launcher_build(void)
     lv_obj_t *dots[UI_DOTS_MAX];
     int count = app_manager_count();
     int pages = (count + 3) / 4;
+#ifdef ESP_PLATFORM
+    s_lazy_n = 0; /* 重建（主题/排布变更）时重置错峰队列 */
+    s_lazy_i = 0;
+#endif
+    s_last_page = -1; /* 页点缓存重置 */
+
 
     for (int pg = 0; pg < pages; pg++) {
         lv_obj_t *tile = lv_tileview_add_tile(tv, pg, 0, LV_DIR_HOR);
@@ -341,7 +344,11 @@ void ui_launcher_build(void)
             lv_obj_set_style_border_width(tile_btn, 0, 0);
             lv_obj_set_style_shadow_width(tile_btn, 0, 0);
             lv_obj_set_style_pad_all(tile_btn, 0, 0);
-            lv_obj_add_event_cb(tile_btn, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
+            /* 打开判定=按下→抬起位移≤14px（滑动拖拽/长按不触发；
+             * CLICKED 在 tileview 横滑时仍会误发，用户实测反馈） */
+            lv_obj_add_event_cb(tile_btn, tile_press_cb, LV_EVENT_PRESSED, (void *)(uintptr_t)def->id);
+            lv_obj_add_event_cb(tile_btn, tile_release_cb, LV_EVENT_RELEASED, NULL);
+            lv_obj_add_event_cb(tile_btn, tile_press_lost_cb, LV_EVENT_PRESS_LOST, NULL);
 
             const int ICON = 108;
             /* 素材缺位时回退符号占位（assets/icons/ 自备图标体系）。
@@ -385,6 +392,9 @@ void ui_launcher_build(void)
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
+                /* 图标 108×108 原生 1:1（不缩放、不混合） */
+                lv_obj_set_size(img, ICON, ICON);
+                lv_obj_center(img);
 #ifdef ESP_PLATFORM
                 /* 真机：延迟错峰挂载（见 lazy_icon_cb 注释） */
                 if (s_lazy_n < LAZY_ICONS_MAX) {
@@ -392,18 +402,13 @@ void ui_launcher_build(void)
                     s_lazy[s_lazy_n].src = icon_src;
                     s_lazy_n++;
                     if (s_lazy_n == 1) {
-                        lv_timer_create(lazy_icon_cb, 700, NULL);
+                        lv_timer_create(lazy_icon_cb, 500, NULL);
                     }
                 }
 #else
                 lv_image_set_src(img, icon_src);
-                /* 按源图实际宽度自适应缩放（88 头像/更大自备图标均可） */
-                lv_obj_update_layout(img);
-                int32_t src_w = lv_obj_get_width(img);
-                if (src_w <= 0) src_w = 88;
-                lv_obj_set_size(img, ICON, ICON);
-                lv_image_set_scale(img, (256 * ICON) / src_w);
-                lv_obj_center(img);
+                /* 模拟器：源 88 → 缩到 108 显示（桌面端无性能压力） */
+                lv_image_set_scale(img, (256 * ICON) / 88);
 #endif
             } else {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
@@ -458,13 +463,56 @@ static void tileview_scroll_cb(lv_event_t *e)
     int cur = ui_page_of_scroll(tv, 0); /* 步长实测（tv 宽含父级 pad） */
     if (cur < 0) cur = 0;
     if (cur >= pages) cur = pages - 1;
+    /* 只在页号变化时改页点：SCROLL 每像素触发，逐帧 set_size 会
+     * 全屏重排（9 张图标重绘）→ 显示管线堵塞卡死（用户实测） */
+    if (cur == s_last_page) return;
+    s_last_page = cur;
     ui_dots_update(dots, pages, cur);
 }
 
-static void tile_click_cb(lv_event_t *e)
+/* 打开判定：按下→抬起位移 ≤14px 且 ≤700ms（滑动/拖拽不打开）。
+ * 原用 LV_EVENT_CLICKED：tileview 横滑后仍会误发（用户实测）。 */
+static struct {
+    lv_obj_t *obj;
+    lv_point_t start;
+    uint32_t t0;
+    int app_id;
+    bool active;
+} s_press;
+
+static void tile_press_cb(lv_event_t *e)
 {
-    int app_id = (int)(uintptr_t)lv_event_get_user_data(e);
-    ui_open_app(app_id);
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    s_press.obj = lv_event_get_target(e);
+    lv_indev_get_point(indev, &s_press.start);
+    s_press.t0 = lv_tick_get();
+    s_press.app_id = (int)(uintptr_t)lv_event_get_user_data(e);
+    s_press.active = true;
+}
+
+static void tile_press_lost_cb(lv_event_t *e)
+{
+    (void)e;
+    s_press.active = false; /* 滚动接管：本次按压作废 */
+}
+
+static void tile_release_cb(lv_event_t *e)
+{
+    if (!s_press.active || lv_event_get_target(e) != s_press.obj) return;
+    s_press.active = false;
+
+    lv_indev_t *indev = lv_indev_active();
+    if (!indev) return;
+    lv_point_t p;
+    lv_indev_get_point(indev, &p);
+    int dx = p.x - s_press.start.x;
+    int dy = p.y - s_press.start.y;
+    if (dx < 0) dx = -dx;
+    if (dy < 0) dy = -dy;
+    if (dx <= 14 && dy <= 14 && lv_tick_elaps(s_press.t0) <= 700) {
+        ui_open_app(s_press.app_id);
+    }
 }
 
 static void clock_timer_cb(lv_timer_t *t)
