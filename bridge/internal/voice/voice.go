@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"gadget-bridge/internal/ai"
 )
@@ -200,29 +201,50 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	if app == "" {
 		app = r.Header.Get("X-Voice-App")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 	ctx = context.WithValue(ctx, ctxKeyVoiceApp{}, app)
 
+	// 分段耗时：语音链路"慢"必须能看出卡在 ASR / LLM / TTS 哪一段
+	t0 := time.Now()
 	text, err := h.eng.Transcribe(ctx, audio)
 	if err != nil {
-		log.Printf("voice: asr failed: %v", err) // 排障：不含密钥/音频内容
+		log.Printf("voice: asr failed after %v: %v", time.Since(t0).Round(time.Millisecond), err)
 		w.Header().Set("X-Voice-Error", "asr_failed")
 		http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
 		return
 	}
+	tASR := time.Since(t0)
+
+	t1 := time.Now()
 	reply, err := h.eng.Respond(ctx, text)
 	if err != nil {
+		log.Printf("voice: llm failed after %v: %v", time.Since(t1).Round(time.Millisecond), err)
 		w.Header().Set("X-Voice-Error", "llm_failed")
 		http.Error(w, `{"error":"llm_failed"}`, http.StatusBadGateway)
 		return
 	}
+	tLLM := time.Since(t1)
+	// 语音场景清洗：丢掉英文推理前言、按句截断（TTS 只念中文正文）
+	rawRunes := utf8.RuneCountInString(reply)
+	reply = sanitizeVoiceReply(reply)
+
+	t2 := time.Now()
 	wav, err := h.eng.Synthesize(ctx, reply)
 	if err != nil {
+		log.Printf("voice: tts failed after %v: %v", time.Since(t2).Round(time.Millisecond), err)
 		w.Header().Set("X-Voice-Error", "tts_failed")
 		http.Error(w, `{"error":"tts_failed"}`, http.StatusBadGateway)
 		return
 	}
+	tTTS := time.Since(t2)
+	// 不记文本内容（隐私）；只记长度，便于判断是否"回复太长导致 TTS 慢"
+	log.Printf("voice: app=%s audio=%dKB asr=%v(%d字) llm=%v(%d字→清洗后%d字) tts=%v(%dKB) total=%v",
+		app, len(audio)/1024,
+		tASR.Round(time.Millisecond), utf8.RuneCountInString(text),
+		tLLM.Round(time.Millisecond), rawRunes, utf8.RuneCountInString(reply),
+		tTTS.Round(time.Millisecond), len(wav)/1024,
+		time.Since(t0).Round(time.Millisecond))
 
 	w.Header().Set("Content-Type", "audio/wav")
 	w.Header().Set("X-Voice-Transcript", text)

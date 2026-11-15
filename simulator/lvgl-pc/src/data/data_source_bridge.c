@@ -767,7 +767,7 @@ static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *p
                                       (const char *)pcm, (size_t)frames * 2,
                                       "X-Voice-Transcript", transcript, (size_t)transcript_len,
                                       "X-Voice-Reply", reply, (size_t)reply_len,
-                                      voice_tts_cb, NULL, 30000);
+                                      voice_tts_cb, NULL, 45000);
     DSLOG("voice POST done: status=%d dur=%lldms tr=%u rep=%u", status,
           DSNOW_MS() - t0, (unsigned)strlen(transcript), (unsigned)strlen(reply));
     if (status != 200) {
