@@ -17,6 +17,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_lv_adapter.h"
+#include "http_client.h"
 #include "hal/gpio_ll.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
@@ -66,12 +67,34 @@ static inline void display_unlock(void) { esp_lv_adapter_unlock(); }
  * 每 5s：①以 200ms 试锁 LVGL 判断显示锁是否被永久占用；
  * ②打印任务表（B=阻塞 R=就绪 S=挂起）定位谁在等谁。
  * 依赖 CONFIG_FREERTOS_USE_TRACE_FACILITY + STATS_FORMATTING_FUNCTIONS。 */
+/* 一次性连通性自检：GET /api/v1/bots（不需要用户操作就能验证
+ * 设备→Bridge 这条 HTTP 路径；语音链路卡 15s 超时时先看这个）。
+ * 注意任务栈要 ≥12KB：http_client.c 的 GET/POST 路径有 2~4KB 栈缓冲
+ *（曾用 6KB → 栈溢出踩坏堆，表现为 LVGL 任务里 time() 的 newlib 锁
+ * 断言 xQueueSemaphoreTake failed: uxItemSize == 0）。 */
+static void net_probe_once(void)
+{
+    /* 与语音请求同一条通道（data/http_client.c 的 BSD socket 实现） */
+    static char body[256];
+    size_t blen = 0;
+    int64_t t0 = esp_timer_get_time();
+    int st = http_get_bin(BRIDGE_HOST "/api/v1/bots", body, sizeof(body), &blen,
+                          5000);
+    ESP_LOGW(TAG, "net probe: status=%d body=%u dur=%lldms", st,
+             (unsigned)blen, (long long)((esp_timer_get_time() - t0) / 1000));
+}
+
 static void hang_probe_task(void *arg)
 {
     (void)arg;
     static char tbuf[1024];
+    bool net_done = false;
     for (int i = 1;; i++) {
         vTaskDelay(pdMS_TO_TICKS(5000));
+        if (!net_done && i >= 3) {
+            net_done = true;
+            net_probe_once();
+        }
         esp_err_t r = esp_lv_adapter_lock(200);
         ESP_LOGI(TAG, "probe#%d lvgl_lock=%s heap_int=%u", i,
                  r == ESP_OK ? "FREE" : "BUSY",
@@ -481,6 +504,18 @@ static void key_task(void *arg)
     }
 }
 
+/* GOT_IP 后补拉 Web 配置（ui_remote_config_refresh 会动 LVGL，需持锁） */
+static void remote_cfg_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(300)); /* 让 sta 连接稳定（DHCP 后立刻发首包偶发失败） */
+    display_lock();
+    ui_remote_config_refresh();
+    display_unlock();
+    ESP_LOGI(TAG, "remote config applied (theme/bg/keys)");
+    vTaskDelete(NULL);
+}
+
 /* ---- Wi-Fi：GOT_IP → SNTP 对时 ---- */
 static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -494,6 +529,13 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
         ESP_LOGI(TAG, "wifi got ip: " IPSTR, IP2STR(&evt->ip_info.ip));
         xEventGroupSetBits(g_ev, EV_NET_BIT);
+        /* 联网后才拉得到 Web 下发配置（主题/背景/按键）。必须用独立
+         * 大栈任务：http_client 单请求要 4KB 栈缓冲，事件回调栈只有 4KB。 */
+        static bool cfg_task_started;
+        if (!cfg_task_started) {
+            cfg_task_started = true;
+            xTaskCreate(remote_cfg_task, "cfg_fetch", 12288, NULL, 4, NULL);
+        }
     }
 }
 
@@ -512,12 +554,15 @@ static void net_task(void *arg)
     }
 }
 
-static void wifi_start(void)
+/* TCP/IP 栈 + 事件循环：必须在**任何 socket 调用之前**起来。
+ * 真机事故（2026-11-15）：UI 初始化会拉 Bridge 外观/按键配置，
+ * 那时栈还没起（原来栈初始化在 wifi_start 里，排在 UI 之后）→
+ * lwip assert "tcpip_send_msg_wait_sem: Invalid mbox" → 重启循环。
+ * Wi-Fi 关联仍留在 wifi_start（保持"UI 先于 Wi-Fi"的顺序约束）。 */
+static void net_stack_init(void)
 {
-    if (strlen(WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi");
-        return;
-    }
+    static bool done;
+    if (done) return;
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -527,6 +572,16 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
+    done = true;
+}
+
+static void wifi_start(void)
+{
+    if (strlen(WIFI_SSID) == 0) {
+        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi");
+        return;
+    }
+    net_stack_init();
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
@@ -581,13 +636,16 @@ void app_main(void)
      * 数据源在 ui_init 前即切 bridge：首屏读到的是「空」而非 mock
      * 演示数据（无配置 → 空态提示），联网后各页轮询拿真实数据；
      * 同任务切换也消除了原 GOT_IP 后跨任务改 g_impl 的竞态 */
+    /* 网络栈先起（UI 初始化会立刻拉 Bridge 配置） */
+    net_stack_init();
+
     heap_report("pre-display");
     if (display_start_custom() == NULL) {
         ESP_LOGE(TAG, "display_start_custom failed");
         return;
     }
     /* 临时：开机卡死探针（定位完删除） */
-    xTaskCreate(hang_probe_task, "hangprobe", 6144, NULL, 3, NULL);
+    xTaskCreate(hang_probe_task, "hangprobe", 12288, NULL, 3, NULL);
 
     heap_report("post-display");
 

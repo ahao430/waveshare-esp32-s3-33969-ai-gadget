@@ -12,6 +12,18 @@
 #include "data_source_internal.h"
 #include "http_client.h"
 
+/* 语音链路排障：请求发出/返回（含 HTTP 状态与耗时）必须留痕——
+ * 之前"按住说话没反应"只能看到状态机 15s 超时，看不到卡在哪一步 */
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#include "esp_timer.h"
+#define DSLOG(fmt, ...) ESP_LOGI("ds", fmt, ##__VA_ARGS__)
+#define DSNOW_MS() ((long long)(esp_timer_get_time() / 1000))
+#else
+#define DSLOG(fmt, ...) fprintf(stderr, "[ds] " fmt "\n", ##__VA_ARGS__)
+#define DSNOW_MS() 0LL
+#endif
+
 #define BRIDGE_TIMEOUT_MS 1500
 #define BRIDGE_BUF_SIZE   (64 * 1024)
 
@@ -749,11 +761,15 @@ static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *p
     } else {
         snprintf(app_url, sizeof(app_url), "%s", g_voice_url);
     }
+    DSLOG("voice POST %s bytes=%u", app_url, (unsigned)((size_t)frames * 2));
+    long long t0 = DSNOW_MS();
     int status = http_post_raw_stream(app_url, "audio/l16;rate=16000",
                                       (const char *)pcm, (size_t)frames * 2,
                                       "X-Voice-Transcript", transcript, (size_t)transcript_len,
                                       "X-Voice-Reply", reply, (size_t)reply_len,
                                       voice_tts_cb, NULL, 30000);
+    DSLOG("voice POST done: status=%d dur=%lldms tr=%u rep=%u", status,
+          DSNOW_MS() - t0, (unsigned)strlen(transcript), (unsigned)strlen(reply));
     if (status != 200) {
         snprintf(reply, (size_t)reply_len, "语音请求失败（HTTP %d）", status);
         return DS_VOICE_ERROR;

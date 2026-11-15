@@ -48,6 +48,9 @@ void ui_open_app(int app_id);
 void ui_monitor_build(lv_obj_t *screen, int app_id);
 void ui_weather_build(lv_obj_t *screen, int app_id); /* 天气（Open-Meteo） */
 void ui_weather_on_exit(void);
+/* 联网后补拉 Web 下发配置（主题/背景/按键）；main 在 GOT_IP 后调，
+ * 调用方需持显示锁（函数内部会改主题/按键映射） */
+void ui_remote_config_refresh(void);
 void ui_conversation_build(lv_obj_t *screen, int app_id);
 void ui_conversation_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);

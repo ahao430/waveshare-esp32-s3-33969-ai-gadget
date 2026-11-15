@@ -118,7 +118,7 @@ static const char *state_text(vs_state_t st)
 /* App 标识（与 Bridge 音色配置的 key 一致；未知返回 "chat"） */
 static const char *conv_app_key(int app_id)
 {
-    const app_def_t *def = app_manager_get(app_id);
+    const app_def_t *def = app_manager_find(app_id);
     return (def && def->key) ? def->key : "chat";
 }
 
@@ -126,11 +126,15 @@ static void *voice_worker(void *arg)
 {
     (void)arg;
     char transcript[192] = {0}, reply[CONV_TEXT] = {0};
+    CLOG("voice worker start: app=%s frames=%d", conv_app_key(g_app_id),
+         g_capture ? g_capture_frames : 0);
     ds_voice_interact(conv_app_key(g_app_id),
                       g_capture ? g_capture : (const int16_t *)"",
                       g_capture ? g_capture_frames : 0,
                       transcript, sizeof(transcript),
                       reply, sizeof(reply));
+    CLOG("voice worker done: transcript=%u reply=%u", (unsigned)strlen(transcript),
+         (unsigned)strlen(reply));
 
     /* 写入历史（transcript 作为用户气泡 + reply 作为助手气泡） */
     int id = g_app_id;
@@ -176,7 +180,8 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
         pthread_attr_t attr;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, 16 * 1024);
-        pthread_create(&tid, &attr, voice_worker, NULL);
+        int prc = pthread_create(&tid, &attr, voice_worker, NULL);
+        CLOG("voice worker spawn rc=%d frames=%d", prc, g_capture_frames);
         pthread_attr_destroy(&attr);
         pthread_detach(tid);
     }

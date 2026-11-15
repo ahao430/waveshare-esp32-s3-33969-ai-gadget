@@ -107,6 +107,14 @@ static char g_chat_provider[32] = "mock";
 
 void ds_init(const char *source, const char *bridge_url, const char *provider)
 {
+    /* 已初始化且本次没给参数 = 不要动（只补默认值语义）。
+     * 真机事故（2026-11-15）：main 先 ds_init("bridge", BRIDGE_HOST)，
+     * 随后 ui_init() 为了"从环境变量初始化"又调 ds_init(NULL,NULL,NULL)——
+     * 设备上没有 GADGET_DATA_SOURCE，直接回落 mock，把 bridge 实现覆盖掉。
+     * 后果：语音走 mock 假数据（4ms 返回固定文本，ASR/LLM/TTS 全不执行）、
+     * 天气永远深圳、Web 下发配置不生效。 */
+    if (!source && !bridge_url && !provider && g_impl) return;
+
     /* 聊天 provider 默认值：GADGET_CHAT_PROVIDER（bridge 模式有意义） */
     if (getenv("GADGET_CHAT_PROVIDER") && getenv("GADGET_CHAT_PROVIDER")[0]) {
         snprintf(g_chat_provider, sizeof(g_chat_provider), "%s",

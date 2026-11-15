@@ -269,9 +269,13 @@ static int http_request(const char *method, const char *url, const char *json_bo
     char buf[4096];
     ssize_t n;
     while (total < out_len - 1 && (n = read(fd, buf, sizeof(buf))) > 0) {
-        if (total + (size_t)n >= out_len) break;
-        memcpy(out + total, buf, (size_t)n);
-        total += (size_t)n;
+        /* 只拷调用方缓冲装得下的部分：原来是"整块装不下就丢弃"，
+         * 首包 > out_len 时 total=0 → 误判 -6（响应非 HTTP） */
+        size_t take = (size_t)n;
+        if (total + take > out_len - 1) take = out_len - 1 - total;
+        memcpy(out + total, buf, take);
+        total += take;
+        if (take < (size_t)n) break;
     }
     close(fd);
     out[total] = '\0';

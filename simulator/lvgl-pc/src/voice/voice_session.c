@@ -267,8 +267,11 @@ void vs_tick(void)
                 vs_notify_engine_done();
             }
         } else {
-            /* 引擎模式：等 vs_notify_engine_done；超时兜底 15s */
-            if (in_state >= 15000) {
+            /* 引擎模式：等 vs_notify_engine_done；超时兜底 40s
+             * （HTTP 客户端 30s + Bridge 侧 ASR/LLM/TTS 实测 ~25s；
+             * 原 15s 会把成功但慢的回复丢掉——状态已回落 IDLE，
+             * worker 的结果被 poll 判掉，表现为"说完没反应"） */
+            if (in_state >= 40000) {
                 set_state(VS_ERROR, "engine_timeout");
             }
         }

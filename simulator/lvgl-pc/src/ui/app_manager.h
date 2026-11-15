@@ -26,6 +26,7 @@ bool app_manager_register(const app_def_t *def);
 
 int app_manager_count(void);
 const app_def_t *app_manager_get(int idx); /* 按注册序取；越界返回 NULL */
+const app_def_t *app_manager_find(int app_id); /* 按 app id（枚举）查；无则 NULL */
 
 /* 设置常驻 Home 屏幕（Launcher），back 的目的地 */
 void app_manager_set_home(lv_obj_t *home);

@@ -21,7 +21,37 @@
 
 /* ---------------- 公共入口 ---------------- */
 
+/* 启动阶段留痕：UI 构建路径上任何一步炸栈/死机都要能定位到步骤 */
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define UILOG(fmt, ...) ESP_LOGI("ui", fmt, ##__VA_ARGS__)
+#else
+#define UILOG(fmt, ...) ((void)0)
+#endif
+
 static void register_apps(void);
+/* 联网后补拉 Web 下发配置（外观主题/自定义背景/按键映射）。
+ * 由 main 在 IP_EVENT_STA_GOT_IP 之后用独立任务调用：
+ *  - 不能在事件回调里跑（回调栈 4KB，http_client 需要 4KB 缓冲）
+ *  - 不能在 ui_init 里跑（Wi-Fi 还没起，请求必失败）
+ * 调用方负责保证已持显示锁（ui_lock）——本函数会改主题/按键映射。 */
+void ui_remote_config_refresh(void)
+{
+    int web_theme = -1;
+    bool need_theme = false;
+    if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
+        ds_config_set_theme(web_theme);
+        need_theme = true;
+    }
+    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+
+    char kp[8], kb[8], k3s[8], k3l[8];
+    if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
+        ui_keys_apply_config(kp, kb, k3s, k3l);
+    }
+    if (need_theme) ui_theme_select(ds_state()->theme_idx);
+}
+
 static void voice_demo_begin_cb(lv_timer_t *t);
 static void voice_demo_end_cb(lv_timer_t *t);
 static void quota_on_exit(void);
@@ -34,32 +64,42 @@ void ui_init(void)
 {
     /* 数据源先于 UI 初始化：环境变量决定 mock/bridge（ADR-001） */
     ds_init(NULL, NULL, NULL);
+    UILOG("init: ds ready (%s)", ds_source_name());
 
-    /* 主题先于任何 UI 构建（UI_ACCENT 变量生效）；bridge 模式顺手
-     * 拉一次自定义背景缓存（无则回退内置波浪） */
-    int web_theme = -1;
-    if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
-        ds_config_set_theme(web_theme);
-    }
-    ui_theme_select(ds_state()->theme_idx);
-    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
-
-    /* Web 下发按键映射（三键短按 + KEY3 长按；长按电源/BOOT 固件固定） */
+    /* 主题先于任何 UI 构建（UI_ACCENT 变量生效）。
+     * 真机：此时 Wi-Fi 还没起，Bridge 拉不到，且 main 任务栈只有 3.5KB
+     *（http_client 要 4KB 缓冲 → 栈溢出重启）。远端配置改由 main 在
+     * GOT_IP 后调 ui_remote_config_refresh()（独立大栈任务）补齐。
+     * 模拟器没有 Wi-Fi 事件，就地拉。 */
+#ifndef ESP_PLATFORM
     {
+        int web_theme = -1;
+        if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
+            ds_config_set_theme(web_theme);
+        }
+        (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
         char kp[8], kb[8], k3s[8], k3l[8];
         if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
             ui_keys_apply_config(kp, kb, k3s, k3l);
         }
     }
+#endif
+    UILOG("init: theme select");
+    ui_theme_select(ds_state()->theme_idx);
+    UILOG("init: theme ok");
 
     /* 顺序敏感：先注册 App（Launcher 网格按注册表构建），再建桌面 */
     register_apps();
+    UILOG("init: launcher build");
     lv_obj_t *home = ui_launcher_screen();
+    UILOG("init: launcher built");
     app_manager_set_home(home);
     lv_screen_load(home);
+    UILOG("init: screen loaded");
 
     /* 全局状态栏 overlay（PLAN §13.3） */
     ui_statusbar_init();
+    UILOG("init: statusbar ok");
 
     /* 演示/测试钩子：GADGET_DEMO_APP=<id> 启动即进入指定 App */
     const char *demo = getenv("GADGET_DEMO_APP");

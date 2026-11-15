@@ -26,6 +26,16 @@ const app_def_t *app_manager_get(int idx)
     return &g_apps[idx];
 }
 
+const app_def_t *app_manager_find(int app_id)
+{
+    /* 按 id 查（ui_app_id 是枚举值，不等于注册序号——曾用 get(app_id)
+     * 取到隔壁 App 的 key：AstrBot(4) → 注册序 4 = ZCode） */
+    for (int i = 0; i < g_count; i++) {
+        if (g_apps[i].id == app_id) return &g_apps[i];
+    }
+    return NULL;
+}
+
 void app_manager_set_home(lv_obj_t *home) { g_home = home; }
 
 static void exit_current_app_logic(void)
