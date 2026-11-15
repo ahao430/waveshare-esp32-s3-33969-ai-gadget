@@ -21,13 +21,13 @@
  * flash_companion.sh 烧写 @0xC10000）。运行时直读分区到 PSRAM 帧
  * 缓冲，lv_image 原生 RGB565A8 零解码（图标嵌入同思路，但帧多且大，
  * app 分区装不下 → 独立数据分区）。
- * blob 布局见 gen_companion_bin.sh：CMP1 + count + entry[32B]* + frames */
+ * blob 布局见 gen_companion_bin.sh：CMP1 + count + entry[44B]* + frames */
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_partition.h"
 
 typedef struct {
-    char key[16];
+    char key[24]; /* 16 字节放不下 "bigfish/thinking"（见 gen_companion_bin.sh） */
     uint32_t w, h, frames, fbytes, offset;
 } ast_ent_t;
 
@@ -169,7 +169,7 @@ static void apply_geometry(int app_id, lv_obj_t *img)
         lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 96);
         break;
     case UI_APP_XIAOZHI: lv_obj_set_size(img, 132, 117); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 92); break;
-    case UI_APP_MUSE:  lv_obj_set_size(img, 150, 134); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 80); break;
+    case UI_APP_MUSE:  lv_obj_set_size(img, 140, 140); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 78); break;
     }
 }
 #else
@@ -185,10 +185,9 @@ static void apply_geometry(int app_id, lv_obj_t *img)
         lv_obj_set_size(img, 220, 195);
         lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 92);
         break;
-    case UI_APP_MUSE: /* 439×391 → 150 */
-        lv_obj_set_size(img, 150, 150);
-        lv_image_set_scale(img, (256 * 150) / 439);
-        lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 80);
+    case UI_APP_MUSE: /* 源帧已是 140×140（scripts/gen_muse_avatar.py） */
+        lv_obj_set_size(img, 140, 140);
+        lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 78);
         break;
     }
 }

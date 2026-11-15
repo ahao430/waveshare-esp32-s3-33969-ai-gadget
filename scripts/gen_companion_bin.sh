@@ -4,12 +4,14 @@
 # 模拟器直接读 assets/companions/<dir>/frame_NN.png（文件系统）；
 # 真机没有文件系统，本脚本把帧序列打包成 RGB565A8 原生数组blob：
 #   [magic "CMP1"][u32 条目数]
-#   条目×N（32B）: key[16] u32 w h frames frame_bytes offset
+#   条目×N（44B）: key[24] u32 w h frames frame_bytes offset
+#   （key 24 字节：16 字节放不下 "bigfish/thinking"——曾被截成
+#     "bigfish/thinkin"，strncmp 永不匹配，thinking/speaking 一直退化成 idle）
 #   帧数据：RGB565 平面 (w*h*2) + A8 平面 (w*h)——LVGL 原生格式零解码
 # 帧数/尺寸预算（assets 分区 2.5MB）：
 #   bigfish 三动作 200×114（源 144×82 离线 LANCZOS 放大）×12 帧 ≈ 2.4MB
 #   xiaozhi/wave  132×117（0.6 缩）×10 帧 ≈ 0.46MB
-#   muse/idle     150×134（0.34 缩）×10 帧 ≈ 0.60MB
+#   muse/idle     140×140（官方 jollybot）×12 帧 ≈ 0.69MB
 # 烧写：scripts/flash_companion.sh（0xC10000）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,7 +32,8 @@ SPECS = [
     ("bigfish/thinking", 200, 114, 12),
     ("bigfish/speaking", 200, 114, 12),
     ("xiaozhi/wave",     132, 117, 10),
-    ("muse/idle",        150, 134, 10),
+    # Muse 用官方 jollybot 形象（scripts/gen_muse_avatar.py 生成源帧）
+    ("muse/idle",        140, 140, 12),
 ]
 
 def rgb565a8(im):
@@ -52,7 +55,7 @@ def rgb565a8(im):
     return bytes(plane) + bytes(alpha)
 
 entries, blobs, offset = [], b"", 0
-hdr_len = 8 + 32 * len(SPECS)
+hdr_len = 8 + 44 * len(SPECS)
 for key, tw, th, keep in SPECS:
     files = sorted(glob.glob(f"{root}/{key}/frame_*.png"))
     if not files:
@@ -67,8 +70,8 @@ for key, tw, th, keep in SPECS:
         frames += rgb565a8(im)
     fbytes = tw * th * 3
     assert len(frames) == fbytes * keep, (key, len(frames), fbytes * keep)
-    ekey = key.encode()[:15]
-    entries.append(struct.pack("<16sIIIII", ekey, tw, th, keep, fbytes,
+    ekey = key.encode()[:23]
+    entries.append(struct.pack("<24sIIIII", ekey, tw, th, keep, fbytes,
                                hdr_len + offset))
     blobs += frames
     offset += len(frames)
