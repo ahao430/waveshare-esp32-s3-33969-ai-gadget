@@ -38,6 +38,7 @@
 /* PTT 事件留痕：按下/抬起/丢失任何一个没到，表现都是"按住说话没反应"
  *（无 HTTP 请求、无报错），日志是唯一判据。 */
 #ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -58,6 +59,62 @@ typedef struct {
 /* 每 App 独立历史 */
 static conv_msg_t g_hist[UI_APP_COUNT][CONV_MSGS];
 static int g_hist_n[UI_APP_COUNT];
+
+/* AstrBot 多实例：聊天记录再按机器人实例分槽（用户 2026-11-16 反馈
+ * "不同机器人对话历史共享"）。每 App 4.6KB×12 条放静态数组会把内部
+ * RAM 吃穿，8 实例 ×12 条 ≈37KB 放 PSRAM；分配失败回落共享槽。
+ * 服务器侧会话本就按实例隔离（Bridge username/session 每实例独立）。 */
+#define BOT_HIST_BOTS 8
+static conv_msg_t *s_bot_hist;               /* 惰性分配（PSRAM/PC 堆） */
+static int s_bot_hist_n[BOT_HIST_BOTS];
+static char s_bot_hist_id[BOT_HIST_BOTS][64];
+static char g_active_bot_id[64];             /* 当前机器人实例 id（sync/切换时更新） */
+
+static void bot_hist_ensure(void)
+{
+    if (s_bot_hist) return;
+    size_t bytes = (size_t)BOT_HIST_BOTS * CONV_MSGS * sizeof(conv_msg_t);
+#ifdef ESP_PLATFORM
+    s_bot_hist = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+#else
+    s_bot_hist = malloc(bytes);
+#endif
+    if (s_bot_hist) memset(s_bot_hist, 0, bytes);
+}
+
+static int bot_hist_slot(const char *bot_id)
+{
+    if (!bot_id || !bot_id[0]) return -1;
+    for (int i = 0; i < BOT_HIST_BOTS; i++) {
+        if (s_bot_hist_id[i][0] == '\0') {
+            snprintf(s_bot_hist_id[i], sizeof(s_bot_hist_id[i]), "%s", bot_id);
+            s_bot_hist_n[i] = 0;
+            return i;
+        }
+        if (strcmp(s_bot_hist_id[i], bot_id) == 0) return i;
+    }
+    return -1; /* 槽满：回落共享历史 */
+}
+
+/* 取当前 App 的历史槽：chat App 优先按机器人实例；其余按 App。
+ * h/n 永不为 NULL（回落 g_hist）。 */
+static void conv_hist_slot(int app_id, conv_msg_t **h, int **n)
+{
+    *h = NULL;
+    *n = NULL;
+    if (app_id < 0 || app_id >= UI_APP_COUNT) return;
+    if (app_id == UI_APP_CHAT) {
+        bot_hist_ensure();
+        int slot = bot_hist_slot(g_active_bot_id);
+        if (slot >= 0 && s_bot_hist) {
+            *h = &s_bot_hist[(size_t)slot * CONV_MSGS];
+            *n = &s_bot_hist_n[slot];
+            return;
+        }
+    }
+    *h = g_hist[app_id];
+    *n = &g_hist_n[app_id];
+}
 
 /* 页面控件（单前台） */
 static lv_obj_t *g_status_lbl;
@@ -174,21 +231,24 @@ static void voice_work_once(void)
     CLOG("voice worker stack free=%u", (unsigned)uxTaskGetStackHighWaterMark(NULL));
 #endif
 
-    /* 写入历史（transcript 作为用户气泡 + reply 作为助手气泡） */
-    int id = g_app_id;
-    if (id >= 0 && id < UI_APP_COUNT) {
-        conv_msg_t *h = g_hist[id];
-        int *n = &g_hist_n[id];
-        if (*n >= CONV_MSGS - 1) {
-            memmove(h, h + 2, sizeof(conv_msg_t) * (*n - 2));
-            *n -= 2;
+    /* 写入历史（transcript 作为用户气泡 + reply 作为助手气泡）。
+     * chat App 按当前机器人实例分槽（多实例记录互不混） */
+    {
+        conv_msg_t *h = NULL;
+        int *n = NULL;
+        conv_hist_slot(g_app_id, &h, &n);
+        if (h && n) {
+            if (*n >= CONV_MSGS - 1) {
+                memmove(h, h + 2, sizeof(conv_msg_t) * (*n - 2));
+                *n -= 2;
+            }
+            snprintf(h[*n].role, sizeof(h[*n].role), "user");
+            snprintf(h[*n].text, sizeof(h[*n].text), "%.127s", transcript);
+            (*n)++;
+            strcpy(h[*n].role, "assistant");
+            snprintf(h[*n].text, sizeof(h[*n].text), "%.*s", CONV_TEXT - 1, reply);
+            (*n)++;
         }
-        snprintf(h[*n].role, sizeof(h[*n].role), "user");
-        snprintf(h[*n].text, sizeof(h[*n].text), "%.127s", transcript);
-        (*n)++;
-        strcpy(h[*n].role, "assistant");
-        snprintf(h[*n].text, sizeof(h[*n].text), "%.*s", CONV_TEXT - 1, reply);
-        (*n)++;
     }
 
     pthread_mutex_lock(&g_voice_mu);
@@ -532,12 +592,17 @@ static void hist_open_cb(lv_event_t *e)
     lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_pad_row(list, 8, 0);
 
-    conv_msg_t *h = g_hist[g_app_id];
-    int n = g_hist_n[g_app_id];
-    for (int i = 0; i < n; i++) {
+    conv_msg_t *h = NULL;
+    int *np = NULL;
+    conv_hist_slot(g_app_id, &h, &np);
+    if (!h || !np) { /* 防御：不该发生 */
+        h = g_hist[g_app_id];
+        np = &g_hist_n[g_app_id];
+    }
+    for (int i = 0; i < *np; i++) {
         add_bubble(list, h[i].role, h[i].text);
     }
-    if (n == 0) {
+    if (*np == 0) {
         lv_obj_t *empty = ui_label(list, "还没有对话记录", &lv_font_cn_14, UI_TEXT_DIM);
         lv_obj_center(empty);
     }
@@ -559,16 +624,25 @@ static void hist_open_cb(lv_event_t *e)
     ui_style_card(wipe);
     lv_obj_set_style_radius(wipe, 16, 0);
     lv_obj_add_event_cb(wipe, hist_wipe_cb, LV_EVENT_CLICKED, mask);
-    lv_obj_t *wl = ui_label(wipe, LV_SYMBOL_TRASH "  清空", &lv_font_cn_16, UI_TEXT_DIM);
+    /* chat App：清记录 + 清服务端记忆（当前机器人）＝"新对话"；
+     * 其余 App 只清本地记录（不碰 AstrBot 会话） */
+    lv_obj_t *wl = ui_label(wipe, g_app_id == UI_APP_CHAT
+                                ? LV_SYMBOL_REFRESH "  新对话"
+                                : LV_SYMBOL_TRASH "  清空",
+                            &lv_font_cn_16, UI_TEXT_DIM);
     lv_obj_center(wl);
 }
 
-/* 云端会话重置线程：HTTP 别卡 LVGL 线程（栈同 voice worker 预算） */
+/* "新对话"重置线程：HTTP 别卡 LVGL 线程（栈同 voice worker 预算）。
+ * arg 指向静态缓冲 s_reset_bot：空串=全部实例；否则只清该机器人 */
+static char s_reset_bot[64];
 static void *chat_reset_worker(void *arg)
 {
     (void)arg;
-    int rc = ds_chat_reset();
-    CLOG("cloud session reset rc=%d", rc);
+    char bot[64];
+    snprintf(bot, sizeof(bot), "%s", s_reset_bot);
+    int rc = ds_chat_reset(bot);
+    CLOG("cloud session reset bot=%s rc=%d", bot, rc);
     return NULL;
 }
 
@@ -601,6 +675,7 @@ static void *bot_pick_apply_worker(void *arg)
     int rc = ds_chat_set_active(id);
     ui_lock();
     if (rc == 0) {
+        snprintf(g_active_bot_id, sizeof(g_active_bot_id), "%s", id);
         snprintf(g_bot_label, sizeof(g_bot_label), "%s", label);
         if (g_title_lbl) lv_label_set_text(g_title_lbl, g_bot_label);
         if (g_status_lbl) lv_label_set_text(g_status_lbl, "已切换机器人");
@@ -732,6 +807,7 @@ static void *bot_sync_worker(void *arg)
     (void)arg;
     char cur[64] = {0};
     if (ds_chat_active_id(cur, sizeof(cur)) != 0 || cur[0] == '\0') return NULL;
+    snprintf(g_active_bot_id, sizeof(g_active_bot_id), "%s", cur);
 
     char list[512];
     if (ds_chat_bots(list, sizeof(list)) != 0) return NULL;
@@ -774,20 +850,43 @@ static void title_pick_cb(lv_event_t *e)
     bot_picker_start();
 }
 
-/* 清空当前 App 对话历史（历史弹窗里的"清空"按钮）：
- * 本地气泡 + 云端记忆（AstrBot session 轮换，AI 不再带记忆）一起清 */
+/* 历史弹窗底部按钮：chat App="新对话"（清当前机器人本地气泡 + 服务端
+ * 记忆——Bridge 轮换该实例 username/session）；其余 App="清空"（只清
+ * 本地气泡，不碰 AstrBot 会话——之前这里无差别 reset，把 Muse 小智的
+ * 清空也变成了重置全部机器人，顺手修掉）。 */
 static void hist_wipe_cb(lv_event_t *e)
 {
     lv_obj_t *mask = lv_event_get_user_data(e);
     int id = g_app_id;
-    if (id >= 0 && id < UI_APP_COUNT) {
-        g_hist_n[id] = 0;
-        memset(g_hist[id], 0, sizeof(g_hist[id]));
+    bool is_chat = (id == UI_APP_CHAT);
+
+    conv_msg_t *h = NULL;
+    int *np = NULL;
+    conv_hist_slot(id, &h, &np);
+    if (h && np) {
+        *np = 0;
+        size_t bytes = (size_t)CONV_MSGS * sizeof(conv_msg_t);
+        if (h >= s_bot_hist &&
+            h < s_bot_hist + (size_t)BOT_HIST_BOTS * CONV_MSGS) {
+            memset(h, 0, bytes); /* PSRAM 分槽：只清本槽 */
+            for (int i = 0; i < BOT_HIST_BOTS; i++) {
+                if (&s_bot_hist[(size_t)i * CONV_MSGS] == h) {
+                    s_bot_hist_id[i][0] = '\0'; /* 槽位可复用 */
+                }
+            }
+        } else if (id >= 0 && id < UI_APP_COUNT) {
+            memset(g_hist[id], 0, bytes);
+        }
     }
     if (mask) lv_obj_delete(mask); /* 直接销毁弹窗（hist_close_cb 走 event 取参，不复用） */
     if (g_reply_lbl) lv_label_set_text(g_reply_lbl, "");
 
-    (void)conv_thread_start(chat_reset_worker, NULL, 16 * 1024);
+    if (is_chat) {
+        snprintf(s_reset_bot, sizeof(s_reset_bot), "%s", g_active_bot_id);
+        (void)conv_thread_start(chat_reset_worker, NULL, 16 * 1024);
+    } else {
+        if (g_status_lbl) lv_label_set_text(g_status_lbl, "已清空");
+    }
 }
 
 /* ---------------- 页面构建 ---------------- */

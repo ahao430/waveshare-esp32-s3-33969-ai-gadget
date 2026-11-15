@@ -27,4 +27,11 @@ battery_status_t power_manager_snapshot(void);
 /* 订阅状态变化（状态突变或越阈时回调；在定时器任务上下文，勿阻塞） */
 void power_manager_subscribe(power_manager_cb_t cb, void *user);
 
+/* ---- PWR 键（事件位定义见 battery.h 的 BATT_KEY_*）----
+ * long 事件 → 优雅关机（灭背光后 software power-off）；
+ * 10s 硬关兜底由 PMU 硬件完成（battery_keys_init 配置）。 */
+esp_err_t power_manager_keys_init(void);
+unsigned power_manager_poll_key(void);   /* ~100ms 轮询一次 */
+esp_err_t power_manager_power_off(void); /* 软件关机（关机前自行停外设/灭屏） */
+
 #endif /* POWER_MANAGER_POWER_MANAGER_H */

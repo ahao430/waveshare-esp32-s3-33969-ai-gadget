@@ -522,23 +522,63 @@ static void IRAM_ATTR key_gpio_isr(void *arg)
 static int s_key3_state; /* 0=空闲 1=按下未定 2=长按中 */
 static int64_t s_key3_down_us;
 
+/* PWR 键长按 → 优雅关机：灭屏给反馈 → 软件关机（REG10 bit0）。
+ * PMU 10s 硬关兜底（battery_keys_init 配置）；软关后 USB 在位时
+ * PMU 可能立即重新上电（VBUS 触发开机）——属硬件行为，拔线即可。 */
+static void pwr_graceful_shutdown(void)
+{
+    ESP_LOGW(TAG, "PWR long-press: graceful shutdown");
+    display_lock();
+    bsp_display_brightness_set(0);
+    display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(250)); /* 让灭屏指令走完 QSPI */
+
+    esp_err_t err = power_manager_power_off();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "software power-off failed: %s (10s hard-off fallback)",
+                 esp_err_to_name(err));
+    }
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    /* 还在跑（软关失败/USB 在位被重新上电）：恢复亮度继续运行 */
+    ESP_LOGW(TAG, "still alive after power-off cmd (USB attached?) - resume");
+    display_lock();
+    bsp_display_brightness_set(g_user_brightness);
+    display_unlock();
+}
+
+#define PWR_POLL_MS 100
 static void key_task(void *arg)
 {
     (void)arg;
     for (;;) {
-        /* 按下未定时按剩余毫秒等待（到点即判长按），其余无限等 */
-        TickType_t wait = portMAX_DELAY;
+        /* 按下未定时按剩余毫秒等待（到点即判长按）；其余最多等
+         * PWR_POLL_MS——PWR 键走 PMU 状态寄存器轮询，没有 GPIO 中断 */
+        TickType_t wait = pdMS_TO_TICKS(PWR_POLL_MS);
         if (s_key3_state == 1) {
             int64_t remain_us = KEY3_LONG_MS * 1000LL -
                                 (esp_timer_get_time() - s_key3_down_us);
             if (remain_us <= 0) wait = 0;
-            else wait = (TickType_t)(remain_us / 1000 / portTICK_PERIOD_MS) + 1;
+            else {
+                TickType_t w = (TickType_t)(remain_us / 1000 / portTICK_PERIOD_MS) + 1;
+                if (w < wait) wait = w;
+            }
         }
         EventBits_t bits = xEventGroupWaitBits(
             g_ev, EV_KEY3_BIT | EV_KEY3_REL_BIT | EV_BOOT_BIT,
             pdTRUE, pdFALSE, wait);
         g_key_activity_us = esp_timer_get_time();
         int64_t now = esp_timer_get_time();
+
+        /* PWR 键（AXP2101 PWRON，状态位轮询；长按=优雅关机） */
+        unsigned pwr = power_manager_poll_key();
+        if (pwr & BATT_KEY_LONG) {
+            pwr_graceful_shutdown();
+            continue;
+        }
+        if (pwr & BATT_KEY_CLICK) {
+            g_key_activity_us = esp_timer_get_time(); /* 活动记账 */
+            ESP_LOGI(TAG, "PWR short press (no-op for now)");
+        }
 
         if (bits & EV_KEY3_BIT) {
             s_key3_state = 1;
@@ -680,6 +720,12 @@ void app_main(void)
     esp_err_t pm_err = power_manager_init(bsp_i2c_get_handle());
     if (pm_err != ESP_OK) {
         ESP_LOGW(TAG, "power_manager unavailable: %s", esp_err_to_name(pm_err));
+    } else {
+        /* PWR 键：长按优雅关机 + 10s 硬关兜底（2026-11-16） */
+        esp_err_t key_err = power_manager_keys_init();
+        if (key_err != ESP_OK) {
+            ESP_LOGW(TAG, "PWR key arm failed: %s", esp_err_to_name(key_err));
+        }
     }
     probe_rtc();
     probe_pmu_raw();

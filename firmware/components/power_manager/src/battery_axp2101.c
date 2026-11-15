@@ -81,3 +81,90 @@ esp_err_t battery_get_status(battery_status_t *status)
              status->usb_connected, status->battery_present, status->charging);
     return ESP_OK;
 }
+
+/* ---- PWR 键（2026-11-16，用户反馈"长按电源键关机有点问题"）----
+ * 之前固件从未配置 PWR 键，行为完全取决于 PMU 出厂默认——有的芯片
+ * 16s 关机位出厂开着、长按关机使能与时长也不确定，不可预测。
+ * 寄存器语义照抄本板（waveshare_s3_216）实测过的 Muse SDK muse_pmu.c：
+ *   0x10 COMMON_CFG：bit2=PWRON 16s 关机（防御性关闭，datasheet 默认关
+ *                    但有芯片出厂开）；bit0=软关机命令（自清）；bit1=复位
+ *                    命令——读改写时绝不能把 1 写进 [1:0]
+ *   0x22 PWROFF_EN：bit1=长按过关断阈值即硬关
+ *   0x27 IRQ_LEVEL：bit[3:2]=长按至关机时间（11=10s，最长的兜底）
+ *   0x41 INTEN2 / 0x49 INTSTS2：bit0=释放沿 bit1=按下沿 bit2=长按
+ *                    bit3=短按；状态位写 1 清零（IRQ 引脚未接也可轮询） */
+#define REG_COMMON_CFG 0x10
+#define REG_PWROFF_EN  0x22
+#define REG_IRQ_LEVEL  0x27
+#define REG_INTEN2     0x41
+#define REG_INTSTS2    0x49
+#define PKEY_ALL       0x0Fu
+
+static esp_err_t write_reg(uint8_t reg, uint8_t val)
+{
+    i2c_device_config_t dev = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = AXP2101_I2C_ADDR,
+        .scl_speed_hz = 100000,
+    };
+    i2c_master_dev_handle_t handle;
+    esp_err_t err = i2c_master_bus_add_device(g_bus, &dev, &handle);
+    if (err != ESP_OK) return err;
+
+    uint8_t buf[2] = { reg, val };
+    err = i2c_master_transmit(handle, buf, sizeof(buf), -1);
+    i2c_master_bus_rm_device(handle);
+    return err;
+}
+
+static esp_err_t update_reg(uint8_t reg, uint8_t mask, uint8_t set)
+{
+    uint8_t v = 0;
+    esp_err_t err = read_regs(reg, &v, 1);
+    if (err != ESP_OK) return err;
+    return write_reg(reg, (uint8_t)((v & (uint8_t)~mask) | set));
+}
+
+esp_err_t battery_keys_init(void)
+{
+    if (!g_present || g_bus == NULL) return ESP_ERR_NOT_SUPPORTED;
+
+    esp_err_t err;
+    /* 长按至关机 = 10s（最长时间，固件楔死时的硬兜底；正常关机走
+     * battery_power_off 的软件关机，比它早得多） */
+    if ((err = update_reg(REG_IRQ_LEVEL, 0x0C, 0x0C)) != ESP_OK) return err;
+    /* 长按过关断阈值即硬关（使能；配合上一条 = 长按 10s 硬关兜底） */
+    if ((err = update_reg(REG_PWROFF_EN, 0x02, 0x02)) != ESP_OK) return err;
+    /* 防御：关掉"PWRON 16s 关机"（有的芯片出厂开；bit1:0 是命令位，只清 bit2） */
+    if ((err = update_reg(REG_COMMON_CFG, 0x04, 0x00)) != ESP_OK) return err;
+    /* 键事件状态位使能 + 清历史挂起 */
+    if ((err = update_reg(REG_INTEN2, PKEY_ALL, PKEY_ALL)) != ESP_OK) return err;
+    if ((err = write_reg(REG_INTSTS2, PKEY_ALL)) != ESP_OK) return err;
+
+    ESP_LOGI(TAG, "PWR key armed: 10s hard-off fallback, events on");
+    return ESP_OK;
+}
+
+unsigned battery_poll_key(void)
+{
+    if (!g_present || g_bus == NULL) return 0;
+    uint8_t sts = 0;
+    if (read_regs(REG_INTSTS2, &sts, 1) != ESP_OK) return 0;
+    sts &= PKEY_ALL;
+    if (!sts) return 0;
+    (void)write_reg(REG_INTSTS2, sts); /* 写 1 清零 */
+
+    unsigned ev = 0;
+    if (sts & 0x02) ev |= BATT_KEY_PRESS;
+    if (sts & 0x01) ev |= BATT_KEY_RELEASE;
+    if (sts & 0x08) ev |= BATT_KEY_CLICK;
+    if (sts & 0x04) ev |= BATT_KEY_LONG;
+    return ev;
+}
+
+esp_err_t battery_power_off(void)
+{
+    if (!g_present || g_bus == NULL) return ESP_ERR_NOT_SUPPORTED;
+    /* 只写 bit0 软关机；bit1 是复位命令，绝不能带 1（muse_pmu 同款防御） */
+    return update_reg(REG_COMMON_CFG, 0x03, 0x01);
+}

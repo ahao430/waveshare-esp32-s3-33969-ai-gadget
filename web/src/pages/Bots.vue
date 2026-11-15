@@ -319,6 +319,18 @@ async function probe(id: string) {
     probingId.value = ''
   }
 }
+
+/* 新对话：轮换该实例的 username+session（服务端会话与用户记忆一并遗忘），
+ * 设备端聊天记录下次进入时自行清空。 */
+async function freshChat(b: BotInfo) {
+  if (!confirm(`和「${b.label}」开启新对话？该机器人的服务端记忆将被清除。`)) return
+  try {
+    await request(`/api/v1/chat/reset?bot=${encodeURIComponent(b.id)}`, { method: 'POST' })
+    say(false, `已开启新对话（「${b.label}」不再记得之前的内容）`)
+  } catch (e) {
+    say(true, `✗ ${e instanceof Error ? e.message : e}`)
+  }
+}
 </script>
 
 <template>
@@ -428,6 +440,7 @@ async function probe(id: string) {
             @click="previewTTS(b.id, b.tts_provider ?? '', b.tts_voice ?? '')"
           >{{ previewing === b.id ? '试听中…' : '试听' }}</button>
           <button class="btn-ghost !px-2 !py-1" :disabled="probingId !== ''" @click="probe(b.id)">测试</button>
+          <button class="btn-ghost !px-2 !py-1" title="清除该机器人的服务端对话记忆" @click="freshChat(b)">新对话</button>
           <button class="btn-ghost !px-2 !py-1" @click="editBot(b)">编辑</button>
           <button class="btn-ghost !text-err !px-2 !py-1" @click="removeBot(b)">删除</button>
         </div>

@@ -21,12 +21,11 @@ import (
 )
 
 // AstrBot 对话请求参数（2026-11-14 v1）：
-// username 固定 gadget 身份（stable app-controlled username，OpenAPI 要求）；
-// session_id 每实例稳定（机器人侧保持上下文记忆）；
-// "清空历史"（设备端/未来 Web 端）经 ResetBotSession 轮换 session id，
-// 等效 AstrBot 网页端的"新建会话"——旧会话数据留在服务端但不影响新会话。
+// username/session_id 每实例独立（见 astrbotIdentity——用户级记忆按
+// username 共享，不能全实例共用一个）；
+// "清空历史"（设备端/Web 端）经 ResetBotSession 轮换 username+session id，
+// 等效 AstrBot 网页端的"新建会话"——服务端会话与用户记忆一并遗忘。
 const (
-	astrbotUsername  = "gadget"
 	astrbotTimeout   = 120 * time.Second
 	astrbotMaxChunks = 16 << 20
 )
@@ -235,28 +234,89 @@ func lastUserContent(body []byte) string {
 // astrbotComplete 非流式：收齐 SSE 全文后返回（voice 链路用）。
 // botSessionID：bot 实例的当前 session id（稳定段 + 轮换代）。
 // 代数 bumped = 新会话 = 机器人无记忆。
+
+// SessionStore 会话轮换代的持久化（main 注入 storage.DB；nil=仅内存，
+// Bridge 重启会退回旧代——服务端旧记忆复活，仅测试场景可接受）。
+type SessionStore interface {
+	LoadSessionGens() (global uint64, perBot map[string]uint64, err error)
+	SaveSessionGens(global uint64, perBot map[string]uint64) error
+}
+
 var (
 	sessMu     sync.Mutex
 	sessBase   uint64                // 全局代：reset-all +1（覆盖未登记实例）
 	sessPerBot = map[string]uint64{} // 实例覆盖代（指定 bot 重置 +1）
+	sessStore  SessionStore          // 持久化；nil=内存态
+	sessLoaded bool
 )
+
+// SetSessionStore 注入轮换代持久化（必须在首次对话/重置前调用）。
+func SetSessionStore(s SessionStore) {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	sessStore = s
+}
+
+// sessEnsure 惰性加载持久化的代数（首次使用时）。
+func sessEnsure() {
+	if sessLoaded {
+		return
+	}
+	sessLoaded = true
+	if sessStore != nil {
+		if g, per, err := sessStore.LoadSessionGens(); err == nil {
+			sessBase = g
+			if per != nil {
+				sessPerBot = per
+			}
+		}
+	}
+}
+
+func sessGen(botID string) uint64 { return sessBase + sessPerBot[botID] }
+
+// astrbotIdentity 每实例独立的 (username, session_id)。
+//
+// AstrBot 会话键 = webchat:FriendMessage:webchat!{username}!{session_id}，
+// 用户级记忆/绑定按 username 共享——全实例共用一个 username 会把记忆
+// 串起来。因此 username 也按实例拆分；"新对话"轮换代同时换两者，
+// 连用户级长期记忆一并清空。
+func astrbotIdentity(botID string) (username, sessionID string) {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	sessEnsure()
+	gen := sessGen(botID)
+	if gen == 0 {
+		return "gadget-" + botID, fmt.Sprintf("gadget-bigfish-%s-0", botID)
+	}
+	return fmt.Sprintf("gadget-%s-r%d", botID, gen),
+		fmt.Sprintf("gadget-bigfish-%s-%d", botID, gen)
+}
 
 func botSessionID(botID string) string {
 	sessMu.Lock()
 	defer sessMu.Unlock()
-	return fmt.Sprintf("gadget-bigfish-%s-%d", botID, sessBase+sessPerBot[botID])
+	sessEnsure()
+	return fmt.Sprintf("gadget-bigfish-%s-%d", botID, sessGen(botID))
 }
 
-// ResetBotSession 轮换指定 bot（空=全部）的会话；返回受影响实例数。
+// ResetBotSession 轮换指定 bot（空=全部）的会话并持久化；返回受影响实例数。
 func ResetBotSession(botID string) int {
 	sessMu.Lock()
 	defer sessMu.Unlock()
+	sessEnsure()
 	if botID == "" {
 		sessBase++                       // 全局代：无需预知实例清单
 		sessPerBot = map[string]uint64{} // 覆盖清零，统一走全局代
-		return 1
+	} else {
+		sessPerBot[botID]++
 	}
-	sessPerBot[botID]++
+	if sessStore != nil {
+		// 持久化失败也要继续（内存代已生效；下次重启会退回——记日志即可）
+		if err := sessStore.SaveSessionGens(sessBase, sessPerBot); err != nil {
+			log.Printf("ai: persist session gens failed: %v", err)
+		}
+	}
 	return 1
 }
 
@@ -269,10 +329,11 @@ func astrbotPayload(message string, u Upstream) map[string]any {
 	if cfg == "" {
 		cfg = "default"
 	}
+	username, session := astrbotIdentity(u.ID)
 	p := map[string]any{
 		"message":          message,
-		"username":         astrbotUsername,
-		"session_id":       botSessionID(u.ID),
+		"username":         username,
+		"session_id":       session,
 		"config_id":        cfg,
 		"enable_streaming": true,
 	}

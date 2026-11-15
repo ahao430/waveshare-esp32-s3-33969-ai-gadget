@@ -47,7 +47,7 @@ static char g_provider[24];
 static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
-static int bridge_chat_reset(void);
+static int bridge_chat_reset(const char *bot_id);
 static int bridge_fetch_background(const char *save_path);
 static int bridge_fetch_launcher(char *out_csv, int cap, int *count);
 static int bridge_fetch_weather(ds_weather_t *out);
@@ -923,12 +923,18 @@ static void voice_tts_cb(const char *data, size_t len, void *user)
 }
 #endif
 
-/* 云端会话重置：POST /api/v1/chat/reset（Bridge 轮换 AstrBot session id） */
-static int bridge_chat_reset(void)
+/* 云端会话重置：POST /api/v1/chat/reset?bot=<id>（Bridge 轮换该实例的
+ * username+session id；bot 空=全部实例）。bot id 字符集（bot-<hex>）无需转义。 */
+static int bridge_chat_reset(const char *bot_id)
 {
     char buf[128];
-    DSLOG("chat reset POST %s", g_chat_reset_url);
-    int status = http_post_json(g_chat_reset_url, "{}", buf, sizeof(buf),
+    char url[384]; /* reset url(256) + ?bot=(5) + id(64) + 余量 */
+    if (bot_id && bot_id[0])
+        snprintf(url, sizeof(url), "%s?bot=%.64s", g_chat_reset_url, bot_id);
+    else
+        snprintf(url, sizeof(url), "%s", g_chat_reset_url);
+    DSLOG("chat reset POST %s", url);
+    int status = http_post_json(url, "{}", buf, sizeof(buf),
                                 BRIDGE_TIMEOUT_MS * 2);
     DSLOG("chat reset done: status=%d", status);
     return status == 200 ? 0 : -1;

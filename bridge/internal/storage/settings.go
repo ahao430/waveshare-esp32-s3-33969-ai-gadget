@@ -58,6 +58,10 @@ const (
 	// chat_active_bot：AstrBot 对话 App 的"当前机器人"实例 id（多实例
 	// 切换，设备端点标题切换/Web 设为默认都写这里；空/失效回落第一个）
 	SettingKeyChatActiveBot = "chat_active_bot"
+	// astrbot_sessions：AstrBot 会话轮换代 {"global":N,"bots":{"<id>":N}}。
+	// "新对话"= 轮换 username+session_id（AstrBot 服务端失忆）。必须持久
+	// 化——曾只存内存，Bridge 重启退回旧代 → 服务端旧记忆复活。
+	SettingKeyAstrbotSessions = "astrbot_sessions"
 )
 
 // SaveChatActiveBot 保存当前机器人实例 id（空串=清除，回落第一个）。
@@ -140,4 +144,33 @@ func (d *DB) SaveVoiceApps(m map[string]VoicePref) error {
 		return err
 	}
 	return d.SaveSetting(SettingKeyVoiceApps, string(raw))
+}
+
+// GetAstrbotSessionGens 读 AstrBot 会话轮换代（global + 每实例覆盖）。
+// 未配置返回 0/nil（首代，与历史行为一致）。
+func (d *DB) GetAstrbotSessionGens() (global uint64, perBot map[string]uint64) {
+	raw, err := d.GetSetting(SettingKeyAstrbotSessions)
+	if err != nil || raw == "" {
+		return 0, nil
+	}
+	var cfg struct {
+		Global uint64            `json:"global"`
+		Bots   map[string]uint64 `json:"bots"`
+	}
+	if json.Unmarshal([]byte(raw), &cfg) != nil {
+		return 0, nil
+	}
+	return cfg.Global, cfg.Bots
+}
+
+// SaveAstrbotSessionGens 覆盖写会话轮换代（ai 域经 SessionStore 调用）。
+func (d *DB) SaveAstrbotSessionGens(global uint64, perBot map[string]uint64) error {
+	raw, err := json.Marshal(map[string]any{
+		"global": global,
+		"bots":   perBot,
+	})
+	if err != nil {
+		return err
+	}
+	return d.SaveSetting(SettingKeyAstrbotSessions, string(raw))
 }

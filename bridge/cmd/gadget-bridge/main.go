@@ -217,6 +217,11 @@ func main() {
 		logger.Info("chat router = mock only (configure CHAT_UPSTREAM_<ID>=\"URL,KEY\" to enable real providers)")
 	}
 	chatRouter := ai.NewRouter(chatUpstreams, chatDefault)
+	// 会话轮换代持久化（"新对话"后 Bridge 重启不得退回旧代——否则
+	// 服务端旧记忆复活）
+	if db != nil {
+		ai.SetSessionStore(&sessionStoreDB{db: db})
+	}
 
 	// 语音引擎：真实 Interactor——智谱 GLM-ASR + ai.Router + Edge-TTS
 	//（raw-16k PCM 直出）。ASR Key 动态解析（env/加密凭据，与预热同语义）；
@@ -399,4 +404,16 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// sessionStoreDB 把 storage.DB 适配成 ai.SessionStore。
+type sessionStoreDB struct{ db *storage.DB }
+
+func (s *sessionStoreDB) LoadSessionGens() (uint64, map[string]uint64, error) {
+	g, per := s.db.GetAstrbotSessionGens()
+	return g, per, nil
+}
+
+func (s *sessionStoreDB) SaveSessionGens(g uint64, per map[string]uint64) error {
+	return s.db.SaveAstrbotSessionGens(g, per)
 }

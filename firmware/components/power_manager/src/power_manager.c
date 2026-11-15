@@ -100,3 +100,7 @@ esp_err_t power_manager_init(void *i2c_bus)
 
 /* 抑制未用告警（g_inited 留作后续 is_running 接口） */
 __attribute__((unused)) static bool pm_inited(void) { return g_inited; }
+
+esp_err_t power_manager_keys_init(void) { return battery_keys_init(); }
+unsigned power_manager_poll_key(void) { return battery_poll_key(); }
+esp_err_t power_manager_power_off(void) { return battery_power_off(); }
