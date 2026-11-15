@@ -67,6 +67,10 @@ void vs_set_reply(const char *text);
 /* 宿主主动告知播放完成（audio ops 非阻塞约定）。 */
 void vs_notify_play_done(void);
 
+/* 流式语音：首帧音频开始播放时由音频层调用 → Thinking 提前转 Speaking
+ * （不等 LLM 全文；播放结束仍由 vs_notify_play_done 收尾）。 */
+void vs_notify_audio_started(void);
+
 /* 主驱动：宿主定时器/主循环周期调用（建议 30~100ms）。
  * 推进 Thinking/Speaking 计时、驱动 mock 采集、触发 listener 回调。 */
 void vs_tick(void);

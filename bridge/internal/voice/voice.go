@@ -33,6 +33,11 @@ const (
 )
 
 // Interactor 是语音引擎抽象（mock 实现；真实 ASR/LLM/TTS 替换点）。
+// StreamingInteractor 可选能力：边生成边回调文本增量（语音流式链路）。
+type StreamingInteractor interface {
+	RespondStream(ctx context.Context, text string, onDelta func(string) error) error
+}
+
 type Interactor interface {
 	// Transcribe 语音→文本。
 	Transcribe(ctx context.Context, pcmL16 []byte) (string, error)
@@ -200,6 +205,11 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	app := r.URL.Query().Get("app")
 	if app == "" {
 		app = r.Header.Get("X-Voice-App")
+	}
+	// 流式：设备 ?stream=1 → 帧协议 + 边生成边合成（首声更早）
+	if r.URL.Query().Get("stream") == "1" {
+		h.ServeInteractStream(w, r, audio, app)
+		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()

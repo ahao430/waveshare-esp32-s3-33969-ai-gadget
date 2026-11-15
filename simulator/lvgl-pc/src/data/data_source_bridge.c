@@ -728,10 +728,118 @@ static int bridge_fetch_background(const char *save_path)
  * 超时 30s。 */
 #ifdef ESP_PLATFORM
 #include "voice/audio_esp32.h"
+
+/* 流式语音帧解析（协议见 bridge/internal/voice/stream.go）：
+ *   [u8 type][u32 LE len][payload]
+ *     type1 PCM（16k/16bit/mono）→ 写播放缓冲（攒够就开播）
+ *     type2 最终文本 → 设备字幕/历史
+ *     type3 错误文本
+ * 兼容旧 Bridge：首帧头不像帧（如 "RIFF"）就整体按裸 WAV 处理。 */
+enum { VF_UNKNOWN = 0, VF_FRAMED, VF_RAW };
+
+typedef struct {
+    int mode;
+    unsigned char hdr[5];
+    int hdr_n;
+    unsigned char *buf;
+    size_t cap, need, got;
+    int type;
+    char *reply;
+    int reply_cap;
+    /* 帧统计（POST 完成后打一行，真机排障用） */
+    unsigned pcm_frames, pcm_bytes, text_frames, err_frames;
+} vframe_t;
+
+static void vf_reset_frame(vframe_t *f)
+{
+    f->hdr_n = 0;
+    f->need = f->got = 0;
+    f->type = 0;
+}
+
+/* 状态机：hdr_n<5 = 凑帧头；hdr_n==5 且 got<need = 凑载荷（跨包续传）。
+ * 关键教训（2026-11-15 真机无声 bug）：一个 PCM 帧分几十个 chunk 到达，
+ * got/need 只能在"帧头刚凑满"那一步初始化——之前放在循环开头，每来
+ * 一个 chunk 就把 got 清零，帧永远凑不满 → 一帧音频都写不出去、文本
+ * 帧也解析不到（表现：rep=0、无语音无文字、播报状态秒退）。 */
+static void vf_feed(vframe_t *f, const char *data, size_t len)
+{
+    const unsigned char *p = (const unsigned char *)data;
+    while (len > 0) {
+        if (f->mode == VF_RAW) {
+            audio_esp32_tts_write((const char *)p, len);
+            return;
+        }
+        if (f->hdr_n < 5) {
+            while (f->hdr_n < 5 && len > 0) {
+                f->hdr[f->hdr_n++] = *p++;
+                len--;
+            }
+            if (f->hdr_n < 5) return; /* 头未凑满，等下一包 */
+
+            unsigned int need = (unsigned int)f->hdr[1] |
+                                ((unsigned int)f->hdr[2] << 8) |
+                                ((unsigned int)f->hdr[3] << 16) |
+                                ((unsigned int)f->hdr[4] << 24);
+            if (f->mode == VF_UNKNOWN) {
+                if (f->hdr[0] >= 1 && f->hdr[0] <= 3 && need <= (4u << 20)) {
+                    f->mode = VF_FRAMED;
+                    audio_esp32_tts_begin_stream();
+                } else {
+                    f->mode = VF_RAW; /* 旧版裸 WAV */
+                    audio_esp32_tts_write((const char *)f->hdr, 5);
+                    continue;
+                }
+            }
+            f->type = f->hdr[0];
+            f->need = need;
+            f->got = 0; /* 仅帧头刚凑满时初始化 */
+        }
+
+        if (f->need > 0) {
+            if (f->need > f->cap) {
+                unsigned char *nb = realloc(f->buf, f->need);
+                if (nb == NULL) {
+                    if (f->buf) free(f->buf);
+                    memset(f, 0, sizeof(*f)); /* 缓冲不可靠：丢弃本轮 */
+                    return;
+                }
+                f->buf = nb;
+                f->cap = f->need;
+            }
+            size_t rem = f->need - f->got;
+            size_t take = rem < len ? rem : len;
+            memcpy(f->buf + f->got, p, take);
+            f->got += take;
+            p += take;
+            len -= take;
+        }
+        if (f->got < f->need) return; /* 载荷未凑满，等下一包 */
+
+        if (f->type == 1 && f->need > 0) {
+            f->pcm_frames++;
+            f->pcm_bytes += (unsigned)f->need;
+            audio_esp32_tts_write_pcm((const char *)f->buf, f->need);
+        } else if (f->type == 2 && f->reply && f->reply_cap > 1) {
+            f->text_frames++;
+            size_t n = f->need < (size_t)(f->reply_cap - 1) ? f->need
+                                                            : (size_t)(f->reply_cap - 1);
+            memcpy(f->reply, f->buf, n);
+            f->reply[n] = '\0';
+        } else if (f->type == 3 && f->reply && f->reply_cap > 1) {
+            f->err_frames++;
+            size_t n = f->need < (size_t)(f->reply_cap - 1) ? f->need
+                                                            : (size_t)(f->reply_cap - 1);
+            snprintf(f->reply, (size_t)f->reply_cap, "语音请求失败：%.*s", (int)n,
+                     (const char *)f->buf);
+        }
+        vf_reset_frame(f);
+    }
+}
+
 static void voice_tts_cb(const char *data, size_t len, void *user)
 {
-    (void)user;
-    audio_esp32_tts_write(data, len);
+    vf_feed((vframe_t *)user, data, len);
 }
 #else
 static void voice_tts_cb(const char *data, size_t len, void *user)
@@ -754,22 +862,44 @@ static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *p
     audio_esp32_tts_reset();
 #endif
     /* App 标识透传（Bridge 按 App 选 TTS 音色）：?app=chat|xiaozhi|muse|zcode
-     * 缓冲留足 g_voice_url(128) + 查询串，防 -O2 truncation 告警 */
+     * stream=1：Bridge 走帧协议边生成边合成；旧 Bridge 忽略它返回裸 WAV，
+     * 设备侧 vf_feed 按首帧头自动回落。缓冲留足查询串，防截断。 */
     char app_url[320];
     if (app && app[0]) {
-        snprintf(app_url, sizeof(app_url), "%s?app=%s", g_voice_url, app);
+        snprintf(app_url, sizeof(app_url), "%s?app=%s&stream=1", g_voice_url, app);
     } else {
-        snprintf(app_url, sizeof(app_url), "%s", g_voice_url);
+        snprintf(app_url, sizeof(app_url), "%s?stream=1", g_voice_url);
     }
+#ifdef ESP_PLATFORM
+    vframe_t vf;
+    memset(&vf, 0, sizeof(vf));
+    vf.reply = reply;
+    vf.reply_cap = reply_len;
+#else
+    void *vfp = NULL;
+#endif
     DSLOG("voice POST %s bytes=%u", app_url, (unsigned)((size_t)frames * 2));
     long long t0 = DSNOW_MS();
     int status = http_post_raw_stream(app_url, "audio/l16;rate=16000",
                                       (const char *)pcm, (size_t)frames * 2,
                                       "X-Voice-Transcript", transcript, (size_t)transcript_len,
                                       "X-Voice-Reply", reply, (size_t)reply_len,
-                                      voice_tts_cb, NULL, 45000);
+#ifdef ESP_PLATFORM
+                                      voice_tts_cb, &vf, 45000);
+#else
+                                      voice_tts_cb, vfp, 45000);
+#endif
+#ifdef ESP_PLATFORM
+    if (vf.mode == VF_FRAMED) audio_esp32_tts_stream_end();
+    DSLOG("voice POST done: status=%d dur=%lldms tr=%u rep=%u "
+          "frames[pcm=%u/%uB text=%u err=%u]",
+          status, DSNOW_MS() - t0, (unsigned)strlen(transcript), (unsigned)strlen(reply),
+          vf.pcm_frames, vf.pcm_bytes, vf.text_frames, vf.err_frames);
+    free(vf.buf);
+#else
     DSLOG("voice POST done: status=%d dur=%lldms tr=%u rep=%u", status,
           DSNOW_MS() - t0, (unsigned)strlen(transcript), (unsigned)strlen(reply));
+#endif
     if (status != 200) {
         snprintf(reply, (size_t)reply_len, "语音请求失败（HTTP %d）", status);
         return DS_VOICE_ERROR;

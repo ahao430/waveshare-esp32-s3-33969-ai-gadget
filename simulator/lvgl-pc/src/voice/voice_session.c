@@ -48,6 +48,7 @@ static long g_state_enter_ms;
 static int g_think_ms = 1500;        /* Thinking 停留 */
 static int g_speak_ms_per_char = 70; /* Speaking 每"字"推进 */
 static int g_speak_pos;              /* 朗读推进位置（UTF-8 字符序号） */
+static bool g_speak_stream;          /* 流式播放：音频驱动结束，不靠字进度 */
 static char g_reply[512];            /* 待朗读文本 */
 
 #define PCM_FRAMES_PER_TICK 160 /* 16kHz × 10ms */
@@ -65,6 +66,7 @@ static void fire_state(vs_state_t st, const char *detail)
 static void set_state(vs_state_t transition_to, const char *detail)
 {
     if (g_state == transition_to) return;
+    if (transition_to != VS_SPEAKING) g_speak_stream = false;
     VLOG("state %d -> %d (%s)", (int)g_state, (int)transition_to,
          detail ? detail : "");
     g_state = transition_to;
@@ -186,6 +188,15 @@ void vs_set_reply(const char *text)
     snprintf(g_reply, sizeof(g_reply), "%s", text ? text : "");
 }
 
+/* 流式语音：首帧音频开始播放时由音频层通知，THINKING → SPEAKING。
+ * 不等全文——播放/结束都由音频侧驱动（vs_notify_play_done）。 */
+void vs_notify_audio_started(void)
+{
+    if (g_state != VS_THINKING) return;
+    g_speak_stream = true;
+    set_state(VS_SPEAKING, "stream");
+}
+
 void vs_notify_play_done(void)
 {
     if (g_state == VS_SPEAKING) {
@@ -278,8 +289,13 @@ void vs_tick(void)
         break;
 
     case VS_SPEAKING:
-        /* 字幕进度始终推进（真实 TTS 场景 = 可视字幕；音频完成走
-         * vs_notify_play_done 提前回 Idle）。文本读完也自动结束。 */
+        /* 流式播放：字幕进度不参与收尾（音频播完由 vs_notify_play_done
+         * 回 Idle）。只留 90s 兜底，防播放任务异常退出后卡死。 */
+        if (g_speak_stream) {
+            if (in_state >= 90000) enter_idle("stream_timeout");
+            break;
+        }
+        /* 非流式：字幕进度推进；文本读完自动结束。 */
         if (in_state >= (long)g_speak_ms_per_char) {
             g_state_enter_ms = now;
             size_t bytes = 0, chars = 0;

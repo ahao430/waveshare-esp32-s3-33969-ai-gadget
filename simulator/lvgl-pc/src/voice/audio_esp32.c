@@ -23,8 +23,9 @@ static const char *TAG = "audio_esp32";
 
 /* 16kHz/16bit/mono；20ms 一块（320 帧） */
 #define PCM_CHUNK_FRAMES 320
-/* TTS 上限 512KB ≈ 16s 语音（PSRAM） */
-#define AUDIO_TTS_MAX_BYTES (512 * 1024)
+/* TTS 上限 1.5MB ≈ 48s 16k/16bit 语音（PSRAM）。
+ * 流式一句一合成，~110 字中文实测 664KB，512KB 会截尾。 */
+#define AUDIO_TTS_MAX_BYTES (1536 * 1024)
 
 static esp_codec_dev_handle_t g_spk, g_mic;
 static atomic_bool g_inited;
@@ -60,17 +61,84 @@ static void capture_task(void *arg)
 /* ---- 播放（TTS WAV 整段缓冲 → SPEAKING 时一次性播） ---- */
 
 static char *g_tts;                 /* PSRAM；音频字节（WAV 头已剥） */
-static volatile size_t g_tts_len;   /* 有效字节数 */
+static volatile size_t g_tts_len;   /* 写侧：已写入字节数 */
 static volatile size_t g_tts_head;  /* WAV 头解析状态（写侧） */
 static atomic_bool g_play_run;
 static TaskHandle_t g_play_task;
+static atomic_bool g_tts_stream;    /* 流式：写完不代表结束（等 stream_end） */
+static void play_task(void *arg);   /* 前置声明：流式写入要边收边起播 */
+static atomic_bool g_tts_eof;       /* 写侧结束（流式） */
+
+/* 流式播放阈值：攒够 0.5s 音频就开播，剩余边收边播 */
+#define TTS_START_BYTES (16000 / 2 * 2 * 1) /* 0.5s @16k/16bit ≈ 16000B */
 
 void audio_esp32_tts_reset(void)
 {
     if (!atomic_load(&g_inited)) return;
     atomic_store(&g_play_run, false); /* 丢弃未播完的旧段 */
+    atomic_store(&g_tts_stream, false);
+    atomic_store(&g_tts_eof, true);
     g_tts_len = 0;
     g_tts_head = 0; /* WAV 头剥离游标归零 */
+}
+
+/* 流式开始：清空缓冲，标记"还会继续写"（播放任务等数据） */
+void audio_esp32_tts_begin_stream(void)
+{
+    if (!atomic_load(&g_inited)) return;
+    atomic_store(&g_play_run, false);
+    atomic_store(&g_tts_stream, true);
+    atomic_store(&g_tts_eof, false);
+    g_tts_len = 0;
+    g_tts_head = 44; /* 流式帧里没有 WAV 头，直接当已剥完 */
+}
+
+/* 流式结束：允许播放任务在缓冲耗尽后收尾 */
+void audio_esp32_tts_stream_end(void)
+{
+    atomic_store(&g_tts_eof, true);
+    /* 数据不足阈值时也要开播（短句） */
+    if (g_tts_len > 0 && g_play_task == NULL) {
+        atomic_store(&g_play_run, true);
+        xTaskCreate(play_task, "vs_play", 4096, NULL, 5, &g_play_task);
+    }
+}
+
+/* 流式 PCM 写入（无 WAV 头）：边收边播 */
+void audio_esp32_tts_write_pcm(const char *data, size_t len)
+{
+    if (!atomic_load(&g_inited) || !data || len == 0) return;
+    if (g_tts == NULL) {
+        g_tts = malloc(AUDIO_TTS_MAX_BYTES);
+        if (g_tts == NULL) {
+            ESP_LOGE(TAG, "tts buffer alloc failed");
+            return;
+        }
+    }
+    size_t room = AUDIO_TTS_MAX_BYTES - g_tts_len;
+    if (len > room) {
+        if (room == 0) {
+            ESP_LOGW(TAG, "tts stream full (%u), drop %u bytes",
+                     (unsigned)AUDIO_TTS_MAX_BYTES, (unsigned)len);
+            return;
+        }
+        len = room;
+    }
+    memcpy(g_tts + g_tts_len, data, len);
+    g_tts_len += len;
+
+    /* 攒够阈值就开播（首声提前）；状态机由 vs_notify_audio_started 推进 */
+    if (g_play_task == NULL && g_tts_len >= TTS_START_BYTES) {
+        atomic_store(&g_play_run, true);
+        if (xTaskCreate(play_task, "vs_play", 4096, NULL, 5, &g_play_task) == pdPASS) {
+            ESP_LOGI(TAG, "stream play start at %u bytes", (unsigned)g_tts_len);
+            /* 状态机 THINKING → SPEAKING（不等全文）；回调在播放任务外的
+             * 调用线程（HTTP worker）执行，UI 侧自带 ui_lock */
+            vs_notify_audio_started();
+        } else {
+            atomic_store(&g_play_run, false);
+        }
+    }
 }
 
 void audio_esp32_tts_write(const char *data, size_t len)
@@ -110,16 +178,22 @@ void audio_esp32_tts_write(const char *data, size_t len)
 static void play_task(void *arg)
 {
     (void)arg;
-    const char *p = g_tts;
-    size_t left = g_tts_len;
-    while (atomic_load(&g_play_run) && left > 0) {
-        size_t take = left < PCM_CHUNK_FRAMES * 2 ? left : PCM_CHUNK_FRAMES * 2;
-        if (esp_codec_dev_write(g_spk, (void *)p, (int)take) != 0) {
-            ESP_LOGW(TAG, "spk write failed");
-            break;
+    /* 流式：边收边播——游标追到写游标就等新数据，直到写侧 EOF */
+    size_t pos = 0;
+    while (atomic_load(&g_play_run)) {
+        size_t avail = g_tts_len;
+        if (pos < avail) {
+            size_t take = (avail - pos) < (size_t)(PCM_CHUNK_FRAMES * 2)
+                              ? (avail - pos) : (size_t)(PCM_CHUNK_FRAMES * 2);
+            if (esp_codec_dev_write(g_spk, (void *)(g_tts + pos), (int)take) != 0) {
+                ESP_LOGW(TAG, "spk write failed");
+                break;
+            }
+            pos += take;
+            continue;
         }
-        p += take;
-        left -= take;
+        if (atomic_load(&g_tts_eof)) break; /* 写完了且播完 */
+        vTaskDelay(pdMS_TO_TICKS(10));      /* 等流式下一帧 */
     }
     /* 完成通知：on_state(IDLE) 回调在播放线程 → UI 侧需 ui_lock */
     vs_notify_play_done();

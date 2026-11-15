@@ -352,14 +352,18 @@ static void poll_timer_cb(lv_timer_t *t)
     if (done) strcpy(reply, g_reply);
     pthread_mutex_unlock(&g_voice_mu);
 
-    if (done && vs_state() == VS_THINKING) {
+    if (done) {
+        /* 文本先落 UI/历史（流式时音频已在播，回复文本最后才到） */
+        vs_set_reply(reply);
         if (g_reply_lbl) {
             char buf[CONV_TEXT + 16];
-            snprintf(buf, sizeof(buf), "%s", g_transcript);
+            snprintf(buf, sizeof(buf), "%s", reply[0] ? reply : g_transcript);
             lv_label_set_text(g_reply_lbl, buf);
         }
-        vs_set_reply(reply);
-        vs_notify_engine_done(); /* 进行中字幕可见；历史经按钮查看 */
+        if (vs_state() == VS_THINKING) {
+            /* 非流式链路：等全文到齐才开播 */
+            vs_notify_engine_done();
+        }
     }
 
     /* 波形 */

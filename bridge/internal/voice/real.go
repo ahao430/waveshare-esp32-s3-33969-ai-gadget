@@ -163,6 +163,22 @@ func (r *RealInteractor) Respond(ctx context.Context, text string) (string, erro
 	return fmt.Sprintf("[voice] 收到「%s」。模型暂不可用，这是本地回声回复。", text), nil
 }
 
+// RespondStream 流式回复（语音链路）：与 Respond 同一路由，增量回调。
+func (r *RealInteractor) RespondStream(ctx context.Context, text string,
+	onDelta func(string) error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if r.router == nil {
+		return fmt.Errorf("no_router")
+	}
+	msgs := []ai.ChatMessage{
+		{Role: "system", Content: "你是语音助手。回答保持 1~3 句话，口语化，不用 markdown。"},
+		{Role: "user", Content: text},
+	}
+	return r.router.CompleteStream(ctx, "", msgs, onDelta)
+}
+
 func (r *RealInteractor) ttsCooling() bool {
 	r.ttsMu.Lock()
 	defer r.ttsMu.Unlock()

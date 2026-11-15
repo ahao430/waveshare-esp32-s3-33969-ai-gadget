@@ -12,7 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -240,6 +242,95 @@ func astrbotPayload(message string, u Upstream) map[string]any {
 		p["selected_model"] = u.Model
 	}
 	return p
+}
+
+// astrbotStream 流式：与 astrbotComplete 同一条 SSE，但增量回调。
+// 推理类事件（模型"思考"文本）必须跳过，否则语音会把英文推理念出来。
+func astrbotStream(ctx context.Context, u Upstream, messages []ChatMessage,
+	onDelta func(string) error) error {
+	msg := lastUserText(messages)
+	payload, err := json.Marshal(astrbotPayload(msg, u))
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(u.BaseURL, "/")+"/api/v1/chat", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+u.APIKey)
+
+	resp, err := (&http.Client{Timeout: astrbotTimeout}).Do(req)
+	if err != nil {
+		return fmt.Errorf("astrbot: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("astrbot_http_%d", resp.StatusCode)
+	}
+
+	debugEvents := os.Getenv("ASTRBOT_DEBUG_EVENTS") == "1"
+	seen := map[string]bool{}
+	emitted := false
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 64*1024), astrbotMaxChunks)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		p := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if p == "" || p == "[DONE]" {
+			continue
+		}
+		typ, text := extractAstrBotEvent(p)
+		if debugEvents && !seen[typ] {
+			seen[typ] = true
+			preview := text
+			if len(preview) > 60 {
+				preview = preview[:60]
+			}
+			log.Printf("astrbot: event type=%q preview=%q", typ, preview)
+		}
+		if isReasoningEvent(typ) {
+			continue
+		}
+		if typ == "complete" && emitted {
+			continue
+		}
+		if text == "" {
+			continue
+		}
+		emitted = true
+		if err := onDelta(text); err != nil {
+			return err
+		}
+	}
+	if !emitted {
+		return fmt.Errorf("astrbot_empty_response")
+	}
+	return sc.Err()
+}
+
+// isReasoningEvent：模型的思维链事件（不同版本命名不同）。
+// 命中即丢弃——语音链路只念正文。
+func isReasoningEvent(typ string) bool {
+	switch strings.ToLower(typ) {
+	case "reasoning", "reasoning_content", "thinking", "think", "analysis":
+		return true
+	}
+	return false
+}
+
+// lastUserText 取最后一条 user 消息（AstrBot 单轮 message 语义）。
+func lastUserText(messages []ChatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "user" && messages[i].Content != "" {
+			return messages[i].Content
+		}
+	}
+	return "你好"
 }
 
 func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (string, error) {
