@@ -95,7 +95,13 @@ func (m *MockInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// 每字符 120ms 440Hz 短音（字符间 40ms 间隙），首尾 100ms 静音。
+	return beepWav(text)
+}
+
+// beepWav 占位 TTS：每字符 120ms 440Hz 短音（字符间 40ms 间隙），
+// 首尾 100ms 静音。Mock 直接用；RealInteractor 在 Edge-TTS 失败/
+// 冷却时降级使用（文本回复不受影响）。
+func beepWav(text string) ([]byte, error) {
 	const (
 		charDurMs  = 120
 		gapMs      = 40
