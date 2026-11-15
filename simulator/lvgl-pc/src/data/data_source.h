@@ -138,7 +138,9 @@ typedef enum {
     DS_VOICE_ERROR,
 } ds_voice_result_t;
 
-ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
+/* app：调用方 App 标识（"chat"/"xiaozhi"/"muse"/"zcode"），Bridge 按
+ * App 选择 TTS 引擎/音色；NULL 或空 = 默认（第一个机器人实例）。 */
+ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int frames,
                                     char *transcript, int transcript_len,
                                     char *reply, int reply_len);
 

@@ -18,7 +18,7 @@ typedef struct {
 	                                     ds_chat_delta_cb_t on_delta, void *user,
 	                                     char *reply_full, int reply_len);
 	/* 语音一步式交互（见 data_source.h）。 */
-	ds_voice_result_t (*voice_interact)(const int16_t *pcm, int frames,
+	ds_voice_result_t (*voice_interact)(const char *app, const int16_t *pcm, int frames,
 	                                    char *transcript, int transcript_len,
 	                                    char *reply, int reply_len);
 	/* 聊天 provider 列表（"\\n" 分隔；可为 NULL，front 兜底 "mock"）。 */

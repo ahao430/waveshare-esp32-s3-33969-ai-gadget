@@ -119,10 +119,11 @@ static ds_chat_result_t mock_chat_stream(const ds_chat_msg_t *msgs, int n,
 }
 
 /* mock 语音交互：本地伪转写 + echo（无网络）。 */
-static ds_voice_result_t mock_voice_interact(const int16_t *pcm, int frames,
+static ds_voice_result_t mock_voice_interact(const char *app, const int16_t *pcm, int frames,
                                              char *transcript, int transcript_len,
                                              char *reply, int reply_len)
 {
+    (void)app;
     (void)pcm;
     (void)frames;
     static const char *utterances[] = {

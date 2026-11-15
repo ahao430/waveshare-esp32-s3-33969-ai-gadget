@@ -39,13 +39,14 @@ type RealInteractor struct {
 	dsMu       sync.Mutex
 	dsBrokenAt time.Time // DeepSeek TTS 冷却
 
-	// ttsPref 当前默认机器人的 TTS 偏好（引擎 + 音色）；nil=未接入
-	ttsPref func() (provider, voice string)
+	// ttsPref 按 App 取 TTS 偏好（引擎 + 音色）；nil=未接入。
+	// app="" 或 "chat" → 默认机器人实例；"muse"/"xiaozhi" 等 → App 级配置。
+	ttsPref func(app string) (provider, voice string)
 }
 
-// SetTTSPreference 注入机器人实例的 TTS 偏好（main 里读 bots 表）。
+// SetTTSPreferenceForApp 注入按 App 查询 TTS 偏好的解析器（main 装配）。
 // provider="" 表示自动（配了 DeepSeek Key 用 DeepSeek，否则 Edge）。
-func (r *RealInteractor) SetTTSPreference(fn func() (string, string)) {
+func (r *RealInteractor) SetTTSPreferenceForApp(fn func(app string) (string, string)) {
 	r.ttsPref = fn
 }
 
@@ -183,7 +184,7 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	// （配了 DeepSeek Key 用 DeepSeek TTS，否则 Edge）> 哔声占位
 	prefProvider, prefVoice := "", ""
 	if r.ttsPref != nil {
-		prefProvider, prefVoice = r.ttsPref()
+		prefProvider, prefVoice = r.ttsPref(AppFromContext(ctx))
 	}
 	if prefProvider == "" {
 		prefProvider = os.Getenv("TTS_PROVIDER")

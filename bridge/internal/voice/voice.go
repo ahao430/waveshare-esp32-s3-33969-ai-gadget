@@ -163,6 +163,17 @@ type Handler struct {
 func NewHandler(eng Interactor) *Handler { return &Handler{eng: eng} }
 
 // ServeInteract 处理 POST /api/v1/voice/interact。
+// ctxKeyVoiceApp 承载调用方 App 标识（chat/xiaozhi/muse/zcode），供 TTS
+// 选择音色时使用。
+type ctxKeyVoiceApp struct{}
+
+func AppFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(ctxKeyVoiceApp{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	audio := make([]byte, 0, 4096)
 	buf := make([]byte, 8192)
@@ -184,8 +195,14 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// App 标识：查询参数 ?app= 或请求头 X-Voice-App（设备端传的是前者）
+	app := r.URL.Query().Get("app")
+	if app == "" {
+		app = r.Header.Get("X-Voice-App")
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
+	ctx = context.WithValue(ctx, ctxKeyVoiceApp{}, app)
 
 	text, err := h.eng.Transcribe(ctx, audio)
 	if err != nil {

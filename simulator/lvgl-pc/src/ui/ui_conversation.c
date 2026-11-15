@@ -106,11 +106,19 @@ static const char *state_text(vs_state_t st)
     }
 }
 
+/* App 标识（与 Bridge 音色配置的 key 一致；未知返回 "chat"） */
+static const char *conv_app_key(int app_id)
+{
+    const app_def_t *def = app_manager_get(app_id);
+    return (def && def->key) ? def->key : "chat";
+}
+
 static void *voice_worker(void *arg)
 {
     (void)arg;
     char transcript[192] = {0}, reply[CONV_TEXT] = {0};
-    ds_voice_interact(g_capture ? g_capture : (const int16_t *)"",
+    ds_voice_interact(conv_app_key(g_app_id),
+                      g_capture ? g_capture : (const int16_t *)"",
                       g_capture ? g_capture_frames : 0,
                       transcript, sizeof(transcript),
                       reply, sizeof(reply));

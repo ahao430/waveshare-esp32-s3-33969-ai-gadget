@@ -35,7 +35,82 @@ const providerHint: Record<string, string> = {
   mimo: 'mimo.mi.com 控制台创建 API Key',
 }
 
-onMounted(load)
+/* ---- 各 App 音色（Muse / 小智 / ZCode；大肥鱼用机器人实例设置）---- */
+type VoicePref = { provider?: string; voice?: string }
+const appVoice = ref<Record<string, VoicePref>>({ muse: {}, xiaozhi: {}, zcode: {} })
+const appVoiceMsg = ref('')
+const appVoiceSaving = ref(false)
+const appRows = [
+  { key: 'muse', label: 'Muse' },
+  { key: 'xiaozhi', label: '小智' },
+  { key: 'zcode', label: 'ZCode' },
+] as const
+
+const engines = [
+  { id: '', label: '自动（有 DeepSeek Key 用 DeepSeek，否则 Edge）' },
+  { id: 'deepseek', label: 'DeepSeek TTS' },
+  { id: 'edge', label: 'Edge-TTS（免费）' },
+]
+const voices: Record<string, { id: string; label: string }[]> = {
+  '': [
+    { id: '', label: '默认音色' },
+    { id: 'stella', label: 'DeepSeek · stella（女声）' },
+    { id: 'tide', label: 'DeepSeek · tide（男声）' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: 'Edge · 晓晓（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: 'Edge · 云希（男声）' },
+    { id: 'zh-CN-XiaoyiNeural', label: 'Edge · 晓伊（女声）' },
+    { id: 'zh-CN-YunyangNeural', label: 'Edge · 云扬（男声）' },
+  ],
+  deepseek: [
+    { id: '', label: '默认（stella 女声）' },
+    { id: 'stella', label: 'stella（女声）' },
+    { id: 'tide', label: 'tide（男声）' },
+  ],
+  edge: [
+    { id: '', label: '默认（晓晓 女声）' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
+    { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声）' },
+    { id: 'zh-CN-YunyangNeural', label: '云扬（男声）' },
+  ],
+}
+const voiceOptions = (engine: string) => voices[engine] ?? voices['']
+
+onMounted(async () => {
+  await load()
+  await loadAppVoice()
+})
+
+async function loadAppVoice() {
+  try {
+    const r = await request<{ apps: Record<string, VoicePref> }>('/api/v1/voice/apps')
+    const m: Record<string, VoicePref> = { muse: {}, xiaozhi: {}, zcode: {} }
+    for (const k of Object.keys(m)) {
+      const got = r.apps?.[k]
+      m[k] = { provider: got?.provider ?? '', voice: got?.voice ?? '' }
+    }
+    appVoice.value = m
+  } catch {
+    /* 无配置时静默 */
+  }
+}
+
+async function saveAppVoice() {
+  appVoiceSaving.value = true
+  appVoiceMsg.value = ''
+  try {
+    await request('/api/v1/voice/apps', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(appVoice.value),
+    })
+    appVoiceMsg.value = '✓ 已保存（下一次语音请求生效）'
+  } catch (e) {
+    appVoiceMsg.value = `✗ ${e instanceof Error ? e.message : e}`
+  } finally {
+    appVoiceSaving.value = false
+  }
+}
 
 async function load() {
   try {
@@ -149,6 +224,41 @@ async function remove(id: string) {
           </div>
         </template>
       </div>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <h3 class="mb-1 font-semibold">各 App 音色</h3>
+    <p class="mb-3 text-xs text-dim">
+      每个对话 App 可以有自己的引擎/音色；<b>大肥鱼</b>用「聊天机器人」页里实例的设置，
+      这里配置 Muse / 小智 / ZCode。未配置时回退默认实例。
+    </p>
+    <div class="space-y-2">
+      <div v-for="row in appRows" :key="row.key" class="flex flex-wrap items-center gap-2">
+        <span class="w-16 text-sm">{{ row.label }}</span>
+        <select
+          :value="appVoice[row.key]?.provider ?? ''"
+          class="input !w-64"
+          @change="appVoice[row.key] = { provider: ($event.target as HTMLSelectElement).value, voice: '' }"
+        >
+          <option v-for="e in engines" :key="e.id" :value="e.id">{{ e.label }}</option>
+        </select>
+        <select
+          :value="appVoice[row.key]?.voice ?? ''"
+          class="input !w-56"
+          @change="appVoice[row.key] = { ...appVoice[row.key], voice: ($event.target as HTMLSelectElement).value }"
+        >
+          <option v-for="v in voiceOptions(appVoice[row.key]?.provider ?? '')" :key="v.id" :value="v.id">
+            {{ v.label }}
+          </option>
+        </select>
+      </div>
+    </div>
+    <div class="mt-3 flex items-center gap-3">
+      <button class="btn" :disabled="appVoiceSaving" @click="saveAppVoice">保存音色</button>
+      <span v-if="appVoiceMsg" class="text-xs" :class="appVoiceMsg.startsWith('✓') ? 'text-ok' : 'text-err'">
+        {{ appVoiceMsg }}
+      </span>
     </div>
   </div>
 

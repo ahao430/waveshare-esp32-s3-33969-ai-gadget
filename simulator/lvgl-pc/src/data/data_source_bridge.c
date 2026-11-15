@@ -28,7 +28,7 @@ static char g_name[176]; /* "bridge(" + g_base(160) + ")" 余量 */
 static char g_provider[24];
 
 /* 前置声明：bridge_voice_interact / bridge_fetch_background 函数体在文件尾部 */
-static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
+static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
 static int bridge_fetch_background(const char *save_path);
@@ -730,7 +730,7 @@ static void voice_tts_cb(const char *data, size_t len, void *user)
 }
 #endif
 
-static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
+static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len)
 {
@@ -741,7 +741,15 @@ static ds_voice_result_t bridge_voice_interact(const int16_t *pcm, int frames,
 #ifdef ESP_PLATFORM
     audio_esp32_tts_reset();
 #endif
-    int status = http_post_raw_stream(g_voice_url, "audio/l16;rate=16000",
+    /* App 标识透传（Bridge 按 App 选 TTS 音色）：?app=chat|xiaozhi|muse|zcode
+     * 缓冲留足 g_voice_url(128) + 查询串，防 -O2 truncation 告警 */
+    char app_url[320];
+    if (app && app[0]) {
+        snprintf(app_url, sizeof(app_url), "%s?app=%s", g_voice_url, app);
+    } else {
+        snprintf(app_url, sizeof(app_url), "%s", g_voice_url);
+    }
+    int status = http_post_raw_stream(app_url, "audio/l16;rate=16000",
                                       (const char *)pcm, (size_t)frames * 2,
                                       "X-Voice-Transcript", transcript, (size_t)transcript_len,
                                       "X-Voice-Reply", reply, (size_t)reply_len,

@@ -209,9 +209,18 @@ func main() {
 		Mimo:        func() string { return resolveAccount("mimo").APIKey },
 		Deepseek:    func() string { return resolveAccount("deepseek").APIKey },
 	}, os.Getenv("ZHIPU_BASE_URL"), chatRouter)
-	// 默认机器人的 TTS 偏好（实例配置：引擎 + 音色）
+	// TTS 偏好：App 级设置（Muse/小智等）优先，空则回退默认机器人实例
 	if db != nil {
-		voiceEng.SetTTSPreference(func() (string, string) { return db.DefaultBotTTS() })
+		voiceEng.SetTTSPreferenceForApp(func(app string) (string, string) {
+			if app != "" && app != "chat" {
+				if p, ok := db.GetVoiceApps()[app]; ok {
+					if p.Provider != "" || p.Voice != "" {
+						return p.Provider, p.Voice
+					}
+				}
+			}
+			return db.DefaultBotTTS()
+		})
 	}
 	voiceH := voice.NewHandler(voiceEng)
 

@@ -186,7 +186,7 @@ const char *ds_chat_provider(void)
     return g_chat_provider;
 }
 
-ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
+ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int frames,
                                     char *transcript, int transcript_len,
                                     char *reply, int reply_len)
 {
@@ -195,7 +195,7 @@ ds_voice_result_t ds_voice_interact(const int16_t *pcm, int frames,
         snprintf(reply, (size_t)reply_len, "当前数据源不支持语音");
         return DS_VOICE_UNSUPPORTED;
     }
-    return g_impl->voice_interact(pcm, frames, transcript, transcript_len, reply, reply_len);
+    return g_impl->voice_interact(app, pcm, frames, transcript, transcript_len, reply, reply_len);
 }
 
 int ds_appearance_fetch(const char *save_path)

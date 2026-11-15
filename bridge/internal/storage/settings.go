@@ -47,12 +47,13 @@ func (d *DB) DeleteSetting(key string) error {
 
 // 常用配置键。
 const (
-	SettingKeyZCode    = "zcode"    // ZCode 远程 {base_url, enc_token}
-	SettingKeyMonitor  = "monitor"  // Komari 监控 {base_url, enc_token}
-	SettingKeyKeys     = "keys"     // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
-	SettingKeyWeather  = "weather"  // 天气 {mode: auto|manual, city}
-	SettingKeyLauncher = "launcher" // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
-	SettingKeyAstrBot  = "astrbot"  // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
+	SettingKeyZCode     = "zcode"      // ZCode 远程 {base_url, enc_token}
+	SettingKeyMonitor   = "monitor"    // Komari 监控 {base_url, enc_token}
+	SettingKeyKeys      = "keys"       // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
+	SettingKeyWeather   = "weather"    // 天气 {mode: auto|manual, city}
+	SettingKeyLauncher  = "launcher"   // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
+	SettingKeyAstrBot   = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
+	SettingKeyVoiceApps = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}
 )
 
 // SaveAstrBotConn 保存 AstrBot 公用连接（token 加密；空串=清除）。
@@ -95,4 +96,30 @@ func (d *DB) GetAstrBotConn(masterKey []byte) (baseURL, token string) {
 		}
 	}
 	return "", ""
+}
+
+// VoicePref 单个 App 的语音合成偏好（provider 空=自动）。
+type VoicePref struct {
+	Provider string `json:"provider,omitempty"` // deepseek|edge|""
+	Voice    string `json:"voice,omitempty"`    // 音色 id
+}
+
+// GetVoiceApps 读取 App 级语音偏好（未配置返回空 map）。
+func (d *DB) GetVoiceApps() map[string]VoicePref {
+	out := map[string]VoicePref{}
+	raw, err := d.GetSetting(SettingKeyVoiceApps)
+	if err != nil || raw == "" {
+		return out
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	return out
+}
+
+// SaveVoiceApps 覆盖写 App 级语音偏好。
+func (d *DB) SaveVoiceApps(m map[string]VoicePref) error {
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return d.SaveSetting(SettingKeyVoiceApps, string(raw))
 }

@@ -129,6 +129,7 @@ func NewHandler(d Deps) http.Handler {
 		// 大肥鱼机器人（AstrBot 实例，独立于订阅）+ 应用配置 KV
 		// （ZCode 远程 / Komari 监控 / 按键映射）——同一 storage.DB。
 		serveBots(mux, d, logger)
+		serveVoiceApps(mux, d, logger)
 		serveZcode(mux, d, logger)
 		serveMonitorConfig(mux, d, logger)
 		serveKeys(mux, d, logger)
