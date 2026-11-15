@@ -70,14 +70,17 @@ type CreditBalance struct {
 
 // QuotaSnapshot 一次成功抓取的完整快照。
 type QuotaSnapshot struct {
-	ProviderID string          `json:"provider_id"`
-	AccountID  string          `json:"account_id"`
-	PlanName   string          `json:"plan_name,omitempty"`
-	FetchedAt  time.Time       `json:"fetched_at"`
-	Status     string          `json:"status"`
-	Windows    []QuotaWindow   `json:"windows"`
-	Credits    []CreditBalance `json:"credits,omitempty"`
-	RawVersion string          `json:"raw_version,omitempty"`
+	ProviderID string `json:"provider_id"`
+	AccountID  string `json:"account_id"`
+	PlanName   string `json:"plan_name,omitempty"`
+	// PlanExpiresAt 套餐到期（智谱 coding plan 订阅接口；PlanName 文本
+	// 已含"· X月X日到期"，此字段给 Web/后续倒计时用结构化值）
+	PlanExpiresAt *time.Time      `json:"plan_expires_at,omitempty"`
+	FetchedAt     time.Time       `json:"fetched_at"`
+	Status        string          `json:"status"`
+	Windows       []QuotaWindow   `json:"windows"`
+	Credits       []CreditBalance `json:"credits,omitempty"`
+	RawVersion    string          `json:"raw_version,omitempty"`
 }
 
 // Status 常量。

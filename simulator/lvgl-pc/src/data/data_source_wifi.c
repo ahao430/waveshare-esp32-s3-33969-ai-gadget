@@ -54,13 +54,33 @@ void ds_bridge_host_save(const char *url)
     wifi_prov_bridge_save(url);
 }
 
+int ds_bridge_host_list(char *out, int cap)
+{
+    char list[1024];
+    if (wifi_prov_bridge_list(list, sizeof(list)) == 0 && list[0]) {
+        snprintf(out, (size_t)cap, "%s", list);
+        return 0;
+    }
+    /* 簿空/无 NVS：当前生效地址（含编译期兜底）作为唯一一条 */
+    if (ds_bridge_host_get(out, cap)) return 0;
+    out[0] = '\0';
+    return -1;
+}
+
+int ds_bridge_host_remove(const char *url)
+{
+    return wifi_prov_bridge_remove(url);
+}
+
 #else
 /* ================= 模拟器：演示数据 ================= */
 
 #include <stdlib.h>
 #include <time.h>
 
-static char s_saved_host[160]; /* 演示态保存的 Bridge 地址 */
+static char s_saved_host[160]; /* 演示态保存的 Bridge 地址（=当前激活） */
+static char s_host_book[4][160]; /* 演示地址簿 */
+static int s_host_book_n;
 static char s_cur_ssid[33] = "Home-WiFi-5G"; /* 演示态：默认"已连接" */
 static bool s_connected = true;
 
@@ -128,6 +148,45 @@ bool ds_bridge_host_get(char *out, int cap)
 void ds_bridge_host_save(const char *url)
 {
     strlcpy(s_saved_host, url ? url : "", sizeof(s_saved_host));
+    for (int i = 0; i < s_host_book_n; i++) {
+        if (strcmp(s_host_book[i], url) == 0) return;
+    }
+    if (s_host_book_n < 4 && url && url[0]) {
+        strlcpy(s_host_book[s_host_book_n++], url, sizeof(s_host_book[0]));
+    }
+}
+
+int ds_bridge_host_list(char *out, int cap)
+{
+    if (s_host_book_n == 0) {
+        if (ds_bridge_host_get(out, cap)) return 0;
+        out[0] = '\0';
+        return -1;
+    }
+    size_t off = 0;
+    out[0] = '\0';
+    for (int i = 0; i < s_host_book_n; i++) {
+        int w = snprintf(out + off, (size_t)cap - off, "%s%s",
+                         i ? "\n" : "", s_host_book[i]);
+        if (w <= 0 || (size_t)w >= (size_t)cap - off) break;
+        off += (size_t)w;
+    }
+    return 0;
+}
+
+int ds_bridge_host_remove(const char *url)
+{
+    if (!url || (s_saved_host[0] && strcmp(s_saved_host, url) == 0)) return -1;
+    for (int i = 0; i < s_host_book_n; i++) {
+        if (strcmp(s_host_book[i], url) == 0) {
+            for (int j = i; j < s_host_book_n - 1; j++) {
+                strlcpy(s_host_book[j], s_host_book[j + 1], sizeof(s_host_book[0]));
+            }
+            s_host_book_n--;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 #endif /* ESP_PLATFORM */

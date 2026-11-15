@@ -63,6 +63,75 @@ const editingId = ref('') // ''=新增；非空=编辑该实例（POST 同 id �
 const subAdding = ref(false)
 const message = ref('')
 
+/* ---- 排序（仿外观页主页排布：本地交换 + dirty + 保存） ---- */
+const orderDirty = ref(false)
+const orderBusy = ref(false)
+function moveSub(i: number, delta: number) {
+  const j = i + delta
+  if (j < 0 || j >= subs.value.length) return
+  ;[subs.value[i], subs.value[j]] = [subs.value[j], subs.value[i]]
+  orderDirty.value = true
+}
+async function saveOrder() {
+  orderBusy.value = true
+  try {
+    await request('/api/v1/subscriptions/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: subs.value.map((s) => s.id) }),
+    })
+    orderDirty.value = false
+    message.value = '排序已保存'
+  } catch (e) {
+    message.value = `保存排序失败：${e instanceof Error ? e.message : e}`
+  } finally {
+    orderBusy.value = false
+  }
+}
+
+/* ---- 快照摘要（异步，不阻塞列表；设备订阅页同源数据） ---- */
+interface SnapBrief {
+  plan?: string
+  balance?: string
+  expires?: string
+  error?: string
+}
+const snapMap = ref<Record<string, SnapBrief>>({})
+async function loadSnaps() {
+  try {
+    const r = await request<{
+      subscriptions: Array<{
+        id: string
+        error?: string
+        snapshot?: {
+          plan_name?: string
+          plan_expires_at?: string
+          credits?: Array<{ balance?: number; unit?: string }>
+        }
+      }>
+    }>('/api/v1/quota/subscriptions')
+    const m: Record<string, SnapBrief> = {}
+    for (const e of r.subscriptions) {
+      if (e.snapshot) {
+        const c0 = e.snapshot.credits?.[0]
+        m[e.id] = {
+          plan: e.snapshot.plan_name,
+          expires: e.snapshot.plan_expires_at,
+          balance:
+            c0 && c0.balance != null
+              ? `${c0.unit === 'CNY' || !c0.unit ? '¥' : c0.unit}${c0.balance.toFixed(2)}`
+              : undefined,
+        }
+      } else {
+        m[e.id] = { error: e.error ?? '抓取失败' }
+      }
+    }
+    snapMap.value = m
+  } catch {
+    /* 摘要拿不到不影响列表（可手动刷新） */
+  }
+}
+
 // coding plan 家族（gpt/claude/minimax/mimo）与 newapi 走中转站，base_url 必填
 const needsBaseKinds = ['gpt', 'claude', 'minimax', 'mimo', 'newapi']
 function needsBase(kind: string) {
@@ -81,9 +150,11 @@ async function loadSubs() {
   try {
     const r = await request<{ subscriptions: SubInfo[] }>('/api/v1/subscriptions')
     subs.value = r.subscriptions
+    orderDirty.value = false
   } catch {
     subs.value = []
   }
+  void loadSnaps() // 快照摘要异步补（实时抓取较慢，不阻塞列表）
 }
 
 function resetForm() {
@@ -170,25 +241,46 @@ onMounted(() => {
     </p>
     <div v-if="subs.length === 0" class="mb-2 text-sm text-dim">还没有订阅，添加一个：</div>
     <div class="space-y-2">
-      <div v-for="s in subs" :key="s.id" class="flex items-center justify-between rounded border border-line px-3 py-2"
+      <div v-for="(s, i) in subs" :key="s.id" class="rounded border border-line px-3 py-2"
            :class="editingId === s.id ? 'border-accent/50' : ''">
-        <div class="min-w-0">
-          <span class="font-medium">{{ s.label }}</span>
-          <span class="ml-2 text-xs text-dim">{{ subKindNames[s.kind] ?? s.kind }}</span>
-          <span class="ml-2 badge" :class="s.has_token ? '' : '!text-warn'">{{ s.has_token ? '已配 Key' : '无 Key' }}</span>
+        <div class="flex items-center justify-between">
+          <div class="min-w-0">
+            <span class="font-medium">{{ s.label }}</span>
+            <span class="ml-2 text-xs text-dim">{{ subKindNames[s.kind] ?? s.kind }}</span>
+            <span class="ml-2 badge" :class="s.has_token ? '' : '!text-warn'">{{ s.has_token ? '已配 Key' : '无 Key' }}</span>
+          </div>
+          <div class="flex shrink-0 gap-1">
+            <button class="btn-ghost !px-2 !py-1" :disabled="i === 0" @click="moveSub(i, -1)">↑</button>
+            <button class="btn-ghost !px-2 !py-1" :disabled="i === subs.length - 1" @click="moveSub(i, 1)">↓</button>
+            <a
+              v-if="fetchUrlFor(s)"
+              class="btn-ghost !px-2 !py-1"
+              :href="fetchUrlFor(s)"
+              target="_blank"
+              rel="noopener"
+            >去获取 ↗</a>
+            <button class="btn-ghost !px-2 !py-1" @click="editSub(s)">编辑</button>
+            <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
+          </div>
         </div>
-        <div class="flex shrink-0 gap-1">
-          <a
-            v-if="fetchUrlFor(s)"
-            class="btn-ghost !px-2 !py-1"
-            :href="fetchUrlFor(s)"
-            target="_blank"
-            rel="noopener"
-          >去获取 ↗</a>
-          <button class="btn-ghost !px-2 !py-1" @click="editSub(s)">编辑</button>
-          <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
+        <!-- 快照摘要（异步；设备订阅页同源） -->
+        <div v-if="snapMap[s.id]" class="mt-1 text-xs" :class="snapMap[s.id].error ? 'text-dim' : 'text-dim'">
+          <template v-if="snapMap[s.id].error">状态：{{ snapMap[s.id].error }}</template>
+          <template v-else>
+            <span v-if="snapMap[s.id].plan">{{ snapMap[s.id].plan }}</span>
+            <span v-if="snapMap[s.id].expires" class="ml-2">
+              到期 {{ new Date(snapMap[s.id].expires!).toLocaleDateString('zh-CN') }}
+            </span>
+            <span v-if="snapMap[s.id].balance" class="ml-2">余额 {{ snapMap[s.id].balance }}</span>
+          </template>
         </div>
       </div>
+    </div>
+    <div v-if="subs.length > 1" class="mt-2 flex items-center gap-2">
+      <button class="btn-ghost !px-3 !py-1" :disabled="orderBusy || !orderDirty" @click="saveOrder">
+        {{ orderBusy ? '保存中…' : '保存排序' }}
+      </button>
+      <span v-if="orderDirty" class="text-xs text-warn">顺序已调整（设备订阅页按此顺序显示，需保存）</span>
     </div>
     <div class="mt-3 flex flex-wrap items-end gap-2">
       <select v-model="subForm.kind" class="input !w-auto" :disabled="!!editingId" @change="onKindChange">

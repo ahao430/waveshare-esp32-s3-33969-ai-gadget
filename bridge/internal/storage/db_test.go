@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -94,3 +95,46 @@ func db2Load(db *DB) (map[string]quota.StoredSnapshot, []error) {
 }
 
 func ptr(v float64) *float64 { return &v }
+
+func TestSubscriptionOrder(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "gadget.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer db.Close()
+	mk := []byte("0123456789abcdef0123456789abcdef")
+
+	for _, id := range []string{"sub-a", "sub-b", "sub-c"} {
+		if err := db.SaveSubscription(id, "mock", id, "", "tok", mk); err != nil {
+			t.Fatalf("save %s: %v", id, err)
+		}
+	}
+	// 新建顺序 = sort 1..3；编辑不改序（仍按 sort 而非 updated_at）
+	if err := db.SaveSubscription("sub-b", "mock", "B2", "", "tok2", mk); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	got := ids(db.ListSubscriptions)
+	if fmt.Sprint(got) != "[sub-a sub-b sub-c]" {
+		t.Fatalf("insert order: %v", got)
+	}
+	// 用户排序：c,b,a
+	if err := db.SetSubscriptionOrder([]string{"sub-c", "sub-b", "sub-a"}); err != nil {
+		t.Fatalf("order: %v", err)
+	}
+	got = ids(db.ListSubscriptions)
+	if fmt.Sprint(got) != "[sub-c sub-b sub-a]" {
+		t.Fatalf("user order: %v", got)
+	}
+}
+
+func ids(list func() ([]Subscription, error)) []string {
+	subs, err := list()
+	if err != nil {
+		panic(err)
+	}
+	out := []string{}
+	for _, s := range subs {
+		out = append(out, s.ID)
+	}
+	return out
+}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"gadget-bridge/internal/quota"
 )
@@ -64,9 +65,8 @@ func TestFetchQuota_MapsWindows(t *testing.T) {
 	if snap.ProviderID != "zhipu" || snap.Status != quota.StatusOK {
 		t.Fatalf("bad snapshot header: %+v", snap)
 	}
-	// 套餐名 + 到期时间（fixture expireTime=1798761600000ms → 2027-01-01
-	// 本地时区 → "1月1日到期"）
-	if snap.PlanName != "GLM Coding Plan (Lite) · 1月1日到期" {
+	// 套餐名 + 到期时间（fixture valid 区间止于 2027-12-11 → "12月11日到期"）
+	if snap.PlanName != "GLM Coding Lite · 12月11日到期" {
 		t.Fatalf("PlanName = %q, want fixture plan name + expiry", snap.PlanName)
 	}
 	if len(snap.Windows) != 3 {
@@ -157,5 +157,32 @@ func TestNormalizeResetMs(t *testing.T) {
 		if got := normalizeResetMs(c.in); got != c.want {
 			t.Errorf("normalizeResetMs(%d) = %d, want %d", c.in, got, c.want)
 		}
+	}
+}
+
+func TestParseSubscriptionRealArrayShape(t *testing.T) {
+	// 2026-11-16 真网实测响应（智谱 /api/biz/subscription/list）：
+	// data 直接是数组、套餐名 productName、到期在 valid 区间串里
+	body := []byte(`{"code":200,"msg":"操作成功","data":[{"id":"108253","productName":"GLM Coding Lite","status":"VALID","purchaseTime":"2025-12-11 15:07:09","valid":"2026-12-11 10:00:00-2027-12-11 10:00:00","nextRenewTime":"2026-12-11"}],"success":true}`)
+	plan, expires, err := parseSubscriptionResponseEx(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if plan != "GLM Coding Lite" {
+		t.Fatalf("plan = %q", plan)
+	}
+	if expires == nil || expires.Year() != 2027 || expires.Month() != time.December {
+		t.Fatalf("expires = %v (want 2027-12-11)", expires)
+	}
+}
+
+func TestParseSubscriptionSkipsInvalid(t *testing.T) {
+	body := []byte(`{"code":200,"data":[{"productName":"Old","status":"EXPIRED","valid":"2024-01-01 00:00:00-2025-01-01 00:00:00"}],"success":true}`)
+	plan, expires, err := parseSubscriptionResponseEx(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if plan != "" || expires != nil {
+		t.Fatalf("expired subscription must be skipped: %q %v", plan, expires)
 	}
 }

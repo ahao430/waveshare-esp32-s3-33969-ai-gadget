@@ -290,35 +290,76 @@ static void wifi_pass_view_build(const char *ssid)
     lv_keyboard_set_textarea(kb, ta);
 }
 
-/* ================= Bridge 地址编辑 ================= */
+/* ================= Bridge 地址（地址簿：多地址保存/切换/添加） ================= */
 
-static void bridge_host_save_async(void *arg)
+#define BH_PANEL_MAX 8
+
+static char s_bh_rows[BH_PANEL_MAX][160]; /* 地址簿快照（LVGL 线程用） */
+static int s_bh_n;
+static char s_bh_cur[160];               /* 当前生效地址 */
+
+static void bridge_list_view_build(void); /* 前向 */
+static void bridge_add_view_build(void);  /* 前向 */
+
+static void bridge_list_view_cb(lv_event_t *e)
 {
-    (void)arg;
-    if (!g_mask) return;
+    (void)e;
+    bridge_list_view_build();
+}
+static void bridge_add_view_cb(lv_event_t *e)
+{
+    (void)e;
+    bridge_add_view_build();
+}
+
+static void bridge_list_refresh(void)
+{
+    char raw[BH_PANEL_MAX * 161];
+    s_bh_n = 0;
+    ds_bridge_host_get(s_bh_cur, sizeof(s_bh_cur));
+    if (ds_bridge_host_list(raw, sizeof(raw)) == 0) {
+        char *p = raw;
+        while (*p && s_bh_n < BH_PANEL_MAX) {
+            char *e = strchr(p, '\n');
+            size_t len = e ? (size_t)(e - p) : strlen(p);
+            if (len > 0 && len < sizeof(s_bh_rows[0])) {
+                memcpy(s_bh_rows[s_bh_n], p, len);
+                s_bh_rows[s_bh_n][len] = '\0';
+                s_bh_n++;
+            }
+            if (!e) break;
+            p = e + 1;
+        }
+    }
+}
+
+/* 切换（点地址行）：保存+rebind，关面板（网络页状态行随之刷新） */
+static void bridge_switch_cb(lv_event_t *e)
+{
+    int idx = (int)(uintptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= s_bh_n) return;
+    if (strcmp(s_bh_rows[idx], s_bh_cur) != 0) {
+        ds_bridge_host_save(s_bh_rows[idx]);
+        ds_bridge_rebind(s_bh_rows[idx]); /* 热更新数据源全部 URL */
+    }
     mask_close_cb(NULL);
 }
 
-typedef struct {
-    char url[160];
-} bridge_save_t;
-
-static void *bridge_host_save_worker(void *arg)
+/* 删除（非当前地址）：从地址簿移除后重建列表 */
+static void bridge_del_cb(lv_event_t *e)
 {
-    bridge_save_t *bs = arg;
-    ds_bridge_host_save(bs->url);
-    ds_bridge_rebind(bs->url); /* 热更新 bridge 数据源全部 URL */
-    free(bs);
-    ui_lock();
-    lv_async_call(bridge_host_save_async, NULL);
-    ui_unlock();
-    return NULL;
+    int idx = (int)(uintptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= s_bh_n) return;
+    if (ds_bridge_host_remove(s_bh_rows[idx]) == 0) {
+        bridge_list_refresh();
+        bridge_list_view_build();
+    }
 }
 
-static void bridge_host_save_cb(lv_event_t *e)
+/* 添加视图：保存 → 入簿并激活 */
+static void bridge_add_save_cb(lv_event_t *e)
 {
     (void)e;
-    if (!g_view) return;
     lv_obj_t *ta = lv_obj_get_child(g_view, 1);
     const char *url = lv_textarea_get_text(ta);
     if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
@@ -327,16 +368,18 @@ static void bridge_host_save_cb(lv_event_t *e)
         lv_obj_set_style_text_color(st, UI_ERR, 0);
         return;
     }
-    bridge_save_t *bs = malloc(sizeof(*bs));
-    strlcpy(bs->url, url, sizeof(bs->url));
-    panel_thread_start(bridge_host_save_worker, bs);
+    ds_bridge_host_save(url);
+    ds_bridge_rebind(url);
+    bridge_list_refresh();
+    bridge_list_view_build();
 }
 
-void ui_bridge_host_panel_open(void)
+static void bridge_add_view_build(void)
 {
-    if (g_mask) mask_close_cb(NULL);
-    mask_create("Bridge 地址");
-
+    if (g_view) {
+        lv_obj_delete(g_view);
+        g_view = NULL;
+    }
     g_view = lv_obj_create(g_mask);
     lv_obj_set_size(g_view, 480, 480);
     lv_obj_set_style_bg_opa(g_view, LV_OPA_TRANSP, 0);
@@ -344,36 +387,103 @@ void ui_bridge_host_panel_open(void)
     lv_obj_set_style_pad_all(g_view, 0, 0);
     lv_obj_clear_flag(g_view, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *st = panel_label(g_view, "设备对话/订阅都走这个地址（改完立即生效）",
+    lv_obj_t *st = panel_label(g_view, "输入新的 Bridge 地址（保存即切换）",
                                &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(st, LV_ALIGN_TOP_LEFT, 16, 46);
 
-    char cur[160];
     lv_obj_t *ta = lv_textarea_create(g_view);
     lv_obj_set_size(ta, 440, 54);
     lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, 74);
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_max_length(ta, 158);
-    if (ds_bridge_host_get(cur, sizeof(cur))) {
-        lv_textarea_set_text(ta, cur);
-    }
+    if (s_bh_cur[0]) lv_textarea_set_text(ta, s_bh_cur);
 
     lv_obj_t *save = lv_button_create(g_view);
     lv_obj_set_size(save, 120, 44);
     lv_obj_align(save, LV_ALIGN_TOP_LEFT, 20, 140);
-    lv_obj_add_event_cb(save, bridge_host_save_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(save, bridge_add_save_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *l1 = panel_label(save, "保存", &lv_font_cn_14, UI_TEXT);
     lv_obj_align(l1, LV_ALIGN_CENTER, 0, 0);
 
-    lv_obj_t *close = lv_button_create(g_view);
-    lv_obj_set_size(close, 120, 44);
-    lv_obj_align(close, LV_ALIGN_TOP_LEFT, 152, 140);
-    lv_obj_add_event_cb(close, mask_close_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *l2 = panel_label(close, "取消", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *back = lv_button_create(g_view);
+    lv_obj_set_size(back, 120, 44);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 152, 140);
+    lv_obj_add_event_cb(back, bridge_list_view_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *l2 = panel_label(back, "返回", &lv_font_cn_14, UI_TEXT);
     lv_obj_align(l2, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *kb = lv_keyboard_create(g_view);
     lv_obj_set_size(kb, 480, 240);
     lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_keyboard_set_textarea(kb, ta);
+}
+
+/* 列表视图：地址簿 + 添加/关闭 */
+static void bridge_list_view_build(void)
+{
+    if (g_view) {
+        lv_obj_delete(g_view);
+        g_view = NULL;
+    }
+    bridge_list_refresh();
+
+    g_view = lv_obj_create(g_mask);
+    lv_obj_set_size(g_view, 460, 340);
+    lv_obj_align(g_view, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_set_style_bg_opa(g_view, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(g_view, 0, 0);
+    lv_obj_set_style_pad_all(g_view, 4, 0);
+    lv_obj_set_flex_flow(g_view, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(g_view, 6, 0);
+
+    if (s_bh_n == 0) {
+        lv_obj_t *em = panel_label(g_view, "还没有保存的地址，点\"添加地址\"",
+                                   &lv_font_cn_14, UI_TEXT_DIM);
+        lv_obj_set_style_pad_top(em, 30, 0);
+    }
+    for (int i = 0; i < s_bh_n; i++) {
+        bool cur = strcmp(s_bh_rows[i], s_bh_cur) == 0;
+        lv_obj_t *row = lv_button_create(g_view);
+        lv_obj_set_size(row, LV_PCT(100), 46);
+        lv_obj_add_event_cb(row, bridge_switch_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_t *u = panel_label(row, s_bh_rows[i], &lv_font_montserrat_14,
+                                  cur ? UI_ACCENT : UI_TEXT);
+        lv_obj_align(u, LV_ALIGN_LEFT_MID, 8, 0);
+        lv_label_set_long_mode(u, LV_LABEL_LONG_DOT);
+        lv_obj_set_width(u, 340);
+        if (cur) {
+            lv_obj_t *ok = panel_label(row, LV_SYMBOL_OK, &lv_font_montserrat_14, UI_ACCENT);
+            lv_obj_align(ok, LV_ALIGN_RIGHT_MID, -10, 0);
+        } else {
+            lv_obj_t *del = lv_button_create(row); /* 子按钮点它=删除 */
+            lv_obj_set_size(del, 36, 36);
+            lv_obj_align(del, LV_ALIGN_RIGHT_MID, -4, 0);
+            lv_obj_set_style_bg_opa(del, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_border_width(del, 0, 0);
+            lv_obj_add_event_cb(del, bridge_del_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+            lv_obj_t *x = panel_label(del, LV_SYMBOL_CLOSE, &lv_font_montserrat_14, UI_TEXT_DIM);
+            lv_obj_align(x, LV_ALIGN_CENTER, 0, 0);
+        }
+    }
+
+    lv_obj_t *add = lv_button_create(g_mask);
+    lv_obj_set_size(add, 190, 46);
+    lv_obj_align(add, LV_ALIGN_BOTTOM_LEFT, 20, -18);
+    lv_obj_add_event_cb(add, bridge_add_view_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *al = panel_label(add, "添加地址", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(al, LV_ALIGN_CENTER, 0, 0);
+
+    lv_obj_t *close = lv_button_create(g_mask);
+    lv_obj_set_size(close, 190, 46);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_RIGHT, -20, -18);
+    lv_obj_add_event_cb(close, mask_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *cl = panel_label(close, "关闭", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(cl, LV_ALIGN_CENTER, 0, 0);
+}
+
+void ui_bridge_host_panel_open(void)
+{
+    if (g_mask) mask_close_cb(NULL);
+    mask_create("Bridge 地址");
+    bridge_list_view_build();
 }

@@ -89,11 +89,5 @@ export const api = {
   snapshot: (id: string) => request<StoredSnapshot>(`/api/v1/quota/${id}/snapshot`),
   refresh: (id: string) =>
     request<StoredSnapshot>(`/api/v1/quota/${id}/refresh`, { method: 'POST' }),
-  prewarmZhipu: (idempotencyKey: string) =>
-    request<PrewarmResult>('/api/v1/quota/zhipu/prewarm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ idempotency_key: idempotencyKey }),
-    }),
   deviceStatus: () => request<Record<string, unknown>>('/api/v1/device/status'),
 }

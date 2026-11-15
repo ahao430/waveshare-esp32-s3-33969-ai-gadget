@@ -1,13 +1,16 @@
 {
   "code": 200,
-  "msg": "ok",
-  "data": {
-    "list": [
-      {
-        "planName": "GLM Coding Plan (Lite)",
-        "status": "active",
-        "expireTime": 1798761600000
-      }
-    ]
-  }
+  "msg": "操作成功",
+  "data": [
+    {
+      "id": "108253",
+      "productName": "GLM Coding Lite",
+      "productBigTitle": "GLM-5.1代码编程专享计划 · 限时优惠",
+      "status": "VALID",
+      "purchaseTime": "2025-12-11 15:07:09",
+      "valid": "2026-12-11 10:00:00-2027-12-11 10:00:00",
+      "nextRenewTime": "2026-12-11"
+    }
+  ],
+  "success": true
 }

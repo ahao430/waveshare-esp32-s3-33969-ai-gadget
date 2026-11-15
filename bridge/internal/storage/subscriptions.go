@@ -47,9 +47,11 @@ type Subscription struct {
 	BaseURL   string    `json:"base_url,omitempty"`
 	HasToken  bool      `json:"has_token"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Sort      int       `json:"-"` // 内部排序值（Web 用 ↑↓ 不消费数值）
 }
 
 // SaveSubscription 加密后 upsert（token 空串 = 清空凭据）。
+// 新建实例排到末尾（max(sort)+1）；编辑不改序。
 func (d *DB) SaveSubscription(id, kind, label, baseURL, token string, masterKey []byte) error {
 	if masterKey == nil {
 		return security.ErrNoMasterKey
@@ -63,8 +65,9 @@ func (d *DB) SaveSubscription(id, kind, label, baseURL, token string, masterKey 
 		}
 	}
 	_, err := d.sql.Exec(
-		`INSERT INTO subscriptions (id, kind, label, base_url, encrypted, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO subscriptions (id, kind, label, base_url, encrypted, sort, updated_at)
+		 VALUES (?, ?, ?, ?, ?,
+		         (SELECT COALESCE(MAX(sort), 0) + 1 FROM subscriptions), ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   kind=excluded.kind, label=excluded.label, base_url=excluded.base_url,
 		   encrypted=excluded.encrypted, updated_at=excluded.updated_at`,
@@ -73,6 +76,23 @@ func (d *DB) SaveSubscription(id, kind, label, baseURL, token string, masterKey 
 		return fmt.Errorf("storage: save subscription %s: %w", id, err)
 	}
 	return nil
+}
+
+// SetSubscriptionOrder 按传入顺序写 sort=1..n。id 集合与表现有不一致
+// 时整体拒绝（防并发删除后的脏写）——由调用方先比对。
+func (d *DB) SetSubscriptionOrder(ids []string) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return fmt.Errorf("storage: order tx: %w", err)
+	}
+	defer tx.Rollback()
+	for i, id := range ids {
+		if _, err := tx.Exec(
+			`UPDATE subscriptions SET sort = ? WHERE id = ?`, i+1, id); err != nil {
+			return fmt.Errorf("storage: order %s: %w", id, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // GetSubscription 解密读取（token 仅供 Bridge 内部抓取，不出 API）。
@@ -109,11 +129,12 @@ func (d *DB) DeleteSubscription(id string) error {
 	return nil
 }
 
-// ListSubscriptions 列表（无明文 token）。
+// ListSubscriptions 列表（无明文 token）。用户排序（sort）优先；
+// 未排序存量（全 0）按 id 稳定兜底。
 func (d *DB) ListSubscriptions() ([]Subscription, error) {
 	rows, err := d.sql.Query(
-		`SELECT id, kind, label, base_url, encrypted, updated_at
-		 FROM subscriptions ORDER BY updated_at DESC, id`)
+		`SELECT id, kind, label, base_url, encrypted, sort, updated_at
+		 FROM subscriptions ORDER BY sort, id`)
 	if err != nil {
 		return nil, fmt.Errorf("storage: list subscriptions: %w", err)
 	}
@@ -123,7 +144,7 @@ func (d *DB) ListSubscriptions() ([]Subscription, error) {
 		var s Subscription
 		var enc string
 		var ts int64
-		if err := rows.Scan(&s.ID, &s.Kind, &s.Label, &s.BaseURL, &enc, &ts); err != nil {
+		if err := rows.Scan(&s.ID, &s.Kind, &s.Label, &s.BaseURL, &enc, &s.Sort, &ts); err != nil {
 			return nil, err
 		}
 		s.HasToken = enc != ""

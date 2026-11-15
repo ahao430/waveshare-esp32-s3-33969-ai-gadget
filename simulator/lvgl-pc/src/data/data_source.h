@@ -26,16 +26,20 @@ typedef struct {
 
 #define DS_SUB_MAX 8
 
-/* 一个订阅（Provider）的额度视图（PLAN §5.1：单 App 多订阅左右切换） */
+/* 一个订阅（Provider）的额度视图（PLAN §5.1：单 App 多订阅左右切换）。
+ * 两种形态：窗口型（win_5h_s>0，coding plan 卡）；余额型（win_5h_s==0
+ * 且 balance 非空，按量计费卡——DeepSeek 余额查询，无窗口/预热概念）。 */
 typedef struct {
     char name[24];       /* 显示名（如 "智谱" "Kimi"） */
-    char plan[48];
+    char plan[48];       /* 套餐行（智谱已含"· X月X日到期"） */
+    char balance[20];    /* 余额文本（如 "¥110.35"；仅余额型） */
     int used_5h;         /* % */
     int used_week;       /* % */
-    int win_5h_s;        /* 5h 窗口总秒数（18000；换算剩余小时用） */
-    int week_s;          /* 周窗口总秒数（604800；换算 x/y 小时用） */
+    int win_5h_s;        /* 5h 窗口总秒数（18000；0=无窗口=余额型） */
+    int week_s;          /* 周窗口总秒数（604800） */
     long reset_5h;       /* unix 秒 */
     long reset_week;     /* unix 秒 */
+    bool can_prewarm;    /* provider 支持预热（现仅智谱） */
     bool valid;
 } ds_subscription_t;
 
@@ -235,9 +239,15 @@ bool ds_wifi_status(char *ssid, int ssid_cap, char *ip, int ip_cap);
 /* Bridge 地址（http://host:port）。get 返回 false=未配置（编译期
  * wifi_secret.h 兜底）；save 立即生效（下次 HTTP 请求即用新地址）。
  * 配网页保存地址后调 ds_bridge_rebind 让 bridge 数据源的热 URL 全部
- * 重算（无需重启）。 */
+ * 重算（无需重启）。
+ *
+ * 多地址（调试/多环境）：save 会把地址加入地址簿；list 列出全部已保存
+ * 地址（"\n" 分隔，含编译期兜底时首条为当前生效地址）；remove 删除
+ * 非当前地址。UI 切换 = save(目标) + rebind。 */
 bool ds_bridge_host_get(char *out, int cap);
 void ds_bridge_host_save(const char *url);
 void ds_bridge_rebind(const char *url);
+int ds_bridge_host_list(char *out, int cap); /* 0=已写 / -1=空 */
+int ds_bridge_host_remove(const char *url);  /* 0=已删 / -1=当前或未找到 */
 
 #endif /* DATA_SOURCE_H */

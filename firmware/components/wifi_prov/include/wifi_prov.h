@@ -29,7 +29,13 @@ void wifi_prov_save(const char *ssid, const char *pass);
 /* Bridge 地址（"http://host:port"）：返回 false = 未配置（调用方用
  * 编译期 BRIDGE_HOST 兜底）。存了就完全替代宏。 */
 bool wifi_prov_bridge_get(char *out, size_t cap);
+/* 保存并激活：加入地址簿（已存在则只激活）。 */
 void wifi_prov_bridge_save(const char *url);
+/* 地址簿（"\n" 分隔，首条=当前激活地址；簿空时返回编译期兜底单条）。
+ * 返回 0=已写 out / -1=完全无地址。 */
+int wifi_prov_bridge_list(char *out, size_t cap);
+/* 从地址簿删除；当前激活地址不可删（返回 -1），未找到返回 -1。 */
+int wifi_prov_bridge_remove(const char *url);
 
 /* 阻塞扫描（约 1.5~3s，内部 block 模式）。
  * 返回 0=成功（*n 条，按信号强度降序、同名 SSID 去重）/

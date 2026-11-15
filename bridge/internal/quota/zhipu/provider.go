@@ -85,8 +85,9 @@ func (p *Provider) FetchQuota(ctx context.Context, account quota.AccountRef) (*q
 	}
 
 	// 套餐接口独立容错：失败不影响额度快照。
-	if plan, planErr := p.fetchPlanName(ctx, account.APIKey); planErr == nil {
+	if plan, expires, planErr := p.fetchPlan(ctx, account.APIKey); planErr == nil {
 		snap.PlanName = plan
+		snap.PlanExpiresAt = expires
 	}
 	return snap, nil
 }
@@ -103,16 +104,16 @@ func (p *Provider) fetchLimitWindows(ctx context.Context, apiKey string) ([]quot
 	return windows, rawVer, nil
 }
 
-func (p *Provider) fetchPlanName(ctx context.Context, apiKey string) (string, error) {
+func (p *Provider) fetchPlan(ctx context.Context, apiKey string) (string, *time.Time, error) {
 	body, err := p.get(ctx, apiKey, subscriptionPath)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	plan, expires, err := parseSubscriptionResponseEx(body)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return formatPlanWithExpiry(plan, expires), nil
+	return formatPlanWithExpiry(plan, expires), expires, nil
 }
 
 // formatPlanWithExpiry 把套餐名与到期时间拼成设备端直接可显示的一行
@@ -249,6 +250,24 @@ func normalizeResetMs(v int64) int64 {
 // 套餐响应结构未完全验证：名字兼容 data.list[] 的 name/planName/title；
 // 到期兼容 expireTime/endTime/expiredTime（Unix 毫秒秒均收、ISO 也收），
 // 找不到返回空值（缺失不伪造）。
+// rawSubItem 订阅列表单项。真实响应（2026-11-16 实测）字段：
+// productName="GLM Coding Lite"、status="VALID"、
+// valid="2026-12-11 10:00:00-2027-12-11 10:00:00"（起止区间）。
+type rawSubItem struct {
+	Name            string `json:"name"`
+	PlanName        string `json:"planName"`
+	ProductName     string `json:"productName"`
+	ProductBigTitle string `json:"productBigTitle"`
+	Title           string `json:"title"`
+	Status          string `json:"status"`
+	Valid           any    `json:"valid"`
+	NextRenewTime   any    `json:"nextRenewTime"`
+	ExpireTime      any    `json:"expireTime"`
+	EndTime         any    `json:"endTime"`
+	ExpiredTime     any    `json:"expiredTime"`
+	ExpireAt        any    `json:"expireAt"`
+}
+
 func parseSubscriptionResponseEx(body []byte) (string, *time.Time, error) {
 	var env rawEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
@@ -258,25 +277,26 @@ func parseSubscriptionResponseEx(body []byte) (string, *time.Time, error) {
 		return "", nil, fmt.Errorf("%w: code=%v", quota.ErrUnsupportedResponse, env.Code)
 	}
 
-	var data struct {
-		List []struct {
-			Name        string `json:"name"`
-			PlanName    string `json:"planName"`
-			Title       string `json:"title"`
-			ExpireTime  any    `json:"expireTime"`
-			EndTime     any    `json:"endTime"`
-			ExpiredTime any    `json:"expiredTime"`
-			ExpireAt    any    `json:"expireAt"`
-		} `json:"list"`
+	// data 直接是数组（实测）；兼容 data={list:[...]} 形态（社区早期记录）
+	var items []rawSubItem
+	var obj struct {
+		List []rawSubItem `json:"list"`
 	}
-	if err := json.Unmarshal(env.Data, &data); err != nil {
-		return "", nil, fmt.Errorf("%w: data shape: %v", quota.ErrUnsupportedResponse, err)
+	if err := json.Unmarshal(env.Data, &items); err != nil {
+		if err2 := json.Unmarshal(env.Data, &obj); err2 != nil {
+			return "", nil, fmt.Errorf("%w: data shape: %v", quota.ErrUnsupportedResponse, err)
+		}
+		items = obj.List
 	}
 	var plan string
 	var expires *time.Time
-	for _, it := range data.List {
+	for _, it := range items {
+		switch strings.ToUpper(it.Status) {
+		case "EXPIRED", "INVALID", "CANCELED", "CANCELLED", "INACTIVE", "REFUNDED":
+			continue // 过期/失效订阅跳过（旧版描述性状态如 "active" 放行）
+		}
 		if plan == "" {
-			for _, cand := range []string{it.PlanName, it.Name, it.Title} {
+			for _, cand := range []string{it.ProductName, it.PlanName, it.Name, it.ProductBigTitle, it.Title} {
 				if cand != "" {
 					plan = cand
 					break
@@ -284,10 +304,13 @@ func parseSubscriptionResponseEx(body []byte) (string, *time.Time, error) {
 			}
 		}
 		if expires == nil {
-			for _, raw := range []any{it.ExpireTime, it.EndTime, it.ExpiredTime, it.ExpireAt} {
-				if t := parseAnyTime(raw); t != nil {
-					expires = t
-					break
+			expires = parseValidEnd(it.Valid)
+			if expires == nil {
+				for _, raw := range []any{it.NextRenewTime, it.ExpireTime, it.EndTime, it.ExpiredTime, it.ExpireAt} {
+					if t := parseAnyTime(raw); t != nil {
+						expires = t
+						break
+					}
 				}
 			}
 		}
@@ -296,6 +319,16 @@ func parseSubscriptionResponseEx(body []byte) (string, *time.Time, error) {
 		}
 	}
 	return plan, expires, nil // 结构可解析但没有套餐字段：不视为错误
+}
+
+// parseValidEnd 解析 valid 区间串 "起-止"（"2026-12-11 10:00:00-2027-12-11 10:00:00"）
+// 取结束时间；日期自带连字符，故按固定 19 字符时间戳 + '-' 分隔切。
+func parseValidEnd(raw any) *time.Time {
+	s, ok := raw.(string)
+	if !ok || len(s) < 21 || s[19] != '-' {
+		return nil
+	}
+	return parseAnyTime(s[20:])
 }
 
 // parseAnyTime 宽松解析时间字段：Unix 秒/毫秒数字或 ISO 字符串。

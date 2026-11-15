@@ -20,11 +20,12 @@ import (
 
 // subEntry 聚合端点的单条订阅视图。
 type subEntry struct {
-	ID       string               `json:"id"`
-	Kind     string               `json:"kind"`
-	Label    string               `json:"label"`
-	Snapshot *quota.QuotaSnapshot `json:"snapshot,omitempty"`
-	Error    string               `json:"error,omitempty"`
+	ID         string               `json:"id"`
+	Kind       string               `json:"kind"`
+	Label      string               `json:"label"`
+	CanPrewarm bool                 `json:"can_prewarm"` // provider 能力（现仅智谱）
+	Snapshot   *quota.QuotaSnapshot `json:"snapshot,omitempty"`
+	Error      string               `json:"error,omitempty"`
 }
 
 // fetchOne 抓取单条订阅（kind → Registry provider，token/base_url 从配置）。
@@ -35,6 +36,7 @@ func fetchOne(ctx context.Context, d Deps, sub storage.Subscription) subEntry {
 		entry.Error = "unknown_kind"
 		return entry
 	}
+	entry.CanPrewarm = p.Capabilities().CanPrewarm
 	_, _, baseURL, token, err := d.SubscriptionsDB.GetSubscription(sub.ID, d.MasterKey)
 	if err != nil {
 		entry.Error = "read_failed"
@@ -128,6 +130,44 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		}
 		logger.Info("subscription deleted", "id", id)
 		writeJSON(w, logger, http.StatusOK, map[string]bool{"deleted": true})
+	})
+
+	// 用户排序：order 必须与表现有实例集合完全一致（防并发删除后脏写）
+	mux.HandleFunc("POST /api/v1/subscriptions/order", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Order []string `json:"order"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16<<10)).Decode(&body); err != nil {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want {order:[id...]}")
+			return
+		}
+		list, err := db.ListSubscriptions()
+		if err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "list_failed", err.Error())
+			return
+		}
+		existing := map[string]bool{}
+		for _, s := range list {
+			existing[s.ID] = true
+		}
+		if len(body.Order) != len(existing) {
+			writeErr(w, logger, http.StatusBadRequest, "bad_order", "order 数量与实例数不一致")
+			return
+		}
+		seen := map[string]bool{}
+		for _, id := range body.Order {
+			if !existing[id] || seen[id] {
+				writeErr(w, logger, http.StatusBadRequest, "bad_order", "order 含未知或重复 id")
+				return
+			}
+			seen[id] = true
+		}
+		if err := db.SetSubscriptionOrder(body.Order); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "order_failed", err.Error())
+			return
+		}
+		logger.Info("subscription order saved", "n", len(body.Order))
+		writeJSON(w, logger, http.StatusOK, map[string]bool{"ok": true})
 	})
 
 	// 聚合快照：所有订阅实例逐个实时抓取（并发 3）。

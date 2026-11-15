@@ -238,6 +238,7 @@ static void fetch_subscriptions(gadget_state_t *st)
             if (n >= DS_SUB_MAX) break;
             const cJSON *sid = cJSON_GetObjectItem(it, "id");
             const cJSON *label = cJSON_GetObjectItem(it, "label");
+            const cJSON *cpw = cJSON_GetObjectItem(it, "can_prewarm");
             ds_subscription_t *s = &st->subs[n];
             memset(s, 0, sizeof(*s));
             if (cJSON_IsString(label) && label->valuestring[0]) {
@@ -245,6 +246,7 @@ static void fetch_subscriptions(gadget_state_t *st)
             } else if (cJSON_IsString(sid)) {
                 strncpy(s->name, sid->valuestring, sizeof(s->name) - 1);
             }
+            s->can_prewarm = cJSON_IsBool(cpw) && cJSON_IsTrue(cpw);
             const cJSON *snap = cJSON_GetObjectItem(it, "snapshot");
             if (!cJSON_IsObject(snap)) {
                 s->valid = false; /* 抓取失败/无 Key：显示错误态 */
@@ -259,6 +261,18 @@ static void fetch_subscriptions(gadget_state_t *st)
             const cJSON *plan = cJSON_GetObjectItem(snap, "plan_name");
             if (cJSON_IsString(plan)) {
                 strncpy(s->plan, plan->valuestring, sizeof(s->plan) - 1);
+            }
+            /* 余额型（DeepSeek 等按量计费）：credits 首条 → 余额文本 */
+            const cJSON *credits = cJSON_GetObjectItem(snap, "credits");
+            const cJSON *c0 = cJSON_IsArray(credits) ? cJSON_GetArrayItem(credits, 0) : NULL;
+            if (c0) {
+                const cJSON *bal = cJSON_GetObjectItem(c0, "balance");
+                const cJSON *unit = cJSON_GetObjectItem(c0, "unit");
+                if (cJSON_IsNumber(bal)) {
+                    const char *u = cJSON_IsString(unit) ? unit->valuestring : "";
+                    if (strcmp(u, "CNY") == 0) u = "¥";
+                    snprintf(s->balance, sizeof(s->balance), "%s%.2f", u, bal->valuedouble);
+                }
             }
             const cJSON *windows = cJSON_GetObjectItem(snap, "windows");
             const cJSON *w;

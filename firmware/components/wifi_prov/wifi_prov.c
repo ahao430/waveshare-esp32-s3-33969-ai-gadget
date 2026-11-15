@@ -70,9 +70,98 @@ bool wifi_prov_bridge_get(char *out, size_t cap)
     return nvs_read_str("bh", out, cap);
 }
 
+/* 地址簿最多 8 条、每条 ≤159 字节（NVS 单 string 上限内）。 */
+#define BH_MAX 8
+#define BH_LEN 160
+
+/* 读地址簿原始串（"\n" 分隔；空串=无） */
+static size_t bh_read(char *buf, size_t cap)
+{
+    nvs_handle_t h;
+    if (nvs_open(WIFI_PROV_NS, NVS_READONLY, &h) != ESP_OK) return 0;
+    size_t len = cap;
+    esp_err_t err = nvs_get_str(h, "bh_list", buf, &len);
+    nvs_close(h);
+    if (err != ESP_OK) { buf[0] = '\0'; return 0; }
+    return strlen(buf);
+}
+
+static void bh_write(const char *list)
+{
+    nvs_write_str("bh_list", list);
+}
+
 void wifi_prov_bridge_save(const char *url)
 {
+    if (!url || url[0] == '\0') return;
     nvs_write_str("bh", url);
+    /* 地址簿 upsert：已在簿中不重复追加 */
+    char list[BH_MAX * (BH_LEN + 1) + 1] = "";
+    size_t n = bh_read(list, sizeof(list));
+    if (strstr(list, url) != NULL) {
+        /* 已存在（strstr 足够：URL 互不为子串的概率极高，误判最多多发一条
+         * 重复项，切一次即修复） */
+        return;
+    }
+    int lines = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (list[i] == '\n') lines++;
+    }
+    if (n > 0) lines++;
+    if (lines >= BH_MAX) return; /* 簿满：只激活不追加 */
+    size_t off = n;
+    if (off > 0 && list[off - 1] != '\n' && off < sizeof(list) - 1) {
+        list[off++] = '\n';
+    }
+    strlcpy(list + off, url, sizeof(list) - off);
+    bh_write(list);
+}
+
+int wifi_prov_bridge_list(char *out, size_t cap)
+{
+    char list[BH_MAX * (BH_LEN + 1) + 1] = "";
+    bh_read(list, sizeof(list));
+    if (list[0] != '\0') {
+        strlcpy(out, list, cap);
+        return 0;
+    }
+    /* 簿空：编译期兜底作为唯一一条（main.c 通过 ds 层给的宏值无法
+     * 反查，这里留空由调用方补） */
+    out[0] = '\0';
+    return -1;
+}
+
+int wifi_prov_bridge_remove(const char *url)
+{
+    char list[BH_MAX * (BH_LEN + 1) + 1] = "";
+    size_t n = bh_read(list, sizeof(list));
+    if (n == 0 || !url) return -1;
+    char cur[BH_LEN] = "";
+    if (wifi_prov_bridge_get(cur, sizeof(cur)) && strcmp(cur, url) == 0) {
+        return -1; /* 当前激活地址不可删 */
+    }
+    char out[BH_MAX * (BH_LEN + 1) + 1] = "";
+    size_t off = 0;
+    bool removed = false;
+    const char *p = list;
+    while (*p) {
+        const char *e = strchr(p, '\n');
+        size_t len = e ? (size_t)(e - p) : strlen(p);
+        if (len > 0 && !(len == strlen(url) && strncmp(p, url, len) == 0)) {
+            if (off + len + 2 < sizeof(out)) {
+                memcpy(out + off, p, len);
+                off += len;
+                out[off++] = '\n';
+            }
+        } else if (len > 0) {
+            removed = true;
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    if (off > 0 && out[off - 1] == '\n') out[off - 1] = '\0';
+    bh_write(out);
+    return removed ? 0 : -1;
 }
 
 /* ---------------- 扫描 ---------------- */

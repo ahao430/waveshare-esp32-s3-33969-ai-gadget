@@ -44,8 +44,6 @@ typedef struct {
 	 * bot_id 空=全部实例；AstrBot 靠 username+session 记忆，本地清气泡
 	 * ≠ 机器人失忆——此调用让 Bridge 轮换两者（等效"新建会话"）。 */
 	int (*chat_reset)(const char *bot_id);
-	/* Web 后台地址（可为 NULL=不支持）：0=写 out / 1=未知。见 ds_admin_url。 */
-	int (*admin_url)(char *out, int cap);
 
 } ds_impl_t;
 

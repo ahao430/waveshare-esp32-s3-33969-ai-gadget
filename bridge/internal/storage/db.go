@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     label       TEXT NOT NULL,
     base_url    TEXT NOT NULL DEFAULT '',  -- 覆盖该 kind 的默认端点
     encrypted   TEXT NOT NULL DEFAULT '',  -- token（security.Encrypt；空=无凭据）
+    sort        INTEGER NOT NULL DEFAULT 0,-- 用户排序（0=未排，按 id 兜底）
     updated_at  INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS bots (          -- 大肥鱼机器人（AstrBot 实例）
@@ -86,6 +87,7 @@ func Open(path string) (*DB, error) {
 	ensureColumn(sqlDB, "bots", "model", "TEXT NOT NULL DEFAULT ''")
 	ensureColumn(sqlDB, "bots", "tts_provider", "TEXT NOT NULL DEFAULT ''") // deepseek|edge|''=自动
 	ensureColumn(sqlDB, "bots", "tts_voice", "TEXT NOT NULL DEFAULT ''")    // 音色 id/名字
+	ensureColumn(sqlDB, "subscriptions", "sort", "INTEGER NOT NULL DEFAULT 0") // 用户排序（2026-11-16）
 	return &DB{sql: sqlDB}, nil
 }
 
