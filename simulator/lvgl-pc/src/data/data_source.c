@@ -274,10 +274,3 @@ int ds_keys_fetch(char *pwr_short, char *boot_short,
     if (!g_impl->fetch_keys) return 1;
     return g_impl->fetch_keys(pwr_short, boot_short, key3_short, key3_long, cap);
 }
-
-int ds_admin_url(char *out, int cap)
-{
-    if (!g_impl) ds_init(NULL, NULL, NULL);
-    if (!g_impl->admin_url) return 1;
-    return g_impl->admin_url(out, cap);
-}

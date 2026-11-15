@@ -213,9 +213,31 @@ int ds_chat_bots(char *out, int cap);
 int ds_chat_active_id(char *out, int cap);
 int ds_chat_set_active(const char *id);
 
-/* Web 后台地址（手机扫码打开管理页）：由 Bridge 基址推导
- * http://<host>:5173（Web 与 Bridge 同机，Vite host:true）。
- * 返回 0=已写 out / 1=不支持（mock/基址未知，UI 显示占位提示）。 */
-int ds_admin_url(char *out, int cap);
+/* ---- 运行期配网（设备本地能力，ADR-009；实现 data_source_wifi.c，
+ * 单文件双平台：固件=NVS+esp_wifi 真实现，模拟器=演示数据） ---- */
+typedef struct {
+    char ssid[33];
+    int rssi;
+    bool secure; /* true=需要密码 */
+} ds_wifi_ap_t;
+
+/* 扫描周围 Wi-Fi（阻塞 1.5~3s，后台线程调用）。
+ * 返回 0=成功（*n 条）/ -1=Wi-Fi 忙（连接中）/ -2=失败。 */
+int ds_wifi_scan(ds_wifi_ap_t *out, int max, int *n);
+
+/* 连接并保存（阻塞 ≤15s，后台线程调用）：0=已连上 / -1=失败
+ * （密码错/超时；失败自动恢复旧网络）。密码为空 = 开放网络。 */
+int ds_wifi_connect(const char *ssid, const char *pass);
+
+/* 当前连接状态：true=已连接（写出 SSID 与 IP）；未连接时置空串。 */
+bool ds_wifi_status(char *ssid, int ssid_cap, char *ip, int ip_cap);
+
+/* Bridge 地址（http://host:port）。get 返回 false=未配置（编译期
+ * wifi_secret.h 兜底）；save 立即生效（下次 HTTP 请求即用新地址）。
+ * 配网页保存地址后调 ds_bridge_rebind 让 bridge 数据源的热 URL 全部
+ * 重算（无需重启）。 */
+bool ds_bridge_host_get(char *out, int cap);
+void ds_bridge_host_save(const char *url);
+void ds_bridge_rebind(const char *url);
 
 #endif /* DATA_SOURCE_H */

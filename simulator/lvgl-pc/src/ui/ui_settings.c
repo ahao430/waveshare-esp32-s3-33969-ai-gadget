@@ -13,6 +13,7 @@
 #include "ui_gesture.h"
 #include "ui_launcher.h"
 #include "ui_theme.h"
+#include "ui_wifi_panel.h"
 
 /* 子页 id */
 enum settings_page {
@@ -25,7 +26,6 @@ enum settings_page {
 
 static int g_page = SP_HOME;
 static lv_obj_t *g_root;
-static lv_obj_t *g_poll_timer;
 
 /* ---------------- 全屏二维码（网络页用） ---------------- */
 
@@ -282,57 +282,136 @@ static void page_display(lv_obj_t *scr)
 
 /* ---------------- 页面：网络与连接 ---------------- */
 
+/* 面板入口的 event 包装（lv_event_cb_t 签名） */
+static void wifi_panel_open_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_wifi_panel_open();
+}
+static void bridge_host_panel_open_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_bridge_host_panel_open();
+}
+
+/* 网络页状态轮询（Wi-Fi 状态卡 + Bridge 地址行 + 管理后台 URL 都是
+ * 运行期会变的：配网面板连上/保存后这里自动跟上） */
+static lv_timer_t *g_net_timer;
+static lv_obj_t *g_net_dot;
+static lv_obj_t *g_net_ssid_lbl;
+static lv_obj_t *g_net_ip_lbl;
+static lv_obj_t *g_net_bh_val_lbl;
+static lv_obj_t *g_net_admin_val_lbl;
+/* 管理后台二维码：Bridge 同源（Web 静态托管在 Bridge 上，B 阶段）；
+ * static：二维码回调持有的指针要活过建页栈帧 */
+static char g_admin_url[160];
+
+static void net_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!g_net_ssid_lbl) return;
+    char ssid[33], ip[24];
+    bool ok = ds_wifi_status(ssid, sizeof(ssid), ip, sizeof(ip));
+    lv_obj_set_style_bg_color(g_net_dot, ok ? UI_OK : UI_ERR, 0);
+    char line[64];
+    snprintf(line, sizeof(line), "%s%s", ok ? ssid : "", ok ? " · 已连接" : "未连接 Wi-Fi");
+    lv_label_set_text(g_net_ssid_lbl, line);
+    lv_label_set_text(g_net_ip_lbl, ok ? ip : "");
+    if (g_net_bh_val_lbl) {
+        char bh[160];
+        lv_label_set_text(g_net_bh_val_lbl,
+                          ds_bridge_host_get(bh, sizeof(bh)) ? bh : "未配置");
+    }
+    /* 管理后台地址 = Bridge 同源（Web 静态托管在 Bridge 上）；二维码
+     * 与行文案随配网改动自动跟上 */
+    if (!ds_bridge_host_get(g_admin_url, sizeof(g_admin_url))) {
+        g_admin_url[0] = '\0';
+    }
+    if (g_net_admin_val_lbl) {
+        lv_label_set_text(g_net_admin_val_lbl,
+                          g_admin_url[0] ? g_admin_url : "未配置 Bridge");
+    }
+}
+
 static void page_network(lv_obj_t *scr)
 {
     page_title(scr, "网络与连接");
 
-    /* Wi-Fi 状态卡（模拟器 mock；真机读 network_manager） */
+    /* Wi-Fi 状态卡（真数据，net_timer_cb 轮询刷新） */
     lv_obj_t *card1 = lv_obj_create(scr);
     lv_obj_set_size(card1, LV_PCT(100), 72);
-    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 56);
+    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 52);
     ui_style_card(card1);
     lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *dot = lv_obj_create(card1);
-    lv_obj_set_size(dot, 10, 10);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot, UI_OK, 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_align(dot, LV_ALIGN_LEFT_MID, 4, 0);
-    lv_obj_t *w = ui_label(card1, "Home-WiFi-5G · 已连接", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(w, LV_ALIGN_LEFT_MID, 22, 0);
-    lv_obj_t *ip = ui_label(card1, "192.168.1.42", &lv_font_montserrat_12, UI_TEXT_DIM);
-    lv_obj_align(ip, LV_ALIGN_RIGHT_MID, -8, 0);
+    g_net_dot = lv_obj_create(card1);
+    lv_obj_set_size(g_net_dot, 10, 10);
+    lv_obj_set_style_radius(g_net_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(g_net_dot, UI_TEXT_DIM, 0);
+    lv_obj_set_style_bg_opa(g_net_dot, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_net_dot, 0, 0);
+    lv_obj_align(g_net_dot, LV_ALIGN_LEFT_MID, 4, 0);
+    g_net_ssid_lbl = ui_label(card1, "…", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(g_net_ssid_lbl, LV_ALIGN_LEFT_MID, 22, 0);
+    g_net_ip_lbl = ui_label(card1, "", &lv_font_montserrat_12, UI_TEXT_DIM);
+    lv_obj_align(g_net_ip_lbl, LV_ALIGN_RIGHT_MID, -8, 0);
 
-    /* 三行链接（点击 → 全屏大码）。「管理后台」用真实地址（Bridge 同机
-     * 的 Web :5173）——此前写死演示 IP 192.168.1.42，手机扫码 404。
-     * static：二维码回调持有的指针要活过本函数栈帧。 */
-    static char admin_url[96];
-    const char *admin_disp, *admin_qr;
-    if (ds_admin_url(admin_url, sizeof(admin_url)) == 0) {
-        admin_disp = admin_qr = admin_url;
-    } else {
-        admin_disp = "未连接 Bridge";
-        admin_qr  = ""; /* 空串：点击仍可弹层但不渲染码 */
-    }
-    struct { const char *name; const char *url; const char *qr; } rows[] = {
-        { "配网页",   "http://192.168.4.1",  "http://192.168.4.1" },
-        { "小智后台", "xiaozhi.me/console",  "https://xiaozhi.me/console" },
-        { "管理后台", admin_disp,            admin_qr },
+    /* 行 1：Wi-Fi 设置 → 配网面板（扫描/选网/密码，ADR-009） */
+    lv_obj_t *r1 = lv_button_create(scr);
+    lv_obj_set_size(r1, LV_PCT(100) - 8, 48);
+    lv_obj_align(r1, LV_ALIGN_TOP_MID, 0, 132);
+    ui_style_card(r1);
+    lv_obj_set_style_bg_color(r1, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(r1, wifi_panel_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *t1 = ui_label(r1, "Wi-Fi 设置", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(t1, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *h1 = ui_label(r1, LV_SYMBOL_WIFI " 选择网络", &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(h1, LV_ALIGN_RIGHT_MID, -10, 0);
+
+    /* 行 2：Bridge 地址 → 编辑面板（保存即 rebind 生效） */
+    lv_obj_t *r2 = lv_button_create(scr);
+    lv_obj_set_size(r2, LV_PCT(100) - 8, 48);
+    lv_obj_align(r2, LV_ALIGN_TOP_MID, 0, 188);
+    ui_style_card(r2);
+    lv_obj_set_style_bg_color(r2, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(r2, bridge_host_panel_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *t2 = ui_label(r2, "Bridge 地址", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(t2, LV_ALIGN_LEFT_MID, 10, 0);
+    g_net_bh_val_lbl = ui_label(r2, "…", &lv_font_montserrat_12, UI_TEXT_DIM);
+    lv_obj_align(g_net_bh_val_lbl, LV_ALIGN_RIGHT_MID, -28, 0);
+    lv_label_set_long_mode(g_net_bh_val_lbl, LV_LABEL_LONG_DOT);
+    lv_obj_set_width(g_net_bh_val_lbl, 250);
+    lv_obj_t *a2 = ui_label(r2, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(a2, LV_ALIGN_RIGHT_MID, -10, 0);
+
+    /* 行 3/4：二维码行（点击 → 全屏大码） */
+    struct { const char *name; const char *url; const char *qr; } qrows[] = {
+        { "小智后台", "xiaozhi.me/console", "https://xiaozhi.me/console" },
+        { "管理后台", g_admin_url,          g_admin_url },
     };
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
         lv_obj_t *row = lv_button_create(scr);
         lv_obj_set_size(row, LV_PCT(100) - 8, 48);
-        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 140 + i * 56);
+        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, 244 + i * 56);
         ui_style_card(row);
         lv_obj_set_style_bg_color(row, UI_CARD_HI, 0);
-        lv_obj_add_event_cb(row, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)rows[i].qr);
-        lv_obj_t *t = ui_label(row, rows[i].name, &lv_font_cn_14, UI_TEXT);
+        lv_obj_add_event_cb(row, qr_open_fullscreen_cb, LV_EVENT_CLICKED, (void *)qrows[i].qr);
+        lv_obj_t *t = ui_label(row, qrows[i].name, &lv_font_cn_14, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_LEFT_MID, 10, 0);
-        lv_obj_t *u = ui_label(row, rows[i].url, &lv_font_montserrat_12, UI_TEXT_DIM);
+        lv_obj_t *u = ui_label(row, qrows[i].url, &lv_font_montserrat_12, UI_TEXT_DIM);
         lv_obj_align(u, LV_ALIGN_RIGHT_MID, -34, 0);
+        if (i == 1) {
+            g_net_admin_val_lbl = u; /* timer 刷新（URL 可能在配网后变化） */
+        }
         lv_obj_t *a = ui_label(row, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
         lv_obj_align(a, LV_ALIGN_RIGHT_MID, -10, 0);
+    }
+
+    net_timer_cb(NULL); /* 立即刷一次 */
+    g_net_timer = lv_timer_create(net_timer_cb, 1500, NULL);
+
+    /* 回归钩子：进网络页即弹配网面板（headless 截帧验证列表/键盘） */
+    if (getenv("GADGET_DEMO_WIFI_PICK")) {
+        ui_wifi_panel_open();
     }
 }
 
@@ -468,6 +547,13 @@ static void page_device(lv_obj_t *scr)
 void ui_settings_build_page(lv_obj_t *scr)
 {
     lv_obj_set_style_pad_all(scr, 16, 0);
+
+    /* 子页切换：杀网络页轮询（timer 持有的 label 属于被 clean 的旧页） */
+    if (g_net_timer) {
+        lv_timer_delete(g_net_timer);
+        g_net_timer = NULL;
+        g_net_ssid_lbl = g_net_ip_lbl = g_net_bh_val_lbl = g_net_admin_val_lbl = NULL;
+    }
 
     switch (g_page) {
     case SP_DISPLAY:

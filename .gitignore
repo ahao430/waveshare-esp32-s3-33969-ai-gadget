@@ -59,3 +59,6 @@ out/
 
 # bring-up Wi-Fi 凭据（不进仓库）
 firmware/main/wifi_secret.h
+
+# build-release.sh 部署产物
+/dist/

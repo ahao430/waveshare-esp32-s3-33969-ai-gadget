@@ -33,6 +33,7 @@
 #include "lvgl.h"
 #include "nvs_flash.h"
 #include "power_manager.h"
+#include "wifi_prov.h"
 #include "ui.h"
 #include "ui_keys.h"
 #include "data_source.h"
@@ -76,12 +77,19 @@ static inline void display_unlock(void) { esp_lv_adapter_unlock(); }
  * 断言 xQueueSemaphoreTake failed: uxItemSize == 0）。 */
 static void net_probe_once(void)
 {
-    /* 与语音请求同一条通道（data/http_client.c 的 BSD socket 实现） */
+    /* 与语音请求同一条通道（data/http_client.c 的 BSD socket 实现）。
+     * Bridge 地址运行期可配（ADR-009）：NVS 优先，编译期宏兜底 */
     static char body[256];
+    char url[192];
+    char host[160];
+    if (!ds_bridge_host_get(host, sizeof(host))) {
+        ESP_LOGW(TAG, "net probe: bridge host 未配置，跳过");
+        return;
+    }
+    snprintf(url, sizeof(url), "%s/api/v1/bots", host);
     size_t blen = 0;
     int64_t t0 = esp_timer_get_time();
-    int st = http_get_bin(BRIDGE_HOST "/api/v1/bots", body, sizeof(body), &blen,
-                          5000);
+    int st = http_get_bin(url, body, sizeof(body), &blen, 5000);
     ESP_LOGW(TAG, "net probe: status=%d body=%u dur=%lldms", st,
              (unsigned)blen, (long long)((esp_timer_get_time() - t0) / 1000));
 }
@@ -639,8 +647,17 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        /* 有凭据才连（未配网时 start 仅供扫描；凭据来自 NVS 或宏兜底，
+         * wifi_start 已 set_config，这里读回判断） */
+        wifi_config_t cur;
+        if (esp_wifi_get_config(WIFI_IF_STA, &cur) == ESP_OK &&
+            cur.sta.ssid[0] != '\0') {
+            esp_wifi_connect();
+        } else {
+            ESP_LOGW(TAG, "wifi started, 未配网（设置→网络与连接→Wi-Fi 设置）");
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (wifi_prov_busy()) return; /* 配网试连期间避让，由 wifi_prov 驱动 */
         ESP_LOGW(TAG, "wifi disconnected, retry");
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -695,22 +712,37 @@ static void net_stack_init(void)
 
 static void wifi_start(void)
 {
-    if (strlen(WIFI_SSID) == 0) {
-        ESP_LOGW(TAG, "wifi_secret.h 缺失，跳过 Wi-Fi");
-        return;
-    }
     net_stack_init();
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_evt, NULL));
-    wifi_config_t wc = { 0 };
-    strlcpy((char *)wc.sta.ssid, WIFI_SSID, sizeof(wc.sta.ssid));
-    strlcpy((char *)wc.sta.password, WIFI_PASS, sizeof(wc.sta.password));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+
+    /* 凭据优先级：NVS（配网页保存，ADR-009）→ wifi_secret.h 编译兜底 */
+    char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
+    const char *src = "wifi_secret.h";
+    if (wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass))) {
+        src = "nvs";
+    } else if (strlen(WIFI_SSID) > 0) {
+        strlcpy(ssid, WIFI_SSID, sizeof(ssid));
+        strlcpy(pass, WIFI_PASS, sizeof(pass));
+    } else {
+        ssid[0] = '\0'; /* 未配网：仍 start（扫描/配网需要），不 connect */
+    }
+
+    if (ssid[0] != '\0') {
+        wifi_config_t wc = { 0 };
+        strlcpy((char *)wc.sta.ssid, ssid, sizeof(wc.sta.ssid));
+        strlcpy((char *)wc.sta.password, pass, sizeof(wc.sta.password));
+        ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
+    }
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "wifi connecting to \"%s\" ...", WIFI_SSID);
+    if (ssid[0] != '\0') {
+        ESP_LOGI(TAG, "wifi connecting to \"%s\" (creds=%s) ...", ssid, src);
+    } else {
+        ESP_LOGW(TAG, "wifi 未配网，等待设置页配置（扫描可用）");
+    }
 }
 
 void app_main(void)
@@ -778,9 +810,14 @@ void app_main(void)
 
     heap_report("post-display");
 
-    if (strlen(BRIDGE_HOST) > 0) {
-        ds_init("bridge", BRIDGE_HOST, NULL);
-        ESP_LOGI(TAG, "data source -> bridge(%s)", BRIDGE_HOST);
+    /* 数据源切 bridge：地址运行期可配（NVS 优先，ADR-009），配网页
+     * 改地址后无需重刷（下次 ds_init/HTTP 即生效） */
+    char bridge_host[160];
+    if (ds_bridge_host_get(bridge_host, sizeof(bridge_host))) {
+        ds_init("bridge", bridge_host, NULL);
+        ESP_LOGI(TAG, "data source -> bridge(%s)", bridge_host);
+    } else {
+        ESP_LOGW(TAG, "bridge host 未配置（设置→网络与连接 可配）");
     }
 
     display_lock();

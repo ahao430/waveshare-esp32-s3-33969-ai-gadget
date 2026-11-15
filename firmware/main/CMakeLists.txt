@@ -14,6 +14,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_monitor.c
     ${SIM_SRC_DIR}/ui/icons/icon_embed.c
     ${SIM_SRC_DIR}/ui/ui_settings.c
+    ${SIM_SRC_DIR}/ui/ui_wifi_panel.c
     ${SIM_SRC_DIR}/ui/ui_statusbar.c
     ${SIM_SRC_DIR}/ui/ui_theme.c
     ${SIM_SRC_DIR}/ui/ui_weather.c
@@ -26,6 +27,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/data/data_source.c
     ${SIM_SRC_DIR}/data/data_source_mock.c
     ${SIM_SRC_DIR}/data/data_source_bridge.c
+    ${SIM_SRC_DIR}/data/data_source_wifi.c
     ${SIM_SRC_DIR}/data/http_client.c
     ${SIM_SRC_DIR}/data/mock_data.c
     # 语音会话：voice_session 状态机 + mock（模拟器双端兼容）+ esp32 真机 ops
@@ -43,6 +45,7 @@ idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
         espressif__esp_codec_dev                # audio_esp32：ES8311/ES7210 读写
         freertos                                # audio_esp32：采集/播放任务
         power_manager                           # AXP2101 电池/充电
+        wifi_prov                               # 运行期配网（NVS+扫描+试连）
         esp_wifi esp_event esp_netif nvs_flash  # Wi-Fi/NVS
         esp_timer                               # esp_timer_get_time
         esp_driver_gpio esp_driver_i2c          # KEY3 ISR / I2C 扫描探针

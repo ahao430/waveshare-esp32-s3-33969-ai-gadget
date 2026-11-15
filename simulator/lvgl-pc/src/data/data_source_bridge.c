@@ -54,7 +54,6 @@ static int bridge_fetch_weather(ds_weather_t *out);
 static int bridge_fetch_theme(int *theme);
 static int bridge_fetch_keys(char *pwr_short, char *boot_short,
                              char *key3_short, char *key3_long, int cap);
-static int bridge_admin_url(char *out, int cap);
 
 static void bridge_init(void)
 {
@@ -493,7 +492,7 @@ static int bridge_chat_providers(char *out, int cap)
 static int bridge_chat_bots(char *out, int cap)
 {
     static char bots_url[256];
-    if (bots_url[0] == '\0') snprintf(bots_url, sizeof(bots_url), "%s/api/v1/bots", g_base);
+    snprintf(bots_url, sizeof(bots_url), "%s/api/v1/bots", g_base);
     char buf[4096];
     if (http_get(bots_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
     cJSON *root = cJSON_Parse(buf);
@@ -520,9 +519,7 @@ static int bridge_chat_bots(char *out, int cap)
 static int bridge_chat_active_id(char *out, int cap)
 {
     static char active_url[256];
-    if (active_url[0] == '\0') {
-        snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
-    }
+    snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
     char buf[1024];
     if (http_get(active_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
     cJSON *root = cJSON_Parse(buf);
@@ -542,37 +539,43 @@ static int bridge_chat_active_id(char *out, int cap)
 static int bridge_chat_set_active(const char *id)
 {
     static char active_url[256];
-    if (active_url[0] == '\0') {
-        snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
-    }
+    snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
     char body[160], buf[512];
     snprintf(body, sizeof(body), "{\"id\":\"%s\"}", id ? id : "");
     int st = http_put_json(active_url, body, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
     return (st == 200) ? 0 : -1;
 }
 
+/* urls_fill 由 g_base 重算全部模块级 URL（注册与 rebind 共用）。
+ * 配网页改 Bridge 地址后经 ds_bridge_rebind 立即生效，无需重启。 */
+static void urls_fill(void)
+{
+    snprintf(g_url, sizeof(g_url), "%s/api/v1/quota/%s/snapshot",
+             g_base, g_provider);
+    snprintf(g_kimi_url, sizeof(g_kimi_url), "%s/api/v1/quota/kimi/snapshot", g_base);
+    snprintf(g_komari_url, sizeof(g_komari_url), "%s/api/v1/komari/nodes", g_base);
+    snprintf(g_prewarm_url, sizeof(g_prewarm_url), "%s/api/v1/quota/zhipu/prewarm", g_base);
+    snprintf(g_voice_url, sizeof(g_voice_url), "%s/api/v1/voice/interact", g_base);
+    snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers", g_base);
+    snprintf(g_chat_reset_url, sizeof(g_chat_reset_url), "%s/api/v1/chat/reset", g_base);
+    snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions", g_base);
+    snprintf(g_subs_url, sizeof(g_subs_url), "%s/api/v1/quota/subscriptions", g_base);
+}
+
+void ds_bridge_rebind(const char *bridge_url)
+{
+    if (!bridge_url || bridge_url[0] == '\0') return;
+    strlcpy(g_base, bridge_url, sizeof(g_base));
+    snprintf(g_name, sizeof(g_name), "bridge(%s)", g_base);
+    urls_fill();
+}
+
 const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
 {
     snprintf(g_base, sizeof(g_base), "%s", bridge_url);
     snprintf(g_provider, sizeof(g_provider), "%s", provider);
-    snprintf(g_url, sizeof(g_url), "%s/api/v1/quota/%s/snapshot",
-             bridge_url, provider);
-    snprintf(g_kimi_url, sizeof(g_kimi_url), "%s/api/v1/quota/kimi/snapshot",
-             bridge_url);
-    snprintf(g_komari_url, sizeof(g_komari_url), "%s/api/v1/komari/nodes",
-             bridge_url);
-    snprintf(g_prewarm_url, sizeof(g_prewarm_url), "%s/api/v1/quota/zhipu/prewarm",
-             bridge_url);
-    snprintf(g_voice_url, sizeof(g_voice_url), "%s/api/v1/voice/interact",
-             bridge_url);
-    snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers",
-             bridge_url);
-    snprintf(g_chat_reset_url, sizeof(g_chat_reset_url), "%s/api/v1/chat/reset",
-             g_base);
-    snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions",
-             bridge_url);
-    snprintf(g_subs_url, sizeof(g_subs_url), "%s/api/v1/quota/subscriptions",
-             bridge_url);
+    snprintf(g_name, sizeof(g_name), "bridge(%s)", g_base);
+    urls_fill();
     static const ds_impl_t impl = {
         .name          = g_name, /* bridge_init 填充后内容稳定，指针不变 */
         .init          = bridge_init,
@@ -590,28 +593,8 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .fetch_keys       = bridge_fetch_keys,
         .fetch_weather    = bridge_fetch_weather,
         .fetch_launcher   = bridge_fetch_launcher,
-        .admin_url        = bridge_admin_url,
     };
     return &impl;
-}
-
-/* Web 后台与 Bridge 同机（Vite :5173 host:true）：从基址剥出 host 拼 5173。
- * 设置页"管理后台"二维码用——此前写死演示地址 192.168.1.42，扫码 404。 */
-static int bridge_admin_url(char *out, int cap)
-{
-    if (g_base[0] == '\0') return 1;
-    const char *p = strstr(g_base, "://");
-    p = p ? p + 3 : g_base;
-    char host[64];
-    int i = 0;
-    while (p[i] != '\0' && p[i] != ':' && p[i] != '/' && i < (int)sizeof(host) - 1) {
-        i++;
-    }
-    if (i == 0) return 1;
-    memcpy(host, p, (size_t)i);
-    host[i] = '\0';
-    snprintf(out, (size_t)cap, "http://%s:5173", host);
-    return 0;
 }
 
 /* 自定义背景：GET /api/v1/appearance/background（≤256KB，Web 端已压到
@@ -620,9 +603,7 @@ static int bridge_admin_url(char *out, int cap)
 static int bridge_fetch_theme(int *theme)
 {
     static char th_url[256];
-    if (th_url[0] == '\0') {
-        snprintf(th_url, sizeof(th_url), "%s/api/v1/appearance/theme", g_base);
-    }
+    snprintf(th_url, sizeof(th_url), "%s/api/v1/appearance/theme", g_base);
     char buf[512];
     int status = http_get(th_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
     if (status != 200) return -1;
@@ -645,9 +626,7 @@ static int bridge_fetch_theme(int *theme)
 static int bridge_fetch_launcher(char *out_csv, int cap, int *count)
 {
     static char lay_url[256];
-    if (lay_url[0] == '\0') {
-        snprintf(lay_url, sizeof(lay_url), "%s/api/v1/launcher", g_base);
-    }
+    snprintf(lay_url, sizeof(lay_url), "%s/api/v1/launcher", g_base);
     char buf[2048];
     int status = http_get(lay_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
     if (status != 200) return -1;
@@ -679,9 +658,7 @@ static int bridge_fetch_launcher(char *out_csv, int cap, int *count)
 static int bridge_fetch_weather(ds_weather_t *out)
 {
     static char wx_url[256];
-    if (wx_url[0] == '\0') {
-        snprintf(wx_url, sizeof(wx_url), "%s/api/v1/weather", g_base);
-    }
+    snprintf(wx_url, sizeof(wx_url), "%s/api/v1/weather", g_base);
     char *buf = malloc(8192); /* 8KB 也不上栈（worker 栈预算紧） */
     if (!buf) {
         if (out) out->valid = false;
@@ -753,9 +730,7 @@ static int bridge_fetch_keys(char *pwr_short, char *boot_short,
                              char *key3_short, char *key3_long, int cap)
 {
     static char keys_url[256];
-    if (keys_url[0] == '\0') {
-        snprintf(keys_url, sizeof(keys_url), "%s/api/v1/keys", g_base);
-    }
+    snprintf(keys_url, sizeof(keys_url), "%s/api/v1/keys", g_base);
     char buf[1024];
     int status = http_get(keys_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
     if (status != 200) return -1;
@@ -787,9 +762,7 @@ static int bridge_fetch_keys(char *pwr_short, char *boot_short,
 static int bridge_fetch_background(const char *save_path)
 {
     static char bg_url[256];
-    if (bg_url[0] == '\0') {
-        snprintf(bg_url, sizeof(bg_url), "%s/api/v1/appearance/background", g_base);
-    }
+    snprintf(bg_url, sizeof(bg_url), "%s/api/v1/appearance/background", g_base);
 
     /* 背景图响应缓冲 256KB：ESP 上 PSRAM 惰性分配（DRAM BSS 放不下） */
     static char *buf;
