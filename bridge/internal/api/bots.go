@@ -1,5 +1,17 @@
-// bots.go — 大肥鱼机器人（AstrBot 实例）CRUD + 连通性测试。
-// Web 后台创建多个机器人；对话请求经 BotResolver 现读 DB（增删即时生效）。
+// bots.go — 大肥鱼机器人（AstrBot）管理：公用连接 + 多实例。
+//
+// 结构（用户 2026-11 反馈调整）：
+//   - AstrBot 地址与 Token 是**公用配置**（app_settings.astrbot，加密存）；
+//   - 每个机器人实例只存 名称 + AstrBot 配置文件（人设/模型套餐），
+//     可选 provider/model 覆盖；对话请求经 BotResolver 现读 DB 即时生效。
+//
+// 路由：
+//   GET/PUT /api/v1/astrbot/config   公用连接（token 只写不回）
+//   POST    /api/v1/astrbot/probe    用公用连接测试（可带 config_id）
+//   GET     /api/v1/astrbot/configs  用公用连接拉配置文件列表
+//   GET/POST /api/v1/bots            实例列表/新建或更新（label+config_id）
+//   DELETE  /api/v1/bots/{id}
+//   POST    /api/v1/bots/probe       测试某实例（公用连接 + 该实例 config）
 package api
 
 import (
@@ -13,10 +25,86 @@ import (
 	"gadget-bridge/internal/ai"
 )
 
-// serveBots 挂机器人路由（Deps.SubscriptionsDB 非 nil 时—— bots 与订阅
-// 共用同一个 *storage.DB）。
 func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 	db := d.SubscriptionsDB
+
+	// ---- AstrBot 公用连接 ----
+
+	mux.HandleFunc("GET /api/v1/astrbot/config", func(w http.ResponseWriter, r *http.Request) {
+		baseURL, token := db.GetAstrBotConn(d.MasterKey)
+		writeJSON(w, logger, http.StatusOK, map[string]any{
+			"base_url":  baseURL,
+			"has_token": token != "",
+		})
+	})
+
+	mux.HandleFunc("PUT /api/v1/astrbot/config", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			BaseURL string  `json:"base_url"`
+			Token   *string `json:"token"` // nil=保留；""=清除；非空=更新
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
+			return
+		}
+		if body.BaseURL == "" {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "base_url 必填")
+			return
+		}
+		_, oldToken := db.GetAstrBotConn(d.MasterKey)
+		token := oldToken
+		if body.Token != nil {
+			token = *body.Token
+		}
+		if err := db.SaveAstrBotConn(body.BaseURL, token, d.MasterKey); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
+			return
+		}
+		logger.Info("astrbot conn saved") // 不记地址/token
+		writeJSON(w, logger, http.StatusOK, map[string]bool{"ok": true})
+	})
+
+	mux.HandleFunc("POST /api/v1/astrbot/probe", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ConfigID string `json:"config_id"`
+		}
+		_ = json.NewDecoder(io.LimitReader(r.Body, 8*1024)).Decode(&body)
+		baseURL, token := db.GetAstrBotConn(d.MasterKey)
+		if baseURL == "" {
+			writeJSON(w, logger, http.StatusOK, map[string]any{
+				"ok": false, "error": "先在上方保存 AstrBot 地址与 Token",
+			})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		reply, err := ai.ProbeAstrBot(ctx, "conn", baseURL, token, body.ConfigID, "", "")
+		if err != nil {
+			writeJSON(w, logger, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "reply": reply})
+	})
+
+	mux.HandleFunc("GET /api/v1/astrbot/configs", func(w http.ResponseWriter, r *http.Request) {
+		baseURL, token := db.GetAstrBotConn(d.MasterKey)
+		if baseURL == "" {
+			writeJSON(w, logger, http.StatusOK, map[string]any{
+				"ok": false, "error": "先保存 AstrBot 地址与 Token",
+			})
+			return
+		}
+		configs, err := ai.FetchAstrBotConfigs(r.Context(), baseURL, token)
+		if err != nil {
+			writeJSON(w, logger, http.StatusOK, map[string]any{
+				"ok": false, "error": err.Error(),
+			})
+			return
+		}
+		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "configs": configs})
+	})
+
+	// ---- 机器人实例（名称 + 配置文件） ----
 
 	mux.HandleFunc("GET /api/v1/bots", func(w http.ResponseWriter, r *http.Request) {
 		list, err := db.ListBots()
@@ -29,41 +117,31 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 
 	mux.HandleFunc("POST /api/v1/bots", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ID       string  `json:"id"`
-			Label    string  `json:"label"`
-			BaseURL  string  `json:"base_url"`
-			Token    *string `json:"token"` // nil=保留原值（编辑留空）；""=清除；非空=新值
-			ConfigID string  `json:"config_id"`
-			Provider string  `json:"provider"`
-			Model    string  `json:"model"`
+			ID       string `json:"id"`
+			Label    string `json:"label"`
+			ConfigID string `json:"config_id"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
 			return
 		}
-		if body.Label == "" || body.BaseURL == "" {
-			writeErr(w, logger, http.StatusBadRequest, "bad_request", "label 和 base_url 必填（base_url 为 AstrBot 部署地址）")
+		if body.Label == "" {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "名称必填")
 			return
 		}
 		id := body.ID
 		if id == "" {
 			id = "bot-" + randomID()
 		}
-		token := ""
-		if body.Token != nil {
-			token = *body.Token
-		} else if id != "" { // 编辑未带 token：读旧值
-			if _, _, t, _, _, _, err := db.GetBot(id, d.MasterKey); err == nil {
-				token = t
-			}
-		}
-		if err := db.SaveBot(id, body.Label, body.BaseURL, token,
+		// 实例不再存地址/token（公用连接见 astrbot config）
+		if err := db.SaveBot(id, body.Label, "", "",
 			body.ConfigID, body.Provider, body.Model, d.MasterKey); err != nil {
 			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
 			return
 		}
-		// 日志只记 id/label，不记 base_url 里的凭据段与 token。
-		logger.Info("bot saved", "id", id, "label", body.Label)
+		logger.Info("bot saved", "id", id, "label", body.Label, "config", body.ConfigID)
 		writeJSON(w, logger, http.StatusOK, map[string]any{"id": id})
 	})
 
@@ -77,78 +155,30 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		writeJSON(w, logger, http.StatusOK, map[string]bool{"deleted": true})
 	})
 
-	// 拉取 AstrBot 配置文件列表（= 人设/模型套餐；GET {base}/api/v1/chat/configs）。
-	// Key 需勾选 config 权限，403 时给出明确提示。
-	mux.HandleFunc("POST /api/v1/bots/configs", func(w http.ResponseWriter, r *http.Request) {
+	// 测试某实例：公用连接 + 该实例的配置文件/provider/model
+	mux.HandleFunc("POST /api/v1/bots/probe", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ID      string `json:"id"`
-			BaseURL string `json:"base_url"`
-			Token   string `json:"token"`
+			ID string `json:"id"`
 		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
-			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
+		if err := json.NewDecoder(io.LimitReader(r.Body, 8*1024)).Decode(&body); err != nil || body.ID == "" {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id")
 			return
 		}
-		baseURL, token := body.BaseURL, body.Token
-		if body.ID != "" {
-			_, b, t, _, _, _, err := db.GetBot(body.ID, d.MasterKey)
-			if err == nil {
-				if baseURL == "" {
-					baseURL = b
-				}
-				if token == "" {
-					token = t
-				}
-			}
-		}
-		if baseURL == "" {
-			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id 或 base_url")
-			return
-		}
-		configs, err := ai.FetchAstrBotConfigs(r.Context(), baseURL, token)
+		_, cfg, prov, model, err := db.GetBotConfig(body.ID, d.MasterKey)
 		if err != nil {
+			writeErr(w, logger, http.StatusNotFound, "not_found", "robot not found")
+			return
+		}
+		baseURL, token := db.GetAstrBotConn(d.MasterKey)
+		if baseURL == "" {
 			writeJSON(w, logger, http.StatusOK, map[string]any{
-				"ok": false, "error": err.Error(),
+				"ok": false, "error": "先配置 AstrBot 公用地址与 Token",
 			})
 			return
 		}
-		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "configs": configs})
-	})
-
-	// 连通性测试：直接对 body 里的 base_url/token 发一条 ping（未保存也可先测）。
-	mux.HandleFunc("POST /api/v1/bots/probe", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			ID      string `json:"id"`       // 已保存机器人（读库取凭据）
-			BaseURL string `json:"base_url"` // 或直接给地址+token（未保存先测）
-			Token   string `json:"token"`
-		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
-			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
-			return
-		}
-		baseURL, token := body.BaseURL, body.Token
-		configID, provider, model := "", "", ""
-		if body.ID != "" {
-			_, b, t, c, pv, m, err := db.GetBot(body.ID, d.MasterKey)
-			if err != nil {
-				writeErr(w, logger, http.StatusNotFound, "not_found", "robot not found")
-				return
-			}
-			if baseURL == "" {
-				baseURL = b
-			}
-			if token == "" {
-				token = t
-			}
-			configID, provider, model = c, pv, m
-		}
-		if baseURL == "" {
-			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id 或 base_url")
-			return
-		}
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		reply, err := ai.ProbeAstrBot(ctx, body.ID, baseURL, token, configID, provider, model)
+		reply, err := ai.ProbeAstrBot(ctx, body.ID, baseURL, token, cfg, prov, model)
 		if err != nil {
 			writeJSON(w, logger, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 			return

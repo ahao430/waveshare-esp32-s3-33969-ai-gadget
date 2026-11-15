@@ -1,7 +1,7 @@
 <script setup lang="ts">
-// 聊天机器人页：大肥鱼对话上游 = AstrBot 实例（可多个）。
-// Token 加密落库只进不回；支持选择 AstrBot 配置文件（人设/模型套餐）
-// 与 Provider/Model 覆盖；增删改即时生效。
+// 聊天机器人页：AstrBot 连接是公用配置（地址 + Token 只写不回），
+// 每个机器人实例只选 名称 + AstrBot 配置文件（人设/模型套餐）。
+// 增删改即时生效；Token 经 AES-256-GCM 加密落库（需 BRIDGE_MASTER_KEY）。
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
@@ -9,8 +9,6 @@ import { request } from '@/api/client'
 interface BotInfo {
   id: string
   label: string
-  base_url: string
-  has_token: boolean
   config_id?: string
   provider?: string
   model?: string
@@ -27,110 +25,97 @@ const message = ref('')
 const messageErr = ref(false)
 const busy = ref(false)
 
-const form = ref({
-  id: '', // 空=新建；非空=编辑该机器人（upsert）
-  label: '',
-  base_url: '',
-  token: '',
-  config_id: '',
-  provider: '',
-  model: '',
-})
+/* ---- 公用连接 ---- */
+const conn = ref({ base_url: '', has_token: false })
+const connForm = ref({ base_url: '', token: '' })
+const connMsg = ref('')
+const connSaving = ref(false)
+
+/* ---- 实例 ---- */
+const form = ref({ id: '', label: '', config_id: '', provider: '', model: '' })
 const configs = ref<AstrBotConfig[]>([])
-const probeMsg = ref('')
-const probingId = ref('')
 const cfgMsg = ref('')
 const fetchingCfg = ref(false)
+const probingId = ref('')
 
 const configName = (id?: string) =>
-  id ? configs.value.find((c) => c.id === id)?.name ?? id : '默认'
+  id ? configs.value.find((c) => c.id === id)?.name ?? id : '默认配置'
 
-onMounted(load)
-
-async function load() {
-  try {
-    const r = await request<{ bots: BotInfo[] }>('/api/v1/bots')
-    bots.value = r.bots
-  } catch (e) {
-    messageErr.value = true
-    message.value = `机器人列表不可用：${e instanceof Error ? e.message : e}`
-  }
-}
+onMounted(async () => {
+  await loadConn()
+  await load()
+  await fetchConfigs()
+})
 
 function say(err: boolean, text: string) {
   messageErr.value = err
   message.value = text
 }
 
-function resetForm() {
-  form.value = {
-    id: '',
-    label: '',
-    base_url: '',
-    token: '',
-    config_id: '',
-    provider: '',
-    model: '',
+async function loadConn() {
+  try {
+    const r = await request<{ base_url: string; has_token: boolean }>('/api/v1/astrbot/config')
+    conn.value = r
+    connForm.value.base_url = r.base_url
+    connForm.value.token = ''
+  } catch (e) {
+    connMsg.value = `读取连接配置失败：${e instanceof Error ? e.message : e}`
   }
-  configs.value = []
-  cfgMsg.value = ''
 }
 
-async function addBot() {
-  if (!form.value.label || !form.value.base_url) return
-  busy.value = true
+async function saveConn() {
+  if (!connForm.value.base_url) return
+  connSaving.value = true
+  connMsg.value = ''
   try {
-    const body = { ...form.value }
-    if (body.id === '') delete (body as Record<string, unknown>).id
-    if (body.token === '' && form.value.id !== '') delete (body as Record<string, unknown>).token // 编辑未填 token=不覆盖
-    await request('/api/v1/bots', {
-      method: 'POST',
+    const body: Record<string, unknown> = { base_url: connForm.value.base_url }
+    if (connForm.value.token !== '') body.token = connForm.value.token // 留空=不覆盖
+    await request('/api/v1/astrbot/config', {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    say(false, form.value.id ? `已更新「${form.value.label}」` : `已创建机器人「${form.value.label}」（对话即时生效）`)
-    resetForm()
-    await load()
+    connMsg.value = '✓ 已保存（所有实例共用）'
+    connForm.value.token = ''
+    await loadConn()
   } catch (e) {
-    say(true, `保存失败：${e instanceof Error ? e.message : e}`)
+    connMsg.value = `✗ ${e instanceof Error ? e.message : e}`
   } finally {
-    busy.value = false
+    connSaving.value = false
   }
 }
 
-function editBot(b: BotInfo) {
-  form.value = {
-    id: b.id,
-    label: b.label,
-    base_url: b.base_url,
-    token: '',
-    config_id: b.config_id ?? '',
-    provider: b.provider ?? '',
-    model: b.model ?? '',
+async function probeConn() {
+  probingId.value = '__conn'
+  connMsg.value = '测试中…'
+  try {
+    const r = await request<{ ok: boolean; reply?: string; error?: string }>(
+      '/api/v1/astrbot/probe',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    )
+    connMsg.value = r.ok ? `✓ 连通正常，回复：${r.reply}` : `✗ ${r.error}`
+  } catch (e) {
+    connMsg.value = `✗ ${e instanceof Error ? e.message : e}`
+  } finally {
+    probingId.value = ''
   }
-  fetchConfigs()
-  window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-async function removeBot(b: BotInfo) {
-  if (!confirm(`删除机器人「${b.label}」？AstrBot 应用将不再路由到它。`)) return
-  await request(`/api/v1/bots/${b.id}`, { method: 'DELETE' })
-  say(false, `已删除「${b.label}」`)
-  await load()
+async function load() {
+  try {
+    const r = await request<{ bots: BotInfo[] }>('/api/v1/bots')
+    bots.value = r.bots
+  } catch (e) {
+    say(true, `机器人列表不可用：${e instanceof Error ? e.message : e}`)
+  }
 }
 
-/* 拉取 AstrBot 配置文件列表（人设/模型套餐；Key 需 config 权限） */
 async function fetchConfigs() {
-  if (!form.value.base_url && !form.value.id) return
   fetchingCfg.value = true
   cfgMsg.value = '拉取中…'
   try {
-    const body = form.value.id
-      ? { id: form.value.id }
-      : { base_url: form.value.base_url, token: form.value.token }
     const r = await request<{ ok: boolean; configs?: AstrBotConfig[]; error?: string }>(
-      '/api/v1/bots/configs',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      '/api/v1/astrbot/configs',
     )
     if (r.ok && r.configs) {
       configs.value = r.configs
@@ -146,25 +131,64 @@ async function fetchConfigs() {
   }
 }
 
-/* 连通性测试（携带已填地址/Token/配置，验证整条链路含 config_id 合法性） */
-async function probe(id?: string) {
-  probingId.value = id ?? '__new'
-  probeMsg.value = '测试中…'
+function resetForm() {
+  form.value = { id: '', label: '', config_id: '', provider: '', model: '' }
+}
+
+async function addBot() {
+  if (!form.value.label) return
+  busy.value = true
   try {
-    const body = id
-      ? { id }
-      : {
-          base_url: form.value.base_url,
-          token: form.value.token,
-          config_id: form.value.config_id || undefined,
-        }
+    const body: Record<string, unknown> = {
+      label: form.value.label,
+      config_id: form.value.config_id,
+      provider: form.value.provider,
+      model: form.value.model,
+    }
+    if (form.value.id) body.id = form.value.id
+    await request('/api/v1/bots', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    say(false, form.value.id ? `已更新「${form.value.label}」` : `已创建「${form.value.label}」（对话即时生效）`)
+    resetForm()
+    await load()
+  } catch (e) {
+    say(true, `保存失败：${e instanceof Error ? e.message : e}`)
+  } finally {
+    busy.value = false
+  }
+}
+
+function editBot(b: BotInfo) {
+  form.value = {
+    id: b.id,
+    label: b.label,
+    config_id: b.config_id ?? '',
+    provider: b.provider ?? '',
+    model: b.model ?? '',
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+async function removeBot(b: BotInfo) {
+  if (!confirm(`删除机器人「${b.label}」？设备端将不再路由到它。`)) return
+  await request(`/api/v1/bots/${b.id}`, { method: 'DELETE' })
+  say(false, `已删除「${b.label}」`)
+  await load()
+}
+
+async function probe(id: string) {
+  probingId.value = id
+  try {
     const r = await request<{ ok: boolean; reply?: string; error?: string }>(
       '/api/v1/bots/probe',
-      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) },
     )
-    probeMsg.value = r.ok ? `✓ 连通正常，回复：${r.reply}` : `✗ ${r.error}`
+    say(!r.ok, r.ok ? `✓ 连通正常，回复：${r.reply}` : `✗ ${r.error}`)
   } catch (e) {
-    probeMsg.value = `✗ ${e instanceof Error ? e.message : e}`
+    say(true, `✗ ${e instanceof Error ? e.message : e}`)
   } finally {
     probingId.value = ''
   }
@@ -174,56 +198,63 @@ async function probe(id?: string) {
 <template>
   <h1 class="page-title">聊天机器人</h1>
   <p class="page-sub">
-    设备端 AstrBot 应用（对话与语音）的上游 = AstrBot 实例（可创建多个）。
-    AstrBot 侧<b>无需创建机器人/选择平台类型</b>——走 HTTP OpenAPI：
-    WebUI <b>设置 → OpenAPI → 创建 API Key</b>（对话勾 <code class="text-accent2">chat</code>；
-    要在下面拉配置文件再勾 <code class="text-accent2">config</code>）。
+    设备端 AstrBot 应用（对话与语音）的上游。AstrBot 侧无需创建机器人——走
+    HTTP OpenAPI：WebUI <b>设置 → OpenAPI → 创建 API Key</b>（对话勾
+    <code class="text-accent2">chat</code>；拉配置文件再勾 <code class="text-accent2">config</code>）。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="messageErr ? 'text-err' : 'text-ok'">{{ message }}</p>
 
+  <!-- 公用连接 -->
   <div class="card">
-    <h3 class="mb-1 font-semibold">{{ form.id ? '编辑机器人' : '创建机器人' }}</h3>
-    <div class="mb-4 space-y-2">
-      <div class="flex flex-wrap items-end gap-2">
-        <input v-model="form.label" class="input !w-40" placeholder="名称（如：客厅机器人）" />
-        <input v-model="form.base_url" class="input !w-64" placeholder="AstrBot 地址（http://ip:6185）" />
-        <input v-model="form.token" class="input !w-48" type="password"
-               :placeholder="form.id ? 'Token（留空=不修改）' : 'abk_ Token（未开鉴权可空）'" />
-        <button class="btn-ghost" :disabled="!form.base_url && !form.id || probingId !== ''" @click="probe()">先测一下</button>
-      </div>
-      <div class="flex flex-wrap items-end gap-2">
-        <select v-model="form.config_id" class="input !w-56" :disabled="!configs.length">
-          <option value="">默认配置（default）</option>
-          <option v-for="c in configs" :key="c.id" :value="c.id">{{ c.name }}（{{ c.id }}）</option>
-        </select>
-        <button class="btn-ghost" :disabled="fetchingCfg || (!form.base_url && !form.id)" @click="fetchConfigs">
-          拉取配置文件
-        </button>
-        <input v-model="form.provider" class="input !w-40" placeholder="Provider 覆盖（可选）" />
-        <input v-model="form.model" class="input !w-40" placeholder="模型覆盖（可选）" />
-        <button class="btn" :disabled="busy || !form.label || !form.base_url" @click="addBot">
-          {{ form.id ? '保存修改' : '创建机器人' }}
-        </button>
-        <button v-if="form.id" class="btn-ghost" @click="resetForm">取消编辑</button>
-      </div>
-      <p v-if="cfgMsg" class="text-xs" :class="cfgMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ cfgMsg }}</p>
-      <p v-if="probeMsg" class="text-xs" :class="probeMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ probeMsg }}</p>
-      <p class="text-xs text-dim">
-        「配置文件」= AstrBot 里的人设/模型套餐（含人格情境+服务商）；
-        Provider/模型覆盖为单次请求级高级项，通常留空即可。
-      </p>
+    <h3 class="mb-1 font-semibold">AstrBot 连接（公用）</h3>
+    <p class="mb-3 text-xs text-dim">所有机器人实例共用这个地址与 Token。</p>
+    <div class="flex flex-wrap items-end gap-2">
+      <input v-model="connForm.base_url" class="input !w-72" placeholder="AstrBot 地址（https://bot.example.com）" />
+      <input v-model="connForm.token" class="input !w-56" type="password"
+             :placeholder="conn.has_token ? 'Token 已保存（留空=不修改）' : 'abk_ Token（未开鉴权可空）'" />
+      <button class="btn" :disabled="connSaving || !connForm.base_url" @click="saveConn">保存连接</button>
+      <button class="btn-ghost" :disabled="probingId !== '' || !conn.base_url" @click="probeConn">测试连接</button>
+      <span class="badge" :class="conn.has_token ? '!bg-ok/15 !text-ok' : ''">
+        {{ conn.has_token ? 'Token 已配置' : '无 Token' }}
+      </span>
     </div>
+    <p v-if="connMsg" class="mt-2 text-xs" :class="connMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ connMsg }}</p>
+  </div>
+
+  <!-- 实例 -->
+  <div class="card mt-4">
+    <h3 class="mb-1 font-semibold">{{ form.id ? '编辑机器人' : '新建机器人' }}</h3>
+    <div class="mb-4 flex flex-wrap items-end gap-2">
+      <input v-model="form.label" class="input !w-44" placeholder="名称（如：大肥鱼）" />
+      <select v-model="form.config_id" class="input !w-64" :disabled="!configs.length">
+        <option value="">默认配置（default）</option>
+        <option v-for="c in configs" :key="c.id" :value="c.id">{{ c.name }}</option>
+      </select>
+      <button class="btn-ghost" :disabled="fetchingCfg || !conn.base_url" @click="fetchConfigs">
+        刷新配置文件
+      </button>
+      <button class="btn" :disabled="busy || !form.label" @click="addBot">
+        {{ form.id ? '保存修改' : '创建机器人' }}
+      </button>
+      <button v-if="form.id" class="btn-ghost" @click="resetForm">取消编辑</button>
+    </div>
+    <p v-if="cfgMsg" class="mb-2 text-xs" :class="cfgMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ cfgMsg }}</p>
+    <details class="mb-2 text-xs text-dim">
+      <summary class="cursor-pointer">高级：provider / 模型覆盖（通常留空）</summary>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <input v-model="form.provider" class="input !w-44" placeholder="Provider 覆盖（可选）" />
+        <input v-model="form.model" class="input !w-44" placeholder="模型覆盖（可选）" />
+      </div>
+    </details>
 
     <h3 class="mb-1 font-semibold">机器人实例</h3>
-    <div v-if="bots.length === 0" class="mb-2 text-sm text-dim">还没有机器人，添加一个：</div>
+    <div v-if="bots.length === 0" class="mb-2 text-sm text-dim">还没有机器人，创建一个。</div>
     <div class="space-y-2">
       <div v-for="b in bots" :key="b.id" class="flex items-center justify-between rounded border border-line px-3 py-2">
         <div class="min-w-0">
           <span class="font-medium">{{ b.label }}</span>
-          <span class="ml-2 truncate text-xs text-dim">{{ b.base_url }}</span>
-          <span class="ml-2 badge" :class="b.has_token ? '' : '!text-warn'">{{ b.has_token ? '已配 Token' : '无鉴权' }}</span>
-          <span v-if="b.config_id" class="ml-1 badge !bg-accent/15 !text-accent">{{ b.config_id }}</span>
+          <span class="ml-2 badge !bg-accent/15 !text-accent">{{ configName(b.config_id) }}</span>
           <span v-if="b.model" class="ml-1 badge">{{ b.model }}</span>
         </div>
         <div class="flex shrink-0 gap-1">
@@ -237,8 +268,8 @@ async function probe(id?: string) {
 
   <div class="card mt-4 text-xs text-dim">
     说明：Token 经 AES-256-GCM 加密落库（需 <code>BRIDGE_MASTER_KEY</code>），明文不回显。
-    Bridge 按 <code>POST {地址}/api/v1/chat</code> 对接（username=gadget、session_id=gadget-bigfish-&lt;id&gt;
-    每台机器人独立会话）；config_id 每次请求都携带，后台改动即时生效。
-    人设细节（系统提示词、开场白）、服务商与插件都在 AstrBot 侧维护。
+    Bridge 按 <code>POST {地址}/api/v1/chat</code> 对接（username=gadget，每实例独立会话）；
+    config_id 每次请求都携带，后台改动即时生效。人设细节（系统提示词、开场白）、
+    服务商与插件都在 AstrBot 侧维护。
   </div>
 </template>

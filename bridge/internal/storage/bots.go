@@ -108,3 +108,10 @@ func (d *DB) ListBots() ([]Bot, error) {
 	}
 	return out, rows.Err()
 }
+
+// GetBotConfig 只读实例的对话相关字段（name/config/provider/model），
+// 不含地址/token（公用连接见 GetAstrBotConn）。
+func (d *DB) GetBotConfig(id string, masterKey []byte) (label, configID, provider, model string, err error) {
+	label, _, _, configID, provider, model, err = d.GetBot(id, masterKey)
+	return
+}

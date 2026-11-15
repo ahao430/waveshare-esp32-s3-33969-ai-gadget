@@ -214,10 +214,15 @@ func main() {
 		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
 	}
 
-	// 大肥鱼对接 AstrBot 机器人实例（bots 表）：
-	// 每次对话请求现读配置（Web 添加/删除即时生效，无需重启）。
+	// 大肥鱼对接 AstrBot 机器人实例：地址/Token 为公用连接
+	// （app_settings.astrbot，兼容旧版 bots 表首条），实例只带
+	// 名称/配置文件/provider/model。每次请求现读，Web 改动即时生效。
 	chatRouter.BotResolver = func() []ai.Upstream {
 		if db == nil || masterKey == nil {
+			return nil
+		}
+		baseURL, token := db.GetAstrBotConn(masterKey)
+		if baseURL == "" {
 			return nil
 		}
 		list, err := db.ListBots()
@@ -226,13 +231,9 @@ func main() {
 		}
 		var bots []ai.Upstream
 		for _, b := range list {
-			_, baseURL, token, cfg, prov, model, err := db.GetBot(b.ID, masterKey)
-			if err != nil {
-				continue
-			}
 			bots = append(bots, ai.Upstream{
 				ID: b.ID, BaseURL: baseURL, APIKey: token, Kind: "astrbot",
-				ConfigID: cfg, Provider: prov, Model: model,
+				ConfigID: b.ConfigID, Provider: b.Provider, Model: b.Model,
 			})
 		}
 		return bots
