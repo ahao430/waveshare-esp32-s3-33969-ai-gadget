@@ -127,7 +127,16 @@ static lv_obj_t *g_cont_lbl;
 static lv_timer_t *g_poll_timer;
 static int g_app_id = -1;
 static bool g_voice_enabled;
-static bool g_continuous; /* 连续对话（KEY3 短按切换；聊天应用自定义语义） */
+static bool g_continuous; /* 连续对话（KEY3 短按/左上角按钮切换） */
+static bool g_cont_auto;      /* 当前 LISTENING 轮由连续模式自动开启 */
+static bool g_cont_heard;     /* 本轮已检测到人声（VAD） */
+static uint32_t g_cont_loud_tick; /* 最后一次有声时刻（VAD 静音判据） */
+
+/* 连续对话参数（80ms poll 驱动；g_wave_amp 0..100） */
+#define CONT_SPEECH_AMP     10   /* 高于此算有声 */
+#define CONT_RESPEAK_GAP_MS 800  /* 回复播完 → 自动开听的间隔 */
+#define CONT_SILENCE_END_MS 1200 /* 有声后静音此时长 → 自动提交 */
+#define CONT_SILENCE_ROLL_MS 5000 /* 纯静音：滚动清缓冲等开口（不打服务端） */
 
 /* voice_session 状态（从 ui_voice 移植） */
 static bool g_vs_inited;
@@ -352,6 +361,10 @@ static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
     g_wave_amp = (int)(rms * 300);
     if (g_wave_amp > 100) g_wave_amp = 100;
     g_wave_data = true;
+    if (g_wave_amp > CONT_SPEECH_AMP) { /* 连续对话 VAD：记录有声 */
+        g_cont_heard = true;
+        g_cont_loud_tick = lv_tick_get();
+    }
 }
 
 static const vs_listener_t g_listener = {
@@ -434,6 +447,13 @@ static void continuous_toggle_cb(lv_event_t *e)
 {
     (void)e;
     g_continuous = !g_continuous;
+    if (!g_continuous && g_cont_auto && vs_state() == VS_LISTENING) {
+        /* 关闭时正在自动听：清空已录帧 → 本地"按住时间太短"拦截，
+         * 不把静音发去服务端 */
+        g_capture_frames = 0;
+        vs_ptt_end();
+    }
+    g_cont_auto = false;
     lv_obj_set_style_text_color(g_cont_lbl,
                                 g_continuous ? UI_OK : UI_TEXT_DIM, 0);
     if (g_status_lbl) {
@@ -455,6 +475,7 @@ static void ptt_pressed_cb(lv_event_t *e)
     (void)e;
     CLOG("ptt PRESSED voice_enabled=%d state=%d", (int)g_voice_enabled,
          (int)vs_state());
+    g_cont_auto = false; /* 手动轮接管：VAD 不做自动提交 */
     if (g_voice_enabled) vs_ptt_begin();
     ptt_apply_state(VS_LISTENING);
 }
@@ -508,13 +529,43 @@ static void poll_timer_cb(lv_timer_t *t)
     /* 录音看门狗：抬起沿丢失（PRESS_LOST 之外的路径）时不能让状态机
      * 永久停在 Listening——超过 20s 强制提交已录音频。 */
     static vs_state_t last_st;
-    static uint32_t listen_t0;
+    static uint32_t listen_t0, idle_since, cont_listen_t0;
     vs_state_t st = vs_state();
     if (st == VS_LISTENING && last_st != VS_LISTENING) listen_t0 = lv_tick_get();
+    if (st == VS_IDLE && last_st != VS_IDLE) idle_since = lv_tick_get();
     last_st = st;
     if (st == VS_LISTENING && lv_tick_elaps(listen_t0) > 20000) {
         CLOG("ptt watchdog: force submit (20s)");
         vs_ptt_end();
+    }
+
+    /* 连续对话（免提）驱动：
+     *   IDLE（含回复播完）稍候自动开听；自动轮"说完停 1.2s"自动提交；
+     *   纯静音不提交（滚动清缓冲等开口）；缓冲将满强制提交。
+     *   手动按住轮（g_cont_auto=0）完全不受 VAD 干预。 */
+    if (g_continuous && g_voice_enabled) {
+        if (st == VS_IDLE && lv_tick_elaps(idle_since) > CONT_RESPEAK_GAP_MS) {
+            g_cont_auto = true;
+            g_cont_heard = false;
+            cont_listen_t0 = lv_tick_get();
+            CLOG("continuous: auto listen begin");
+            vs_ptt_begin();
+        } else if (st == VS_LISTENING && g_cont_auto) {
+            if (g_cont_heard &&
+                lv_tick_elaps(g_cont_loud_tick) > CONT_SILENCE_END_MS) {
+                CLOG("continuous: silence %.0fms after speech, submit",
+                     (double)lv_tick_elaps(g_cont_loud_tick));
+                vs_ptt_end();
+            } else if (!g_cont_heard &&
+                       lv_tick_elaps(cont_listen_t0) > CONT_SILENCE_ROLL_MS) {
+                /* 一直没人开口：清掉静音继续等（不发服务端） */
+                g_capture_frames = 0;
+                cont_listen_t0 = lv_tick_get();
+            } else if (g_capture_frames >= G_CAPTURE_SAMPLES - 1600) {
+                CLOG("continuous: capture near full, force submit");
+                vs_ptt_end();
+            }
+        }
     }
 
     vs_tick();
@@ -1073,6 +1124,7 @@ void ui_conversation_on_exit(void)
         g_poll_timer = NULL;
     }
     vs_release();
+    g_cont_auto = false;
     g_status_lbl = NULL;
     g_reply_lbl = NULL;
     g_title_lbl = NULL; /* 后台 worker 可能晚到（切机器人/语音），置空防悬垂 */
