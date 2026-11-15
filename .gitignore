@@ -1,6 +1,7 @@
 # ---- Secrets / credentials (never commit) ----
 .env
 .env.*
+bridge/bridge.env
 *.pem
 *.key
 secrets/
