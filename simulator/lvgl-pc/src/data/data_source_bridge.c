@@ -25,6 +25,9 @@
 #endif
 
 #define BRIDGE_TIMEOUT_MS 1500
+/* Komari 聚合要等 Bridge 先去抓上游（实测 1.3~1.5s），给足余量；
+ * 1500ms 会让监控页永远是空的（2026-11-15 用户反馈）。 */
+#define KOMARI_TIMEOUT_MS 6000
 #define BRIDGE_BUF_SIZE   (64 * 1024)
 
 static char g_base[160];
@@ -162,7 +165,7 @@ static void fetch_servers(gadget_state_t *st)
 {
     char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
     if (!buf) return;
-    int status = http_get(g_komari_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS);
+    int status = http_get(g_komari_url, buf, BRIDGE_BUF_SIZE, KOMARI_TIMEOUT_MS);
     cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
     free(buf);
     if (!root) return;

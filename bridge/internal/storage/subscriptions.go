@@ -20,12 +20,20 @@ const (
 	SubKindOpencode = "opencode"
 	SubKindNewAPI   = "newapi"
 	SubKindMock     = "mock"
+	// DeepSeek 官方余额；gpt/claude/minimax/mimo = 中转站 Coding Plan
+	// （internal/quota/codingplan：kimi 形状 /usages 与 newapi 余额探测）
+	SubKindDeepseek = "deepseek"
+	SubKindGPT      = "gpt"
+	SubKindClaude   = "claude"
+	SubKindMiniMax  = "minimax"
+	SubKindMiMo     = "mimo"
 )
 
 // ValidKind 检查 kind 是否受支持。
 func ValidKind(kind string) bool {
 	switch kind {
-	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock:
+	case SubKindZhipu, SubKindKimi, SubKindOpencode, SubKindNewAPI, SubKindMock,
+		SubKindDeepseek, SubKindGPT, SubKindClaude, SubKindMiniMax, SubKindMiMo:
 		return true
 	}
 	return false

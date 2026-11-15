@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 订阅额度页：Provider 账号配置（PLAN §15.3 凭据加密存储的 Web 入口）。
 // Key 只进不出：保存后不回显；Bridge 侧 AES-256-GCM 落库。
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
@@ -20,15 +20,34 @@ const saving = ref(false)
 
 // 本页只管额度：订阅实例 + 额度查询凭据。
 // 语音识别等能力 Key 在「模型 API」页（/models），两者不要混。
-const quotaCreds = ['zhipu', 'kimi']
+// 凭据卡动态化（修"kimi 默认项删不掉"）：只显示已配置凭据、或被
+// 某个订阅实例用到的 kind——都没用就不占地方。
+const allKinds = ['zhipu', 'kimi', 'deepseek', 'gpt', 'claude', 'minimax', 'mimo', 'newapi']
 const providerTitle: Record<string, string> = {
   zhipu: '智谱 GLM Coding Plan',
   kimi: 'Kimi Coding Plan',
+  deepseek: 'DeepSeek 余额',
+  gpt: 'GPT Coding Plan',
+  claude: 'Claude Coding Plan',
+  minimax: 'MiniMax Coding Plan',
+  mimo: 'MiMo Coding Plan',
+  newapi: 'NewAPI 中转站',
 }
 const providerHint: Record<string, string> = {
   zhipu: '仅用于查询 Coding Plan 额度（语音识别请去「模型 API」配置）',
   kimi: '仅用于查询 Coding Plan 额度',
+  deepseek: '官方余额接口（/user/balance）',
+  gpt: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
+  claude: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
+  minimax: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
+  mimo: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
+  newapi: '控制台系统访问令牌（不是 sk- Key）',
 }
+const quotaCreds = computed(() => {
+  const used = new Set(subs.value.map((s) => s.kind))
+  const configured = new Set(creds.value.map((c) => c.provider_id))
+  return allKinds.filter((k) => configured.has(k) || used.has(k))
+})
 
 onMounted(() => { load(); loadSubs() })
 
@@ -84,11 +103,16 @@ interface SubInfo {
   updated_at: string
 }
 const subs = ref<SubInfo[]>([])
-const subKinds = ['zhipu', 'kimi', 'opencode', 'newapi', 'mock']
+const subKinds = ['zhipu', 'kimi', 'deepseek', 'gpt', 'claude', 'minimax', 'mimo', 'newapi', 'opencode', 'mock']
 const subKindNames: Record<string, string> = {
   mock: 'Mock（演示）',
   zhipu: '智谱 Coding Plan',
   kimi: 'Kimi Coding Plan',
+  deepseek: 'DeepSeek（余额）',
+  gpt: 'GPT Coding Plan（中转）',
+  claude: 'Claude Coding Plan（中转）',
+  minimax: 'MiniMax Coding Plan（中转）',
+  mimo: 'MiMo Coding Plan（中转）',
   opencode: 'OpenCode Zen',
   newapi: 'NewAPI 中转站',
 }
@@ -104,8 +128,18 @@ async function loadSubs() {
   }
 }
 
+// coding plan 家族（gpt/claude/minimax/mimo）走中转站，base_url 必填
+const needsBaseKinds = ['gpt', 'claude', 'minimax', 'mimo', 'newapi']
+function needsBase(kind: string) {
+  return needsBaseKinds.includes(kind)
+}
+
 async function addSub() {
   if (!subForm.value.label) return
+  if (needsBase(subForm.value.kind) && !subForm.value.base_url) {
+    message.value = '该类型需要填 Base URL（中转站地址）'
+    return
+  }
   subAdding.value = true
   message.value = ''
   try {
@@ -168,7 +202,8 @@ async function remove(id: string) {
         <option v-for="k in subKinds" :key="k" :value="k">{{ subKindNames[k] }}</option>
       </select>
       <input v-model="subForm.label" class="input !w-40" placeholder="名称（如：智谱主号）" />
-      <input v-model="subForm.base_url" class="input !w-56" placeholder="Base URL（可选）" />
+      <input v-model="subForm.base_url" class="input !w-56"
+             :placeholder="needsBase(subForm.kind) ? 'Base URL（必填：中转站地址）' : 'Base URL（可选）'" />
       <input v-model="subForm.token" class="input !w-48" type="password" placeholder="API Key / Token（可选）" />
       <button class="btn" :disabled="subAdding || !subForm.label" @click="addSub">添加订阅</button>
     </div>

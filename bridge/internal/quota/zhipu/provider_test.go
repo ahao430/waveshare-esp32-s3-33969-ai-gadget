@@ -64,8 +64,10 @@ func TestFetchQuota_MapsWindows(t *testing.T) {
 	if snap.ProviderID != "zhipu" || snap.Status != quota.StatusOK {
 		t.Fatalf("bad snapshot header: %+v", snap)
 	}
-	if snap.PlanName != "GLM Coding Plan (Lite)" {
-		t.Fatalf("PlanName = %q, want fixture plan name", snap.PlanName)
+	// 套餐名 + 到期时间（fixture expireTime=1798761600000ms → 2027-01-01
+	// 本地时区 → "1月1日到期"）
+	if snap.PlanName != "GLM Coding Plan (Lite) · 1月1日到期" {
+		t.Fatalf("PlanName = %q, want fixture plan name + expiry", snap.PlanName)
 	}
 	if len(snap.Windows) != 3 {
 		t.Fatalf("windows = %d, want 3 (5h/weekly/tools)", len(snap.Windows))

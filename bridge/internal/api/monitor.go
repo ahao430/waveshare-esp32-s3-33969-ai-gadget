@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -73,6 +74,10 @@ func serveMonitorConfig(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			return
 		}
 		logger.Info("monitor config saved") // 不记 URL/token
+		// 数据源变了：后台立刻重新抓（force），设备下一次刷新就有新数据
+		if d.Komari != nil {
+			go d.Komari.Nodes(context.Background(), true)
+		}
 		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true})
 	})
 

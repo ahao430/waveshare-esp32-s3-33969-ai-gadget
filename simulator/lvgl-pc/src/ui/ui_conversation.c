@@ -162,6 +162,8 @@ static void *voice_worker(void *arg)
     return NULL;
 }
 
+static void ptt_apply_state(vs_state_t st); /* 前向声明：on_vs_state 里要用 */
+
 static void on_vs_state(vs_state_t st, const char *detail, void *user)
 {
     (void)user;
@@ -171,6 +173,7 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
     ui_lock();
     lv_label_set_text(g_status_lbl, state_text(st));
     companion_set_state(g_app_id, st);
+    ptt_apply_state(st);
     ui_unlock();
 
     if (st == VS_LISTENING) g_capture_frames = 0;
@@ -255,6 +258,33 @@ static void rerender_history(void)
 {
 }
 
+/* PTT 按钮的四态视觉：idle=主色 / listening=红 / thinking=琥珀 /
+ * speaking=绿。按住时另有 LV_STATE_PRESSED 样式（更亮 + 外圈），
+ * 让"按住说话"有明确反馈（用户反馈：按下去按钮没变化）。 */
+#define PTT_COL_IDLE     UI_ACCENT
+#define PTT_COL_LISTEN   0xE5484D /* 录音中：红 */
+#define PTT_COL_THINK    0xF5A623 /* 识别/思考：琥珀 */
+#define PTT_COL_SPEAK    0x2EC4B6 /* 播放中：青 */
+
+static void ptt_apply_state(vs_state_t st)
+{
+    if (!g_ptt_btn) return;
+    lv_color_t c = UI_ACCENT;
+    switch (st) {
+    case VS_LISTENING: c = lv_color_hex(PTT_COL_LISTEN); break;
+    case VS_THINKING:  c = lv_color_hex(PTT_COL_THINK);  break;
+    case VS_SPEAKING:  c = lv_color_hex(PTT_COL_SPEAK);  break;
+    case VS_ERROR:     c = lv_color_hex(PTT_COL_LISTEN); break;
+    default: break;
+    }
+    lv_obj_set_style_bg_color(g_ptt_btn, c, 0);
+    /* 录音中加一圈呼吸外环提示"正在录" */
+    bool ring = (st == VS_LISTENING);
+    lv_obj_set_style_border_width(g_ptt_btn, ring ? 4 : 0, 0);
+    lv_obj_set_style_border_color(g_ptt_btn, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_opa(g_ptt_btn, ring ? LV_OPA_40 : LV_OPA_TRANSP, 0);
+}
+
 /* ---------------- PTT / poll ---------------- */
 
 static void continuous_toggle_cb(lv_event_t *e);
@@ -290,6 +320,7 @@ static void ptt_pressed_cb(lv_event_t *e)
     CLOG("ptt PRESSED voice_enabled=%d state=%d", (int)g_voice_enabled,
          (int)vs_state());
     if (g_voice_enabled) vs_ptt_begin();
+    ptt_apply_state(VS_LISTENING);
 }
 
 /* KEY3 长按（Web 配置 ptt）：真机=按住期间说话，松开沿收口提交
@@ -615,6 +646,11 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_bg_opa(g_ptt_btn, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(g_ptt_btn, 0, 0);
     lv_obj_set_style_shadow_width(g_ptt_btn, 0, 0);
+    /* 按住反馈：按下时提亮 + 内缩，抬起恢复（否则按住期间毫无变化） */
+    lv_obj_set_style_bg_color(g_ptt_btn, lv_color_hex(0xFFFFFF), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(g_ptt_btn, LV_OPA_30, LV_STATE_PRESSED);
+    lv_obj_set_style_transform_scale(g_ptt_btn, 236, LV_STATE_PRESSED); /* ~0.92 */
+    lv_obj_set_style_transform_scale(g_ptt_btn, 256, 0);
     if (g_voice_enabled) {
         lv_obj_add_event_cb(g_ptt_btn, ptt_pressed_cb, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(g_ptt_btn, ptt_released_cb, LV_EVENT_RELEASED, NULL);
@@ -624,6 +660,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_t *mic = ui_label(g_ptt_btn, LV_SYMBOL_AUDIO, &lv_font_montserrat_28,
                              g_voice_enabled ? UI_TEXT : UI_TEXT_DIM);
     lv_obj_center(mic);
+    if (g_voice_enabled) ptt_apply_state(vs_state());
 
     if (!g_voice_enabled) {
         lv_obj_t *hint = ui_label(scr, "语音对话 · 等待数据源（PLAN §5.7）",

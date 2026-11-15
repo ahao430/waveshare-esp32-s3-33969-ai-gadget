@@ -108,7 +108,24 @@ func (p *Provider) fetchPlanName(ctx context.Context, apiKey string) (string, er
 	if err != nil {
 		return "", err
 	}
-	return parseSubscriptionResponse(body)
+	plan, expires, err := parseSubscriptionResponseEx(body)
+	if err != nil {
+		return "", err
+	}
+	return formatPlanWithExpiry(plan, expires), nil
+}
+
+// formatPlanWithExpiry 把套餐名与到期时间拼成设备端直接可显示的一行
+// （如 "GLM Coding Plan · 1月15日到期"）；任一缺失就只返回另一项。
+func formatPlanWithExpiry(plan string, expiresAt *time.Time) string {
+	if expiresAt == nil {
+		return plan
+	}
+	suffix := " · " + expiresAt.Local().Format("1月2日") + "到期"
+	if plan == "" {
+		return suffix[3:] // 去掉 " · "
+	}
+	return plan + suffix
 }
 
 func (p *Provider) get(ctx context.Context, apiKey, path string) ([]byte, error) {
@@ -228,34 +245,76 @@ func normalizeResetMs(v int64) int64 {
 	}
 }
 
-// parseSubscriptionResponse 解析套餐接口，返回套餐名。
-// 套餐响应结构未经验证：兼容 data.list[] 中 name/planName/title 字段，
-// 找不到时返回空串（缺失不伪造）。
-func parseSubscriptionResponse(body []byte) (string, error) {
+// parseSubscriptionResponseEx 解析套餐接口，返回套餐名与到期时间。
+// 套餐响应结构未完全验证：名字兼容 data.list[] 的 name/planName/title；
+// 到期兼容 expireTime/endTime/expiredTime（Unix 毫秒秒均收、ISO 也收），
+// 找不到返回空值（缺失不伪造）。
+func parseSubscriptionResponseEx(body []byte) (string, *time.Time, error) {
 	var env rawEnvelope
 	if err := json.Unmarshal(body, &env); err != nil {
-		return "", fmt.Errorf("%w: bad json: %v", quota.ErrUnsupportedResponse, err)
+		return "", nil, fmt.Errorf("%w: bad json: %v", quota.ErrUnsupportedResponse, err)
 	}
 	if !envelopeOK(env) {
-		return "", fmt.Errorf("%w: code=%v", quota.ErrUnsupportedResponse, env.Code)
+		return "", nil, fmt.Errorf("%w: code=%v", quota.ErrUnsupportedResponse, env.Code)
 	}
 
 	var data struct {
 		List []struct {
-			Name     string `json:"name"`
-			PlanName string `json:"planName"`
-			Title    string `json:"title"`
+			Name        string `json:"name"`
+			PlanName    string `json:"planName"`
+			Title       string `json:"title"`
+			ExpireTime  any    `json:"expireTime"`
+			EndTime     any    `json:"endTime"`
+			ExpiredTime any    `json:"expiredTime"`
+			ExpireAt    any    `json:"expireAt"`
 		} `json:"list"`
 	}
 	if err := json.Unmarshal(env.Data, &data); err != nil {
-		return "", fmt.Errorf("%w: data shape: %v", quota.ErrUnsupportedResponse, err)
+		return "", nil, fmt.Errorf("%w: data shape: %v", quota.ErrUnsupportedResponse, err)
 	}
+	var plan string
+	var expires *time.Time
 	for _, it := range data.List {
-		for _, cand := range []string{it.PlanName, it.Name, it.Title} {
-			if cand != "" {
-				return cand, nil
+		if plan == "" {
+			for _, cand := range []string{it.PlanName, it.Name, it.Title} {
+				if cand != "" {
+					plan = cand
+					break
+				}
+			}
+		}
+		if expires == nil {
+			for _, raw := range []any{it.ExpireTime, it.EndTime, it.ExpiredTime, it.ExpireAt} {
+				if t := parseAnyTime(raw); t != nil {
+					expires = t
+					break
+				}
+			}
+		}
+		if plan != "" && expires != nil {
+			break
+		}
+	}
+	return plan, expires, nil // 结构可解析但没有套餐字段：不视为错误
+}
+
+// parseAnyTime 宽松解析时间字段：Unix 秒/毫秒数字或 ISO 字符串。
+func parseAnyTime(raw any) *time.Time {
+	switch v := raw.(type) {
+	case float64:
+		// 智谱接口习惯毫秒；>1e12 判毫秒
+		sec := v
+		if v > 1e12 {
+			sec = v / 1000
+		}
+		t := time.Unix(int64(sec), 0).UTC()
+		return &t
+	case string:
+		for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02"} {
+			if t, err := time.ParseInLocation(layout, v, time.Local); err == nil {
+				return &t
 			}
 		}
 	}
-	return "", nil // 结构可解析但没有套餐字段：不视为错误
+	return nil
 }
