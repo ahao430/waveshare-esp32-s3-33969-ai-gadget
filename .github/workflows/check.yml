@@ -44,7 +44,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
       - name: Configure + Build
         run: |
-          cmake -S simulator/lvgl-pc -B simulator/lvgl-pc/build
+          cmake -S simulator/lvgl-pc -B simulator/lvgl-pc/build \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
           cmake --build simulator/lvgl-pc/build -j
       # 冒烟：headless 环境下 SDL 需要 dummy video driver
       - name: Smoke run (dummy video)

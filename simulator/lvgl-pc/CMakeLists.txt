@@ -11,6 +11,10 @@ endif()
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
 
+# CMake 4.x 移除对 <3.5 兼容：cjson 等三方依赖声明过老，设策略下限放行
+#（不影响正常构建；CI 全新配置时必需）
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 include(FetchContent)
 FetchContent_Declare(
   lvgl
