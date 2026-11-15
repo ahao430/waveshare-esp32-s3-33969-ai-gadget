@@ -85,9 +85,19 @@ func (r *Router) Providers() []string {
 func (r *Router) resolve(model string) (Upstream, string, error) {
 	id := r.defaultID
 	rest := model
+	explicit := false
 	if i := strings.Index(model, "/"); i >= 0 {
 		id = strings.ToLower(model[:i])
 		rest = model[i+1:]
+		explicit = true
+	}
+	// 未显式指定 provider 且默认仍是 mock 时，优先已配置的 bot 实例
+	// （如 AstrBot 大肥鱼）——否则语音回复/无 model 文本会落到 mock echo，
+	// 用户明明配了机器人却不生效（2026-11-15 实测反馈）
+	if !explicit && id == "mock" && r.BotResolver != nil {
+		if bots := r.BotResolver(); len(bots) > 0 && bots[0].BaseURL != "" {
+			return bots[0], defaultModelName, nil
+		}
 	}
 	u, ok := r.upstreams[id]
 	if !ok && r.BotResolver != nil {

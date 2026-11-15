@@ -122,7 +122,18 @@ func extractAstrBotText(payload string) string {
 	if err := json.Unmarshal([]byte(payload), &probe); err != nil {
 		return payload
 	}
-	// data: {"type":"...","data":{"content":...}} 与扁平字段都兼容
+	// 文本事件形态一：data 直接是字符串（AstrBot 主线 plain/complete
+	// 事件：{"type":"plain","data":"文本"}）——此前只认对象形态，导致
+	// AstrBot 的报错文本（如"未找到可用对话模型"）被吞成空响应
+	if typ, _ := probe["type"].(string); true {
+		switch typ {
+		case "", "plain", "complete", "message", "text", "finish":
+			if v, ok := probe["data"].(string); ok && v != "" {
+				return v
+			}
+		}
+	}
+	// 形态二：data 是对象（{"content":...}）——与扁平字段都兼容
 	if inner, ok := probe["data"].(map[string]any); ok {
 		for _, k := range []string{"content", "text", "result"} {
 			if v, ok := inner[k].(string); ok && v != "" {
@@ -267,7 +278,13 @@ func ProbeAstrBot(ctx context.Context, id, baseURL, token, configID, provider, m
 	if len(r) > 60 {
 		r = r[:60]
 	}
-	return string(r), nil
+	text := string(r)
+	// AstrBot 自身报错也走"正常回复"通道（plain 事件）——连通性测试
+	// 应判失败并透传原因（如未配置模型提供商），否则测试显示"成功"
+	if strings.Contains(text, "LLM 请求失败") || strings.Contains(text, "未找到任何可用") {
+		return "", fmt.Errorf("%s", text)
+	}
+	return text, nil
 }
 
 // AstrBotConfig AstrBot 配置文件摘要（人设/模型套餐）。
