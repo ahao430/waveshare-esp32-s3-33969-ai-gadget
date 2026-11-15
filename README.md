@@ -81,8 +81,10 @@ ESP-IDF 环境见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
   Web 的 AstrBot 页也能「设为当前」。
 - **语音**：按住底部麦克风说话，松开后依次显示 听 → 想 → 说，回复会朗读。
   转写 Key 与每个 App 的音色在 Web「语音设置」，每个音色旁可「▶ 试听」。
-- **小智**：目前走本机 Bridge 语音链路（音色可选台湾腔曉臻），**尚未接官方
-  xiaozhi.me 服务**；官方接入方案见 [PLAN.md §5.5](PLAN.md)。
+- **小智**：在 Web「小智」页点「连接官方服务」，把 6 位激活码输入
+  xiaozhi.me 控制台绑定后，设备小智 App 的转写、人设与音色全走官方
+  （人设/音色在官方控制台配）。未绑定或官方服务失败时自动回落本机
+  语音链路（语音设置页的音色此时生效）。
 - 设置页里有后台/配网二维码，扫码可在局域网打开 Web 后台。
 
 ### 5. 能拔 USB 线吗？
@@ -154,7 +156,7 @@ GADGET_DS=bridge GADGET_BRIDGE=http://127.0.0.1:8081 \
 scripts/gen_cn_font.sh
 ```
 
-## 状态（2026-11-15）
+## 状态（2026-11-16）
 
 | 模块 | 状态 |
 |------|------|
@@ -164,7 +166,7 @@ scripts/gen_cn_font.sh
 | Web 后台 | ✅ 总览 + 12 个配置页：外观/网络与配网/代理/按键/订阅中心/AstrBot/语音设置/Muse/小智/ZCode/监控/天气 |
 | 固件 UI 移植（Phase 6 后半） | ✅ 主体已在真机运行（launcher/对话/设置/订阅/天气；共享模拟器源码） |
 | 稳定性（2026-11-15 收敛） | ✅ 绘制缓冲内部 RAM + 语音静态栈任务 + LVGL 心跳看门狗；连续 6 轮完整语音回合零 NO_MEM/panic |
-| 小智官方服务（xiaozhi.me） | ⏳ 规划中：Bridge 模拟设备（OTA 激活 + WebSocket + Opus）方案已定，见 [PLAN.md §5.5](PLAN.md) / [docs/XIAOZHI_PROTOCOL.md](docs/XIAOZHI_PROTOCOL.md) |
+| 小智官方服务（xiaozhi.me） | ✅ 已接入并真网验证：Bridge 模拟设备（OTA 激活 + WebSocket + Opus，官方 TTS 直通），未绑定自动回落本机链路，见 [ADR-005](docs/DECISIONS.md) |
 | 设备端 ZCode / 音乐 | ⏳ 规划中 |
 
 里程碑与详细进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
@@ -180,6 +182,8 @@ scripts/gen_cn_font.sh
 | 字体压缩/回退 | `gen_cn_font.sh` 默认 RLE 压缩，必须开 `LV_USE_FONT_COMPRESSED`，否则空心方块；生成器自带 `.fallback = NULL` 会覆盖挂接。**当前不压缩、无 L2 回退，flash 余 5%** |
 | 桌面重建 | `ui_launcher_rebuild` 前必须清页点数组（悬垂指针会 LoadProhibited）；波浪背景 buffer 要复用 |
 | 开机拉远端配置 | Wi-Fi 未起时拉不到；`remote_cfg_task` 两段式：prefetch（不持锁）→ refresh（持锁应用+重建） |
+| ES7210 按轮启停采集 | 播放期间无人读 mic → RX DMA 溢出后读数恒为零（转写永远同一句、rc=0 无报错）。**采集任务常驻，别按轮启停** |
+| 主任务直发 QSPI 命令 | 背光 `tx_param` 与 LVGL 首帧 DMA 并发会撑死总线断言（实测 125s 后崩溃）。**发 polling 事务必须持 display_lock** |
 | Bridge 重启 | 必须带同一个 `BRIDGE_MASTER_KEY`，否则凭据无法解密；开发机日志 `/tmp/bridge.log` |
 | 局域网后台 | Bridge 监听 `:8081` 全部网卡；Vite 已 `host: true`；设备只连 Bridge，不连 Web |
 

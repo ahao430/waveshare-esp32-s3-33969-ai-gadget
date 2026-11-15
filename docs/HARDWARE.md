@@ -75,6 +75,10 @@
 
 - BSP 默认音频参数：22050 Hz / 16-bit / 单声道 / Philips 标准 I2S。
 - Muse 移植自测：扬声器播放通过；ES7210 采集通过。
+- ⚠️ ES7210 采集任务必须常驻（2026-11-16 实测）：按轮启停时，SPEAKING
+  期间无人读 mic → RX DMA 溢出后 `esp_codec_dev_read` 永远返回零数据
+  （rc=0 无报错），表现为"下一轮起转写永远是同一句"。现 capture 任务
+  常驻（`audio_esp32.c`），start/stop 只切换消费方。
 - ES8311 地址 = `ES8311_CODEC_DEFAULT_ADDR`，ES7210 = 
   `ES7210_CODEC_DEFAULT_ADDR`（esp_codec_dev 组件默认值；⚠️ 常见
   0x18 / 0x40，以组件源码为准）。
@@ -297,7 +301,7 @@
 分区（0xC10000–0xF90000）重叠——刷回本固件后必须重跑
 `scripts/flash_companion.sh`，否则伴宠资源被清。
 
-### 2.9.1 PWR 键（AXP2101 PWRON）关机（2026-11-16，待真机验证）
+### 2.9.1 PWR 键（AXP2101 PWRON）关机（2026-11-16，armed 已实证；关机手感待确认）
 
 用户反馈"长按电源键关机有点问题"。根因：固件从未配置 PWR 键，行为完全
 取决于 PMU 出厂默认——Muse SDK（本板实测）注释明确：`REG10 bit2

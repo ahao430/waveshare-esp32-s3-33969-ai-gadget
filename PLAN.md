@@ -350,7 +350,7 @@ ESP32 不保存 Provider API Key。所有密钥由 Bridge 管理。
 
 ## 5.5 Xiaozhi AI
 
-**状态：规划中（2026-11-15 调研完成，尚未实现）。**
+**状态：✅ 已实现（2026-11-16 真网验证；Phase A+B 完成，C 未做）。**
 
 目标：设备「小智」App 使用**官方 xiaozhi.me 服务**的 Agent——人设、音色
 （如台湾腔「湾湾小何」）、ASR/LLM/TTS 都由官方服务端决定，而不是当前
@@ -376,20 +376,21 @@ ESP32 不保存 Provider API Key。所有密钥由 Bridge 管理。
    状态，提供「重新检测」「重置设备身份」。Voice 页的小智音色仅作回落链路。
 
 **Phase**：
-- A. Bridge connector：OTA/激活、WS、Opus 编解码、`cmd/xiaozhi-probe`
+- A. ✅ Bridge connector：OTA/激活、WS、Opus 编解码、`cmd/xiaozhi-probe`
   真网跑通「激活 → STT → 回复 → TTS WAV」。
-- B. voice 集成（stream 直通 + 回落）+ Web 配置/状态。
-- C. （可选）设备顶栏显示官方连接状态/激活码。
+- B. ✅ voice 集成（stream 直通 + 回落）+ Web 配置/状态。
+- C. ⏳ （可选）设备顶栏显示官方连接状态/激活码。
 
 **依赖与风险**：
-- Opus：倾向 cgo `hraban/opus`（本机 libopus 已装；CI 需 `libopus-dev`），
-  或纯 Go WASM 方案保持无 cgo——Phase A 用真网音质/延迟定夺。
+- Opus：已选 cgo `hraban/opus`（libopus）；构建需 `-tags nolibopusfile`
+  免 opusfile 依赖（check.sh/run.sh/CI 已统一，CI 装 `libopus-dev`）。
 - 官方服务闭源，协议可能变化；鉴权失败时重新 OTA 刷新 token。
 - 免费额度有限；官方 Agent 配置变更以下一次会话为准。
 - 激活必须由用户在 xiaozhi.me 控制台输入 6 位码，无法自动化。
 
-**验证**：`cmd/xiaozhi-probe` 真网（激活→转写→回复→TTS）；设备 PTT 听到
-官方音色与人设；未配置/断网回落本地链路；`scripts/check.sh` 全绿。
+**验证**：✅ 已全项通过（2026-11-16）：probe 真网（激活→转写→回复→
+5.46s 官方 TTS 落盘）；设备 PTT 直通 103 PCM 帧/193KB/字幕零错误，用户
+确认官方音色与人设正确；未绑定回落本地链路；`scripts/check.sh` 全绿。
 
 设备侧仍复用共享 UI 与 Voice Session，不接管硬件驱动；不引入 MQTT/UDP
 （PTT 场景 WebSocket 已够，见 docs/XIAOZHI_PROTOCOL.md）。

@@ -19,9 +19,9 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 数据源抽象 | `simulator/lvgl-pc/src/data_source.*` | mock / bridge 两实现；新字段三处同步（.h/两 .c） |
 | Bridge API | `bridge/internal/api/` | 标准库 net/http，Go 1.22+ 路由模式 `GET /api/v1/...` |
 | Bridge 配置存储 | `bridge/internal/storage/` | bots/app_settings 表；密钥字段 Encrypt 后存 JSON |
-| AI 上游（AstrBot/OpenAI 兼容） | `bridge/internal/ai/` | astrbot payload 契约见 astrbot.go 头注释 |
+| AI 上游（AstrBot/OpenAI 兼容） | `bridge/internal/ai/` | astrbot payload 契约见 astrbot.go 头注释；会话身份 per-bot（`gadget-<botID>`，「新对话」=轮换代，持久化于 app_settings.astrbot_sessions） |
 | 语音链路 / 音色试听 | `bridge/internal/voice/` | ASR→LLM→TTS；`POST /api/v1/voice/preview` 只读试听（不落配置/不改冷却） |
-| 小智官方服务（规划） | `docs/XIAOZHI_PROTOCOL.md`、`PLAN.md §5.5` | Bridge 模拟设备（OTA 激活 + WS + Opus）；**当前未实现** |
+| 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
 | 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/` | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
 | 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c` | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块 |
@@ -94,11 +94,21 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
    加功能前先裁剪字体/素材。
 8. 启动期约 50% 概率显示管线楔死仍是已知问题（HARDWARE §2.10），
    由 TWDT 自动重启自愈；不要再用「加看门狗」重复治疗。
+9. **ES7210 采集任务必须常驻**（`audio_esp32.c`，别按轮启停）：SPEAKING
+   期间无人读 mic → RX DMA 溢出后 `esp_codec_dev_read` 永远返回零数据
+   （rc=0 无报错），表现为"下一轮起转写永远是同一句"。现在 capture
+   任务常驻，start/stop 只切换消费方。
+10. **主任务发 QSPI polling 事务必须持 display_lock**：开机背光
+    `tx_param` 与 LVGL 首帧 DMA 并发会撑死 `spi_device_release_bus`
+    断言（实测撑 125s 后崩溃重启）。`bsp_display_backlight_on` 已持锁。
 
 ### 当前能力边界（对外说明别说过头）
 
-- **小智 App 不是官方服务**：走 Bridge 的本机 ASR→LLM→TTS；`xiaozhi.me`
-  目前只是设置页入口。官方接入方案（Bridge 模拟设备）见 PLAN §5.5，未实现。
+- **小智 App 已接官方 xiaozhi.me**（ADR-005，2026-11-16 真网验证）：
+  Web「小智」页连接官方服务（6 位激活码在官方控制台绑定）后，设备小智
+  App 的转写/回复/音色全走官方，人设音色在官方控制台配；未绑定或官方
+  失败自动回落本机 ASR→LLM→TTS（语音设置页的音色在回落时生效）。
+  一个 Bridge 身份 = 官方控制台里的一台设备。
 - **Wi-Fi/Bridge 地址是编译期配置**：`firmware/main/wifi_secret.h`（2.4GHz）；
   Web「网络与配网」页是流程设计/mock，真机运行期配网未实现。Mac IP 变了
   要改头文件重刷（建议 DHCP 保留）。

@@ -156,11 +156,12 @@ audio_manager（codec_dev）、display_manager。
 设备端 App（apps/xiaozhi）的边界不变：协议客户端只管
 hello/listen/tts 帧与会话状态机，音色/提示词是服务端会话属性。
 
-## 5. OTA 激活与官方服务接入（2026-11-15 调研，规划中）
+## 5. OTA 激活与官方服务接入（2026-11-15 调研；2026-11-16 已实现）
 
-> 结论先行：官方服务可以用「**Bridge 模拟一台 xiaozhi 设备**」接入，
-> 不需要 console 内部 API，也不需要设备端实现协议。**当前未实现**，
-> 方案已写入 PLAN §5.5。
+> 结论先行：官方服务用「**Bridge 模拟一台 xiaozhi 设备**」接入，
+> 不需要 console 内部 API，也不需要设备端实现协议。**已实现**：
+> `bridge/internal/xiaozhi/` + `internal/voice` 直通 + Web「小智」页
+> （方案 PLAN §5.5，验证记录见 PROGRESS「小智官方服务接入」行）。
 
 ### 5.1 OTA（激活与端点发现）
 
@@ -223,9 +224,9 @@ Content-Type: application/json
    PCM→Opus 上行，解码下行 Opus→16k PCM，按现有 type-1 帧直通给设备；
    `stt` 作为转写、`tts sentence_start` 文本作为字幕，`tts stop` 收尾。
 4. 未配置/OTA/WS 失败 → 自动回落现有 ASR+LLM+TTS（Muse 同款）。
-5. Opus 编解码库候选：cgo `hraban/opus`（libopus，质量最稳；本机已装，
-   CI 需 `libopus-dev`）或纯 Go WASM `jj11hh/opus`（无 cgo，采用度低）。
-   Phase A 用真网音质/延迟定夺。
+5. Opus 编解码已选 cgo `hraban/opus`（libopus）；构建需
+   `-tags nolibopusfile` 免 opusfile 依赖（check.sh/run.sh/CI 已统一，
+   CI 装 `libopus-dev`）。
 
 ### 5.4 与 §4 的关系
 

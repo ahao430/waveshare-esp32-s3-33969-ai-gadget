@@ -44,7 +44,7 @@ const groups = [
       { to: '/bots', label: 'AstrBot', desc: '机器人实例与连接（设备端对话对接，可多个）' },
       { to: '/voice', label: '语音设置', desc: '语音识别 Key（可跳转官方控制台获取）与各 App 音色' },
       { to: '/muse', label: 'Muse', desc: '云端连接凭据（配对导出）与连通性测试' },
-      { to: '/xiaozhi', label: '小智', desc: '官方服务未接入（规划中）；当前走 Bridge 语音链路，可配台湾腔音色' },
+      { to: '/xiaozhi', label: '小智', desc: '连接官方 xiaozhi.me（激活码绑定）；未绑定走本机语音链路' },
       { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
       { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
       { to: '/weather', label: '天气', desc: 'Open-Meteo 免 Key；自动 IP 定位或手动城市' },

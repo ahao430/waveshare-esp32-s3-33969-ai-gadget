@@ -1,6 +1,6 @@
 # 进度对照表（PLAN §18 验收标准逐项核对）
 
-> 最后更新：2026-11-14。状态标记：✅ 完成 · 🔶 部分完成 · ⏳ 未开始 ·
+> 最后更新：2026-11-16。状态标记：✅ 完成 · 🔶 部分完成 · ⏳ 未开始 ·
 > 🔒 等外部输入（解锁条件注明）。证据见 [DEVELOPMENT.md](DEVELOPMENT.md)。
 
 ## Phase 0：项目初始化 ✅
@@ -132,6 +132,6 @@
 | 花屏+重启彻底修复 | ✅ | 关键认知：绘制缓冲放 PSRAM 时，SPI 每块要在内部 RAM 临时分配 bounce buffer，聊天页打开后内存碎片化必然失败 → 丢帧=花屏 + flush 卡死 + 看门狗重启。最终方案：**绘制缓冲开机放内部 RAM（10 行双缓冲 19.2KB，DMA 直连零拷贝）+ 语音线程改常驻静态栈任务（.bss 14KB）+ http 读缓冲入堆 + WiFi 缓冲入 PSRAM**。设备自检连续 6 轮完整语音回合全通：零 NO_MEM、零 panic、栈余 4748B |
 | 音色试听（Web 后台） | ✅ | 语音设置各 App 音色、AstrBot 实例音色旁加「▶ 试听」：POST /api/v1/voice/preview（provider/voice → WAV 试听样例），不落配置、不读写 TTS 冷却、失败直接回显真实原因（未配 Key/音色不可用）；自动档按设备实际路由顺序试。真网验证：Edge 云希 4.10s/131KB（RMS 1575）、DeepSeek stella 102KB；火山未配 Key 返回「火山 TTS 未配置」提示 |
 | 小智官方服务接入 | ✅ 真网端到端打通 | ADR-005 落地：internal/xiaozhi（OTA/激活/WS 回合/Opus 编解码 hraban/opus+libopus，-tags nolibopusfile）+ voice 双路径集成（stream 官方音频直通 type-1 帧、非流式整段 WAV；早失败回落本机链路）+ Web 小智页（连接/激活码/绑定轮询）+ cmd/xiaozhi-probe。**真网实测**（2026-11-16）：OTA 注册 → 控制台输码绑定 → probe 回合「小智你好，请用一句话做个自我介绍」→ 官方转写全对、回复官方台湾人设「我是小智呀，一个来自台湾…」、5.46s 官方 TTS（RMS 3363）落盘；设备端 PTT 直通 `app=xiaozhi` 103 PCM 帧/193KB/字幕 32 字零错误，Bridge 分段 7.4s |
-| AstrBot 会话隔离与「新对话」 | ✅(Bridge)/🚧(固件待刷) | 根因×2：①会话轮换代只存内存——Bridge 重启退回旧代，服务端旧记忆"复活"；②全实例共用 username=gadget，AstrBot 用户级记忆/绑定按 username 共享（会话键 webchat:...:webchat!{username}!{session_id}）。修复：轮换代持久化（app_settings.astrbot_sessions，重启实测 2→3 接续）；每实例独立 username（gadget-<botID>，重置时 -r<gen> 连用户级记忆一并清）；Web AstrBot 页每实例「新对话」；设备端聊天记录按机器人分槽（PSRAM 8×12 条）、「新对话」只重置当前机器人（其余 App 清空不再误触服务端重置）。设备侧已随固件构建，待插 USB 刷写验证 |
+| AstrBot 会话隔离与「新对话」 | ✅ | 根因×2：①会话轮换代只存内存——Bridge 重启退回旧代，服务端旧记忆"复活"；②全实例共用 username=gadget，AstrBot 用户级记忆/绑定按 username 共享（会话键 webchat:...:webchat!{username}!{session_id}）。修复：轮换代持久化（app_settings.astrbot_sessions，重启实测 2→3 接续）；每实例独立 username（gadget-<botID>，重置时 -r<gen> 连用户级记忆一并清）；Web AstrBot 页每实例「新对话」；设备端聊天记录按机器人分槽（PSRAM 8×12 条）、「新对话」只重置当前机器人（其余 App 清空不再误触服务端重置）。设备侧已随 2026-11-16 固件刷入，后续多轮真机使用无回归报告 |
 | PWR 键关机 | ✅ 配置生效 | 根因：固件从未配置 AXP2101 PWR 键，行为看 PMU 出厂默认（16s 关机位有的芯片出厂开、长按时长不确定）。修复（寄存器照抄本板实测的 Muse muse_pmu.c）：长按 10s 硬关兜底 + 键事件状态位轮询（100ms）+ 长按即优雅关机（灭背光→REG10 bit0 软关）。HARDWARE §2.9.1；真机开机日志实证 `PWR key armed: 10s hard-off fallback, events on`（USB 在位时软关后可能立即重新上电，属硬件行为；长按关机手感待用户确认） |
 | 连续对话（免提） | ❌ 已移除 | 三轮真机修复后仍不稳（VAD 触发/时序随环境漂移，用户 2026-11-16 拍板移除）。移除范围：左上角按钮、KEY3 短按注册、VAD/自动轮 poll 驱动全部拆除；KEY3 长按=语音说话保留。**保留的有效遗产**：①vs_cancel API（Listening→Idle 干净取消，通用）；②采集任务常驻（修 ES7210 RX DMA 溢出回零——手动按住模式同样受益，此前的"循环同一句"根因）；③背光持显示锁串行化（修开机与首帧 DMA 抢 QSPI 总线的断言崩溃） |
