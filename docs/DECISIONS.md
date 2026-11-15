@@ -259,3 +259,40 @@ App，UI 共用）；设备端零 BLE/TLS/分区改造；全部可在 Mac 上验
 - Bridge 必须能访问 Muse 云端（本机用 `proxy_url` 走 Clash；部署环境需
   相应网络条件）
 - 上游的 avatar/相册等 UI 能力不引入；Muse 页沿用本项目伴宠与对话 UI
+
+---
+
+## ADR-005 小智官方服务由 Bridge 模拟设备接入（规划中）
+
+日期：2026-11-15　状态：**已定方案，未实现**（PLAN §5.5）
+
+**背景**：用户希望设备「小智」App 使用官方 xiaozhi.me 服务的 Agent——
+官方人设与台湾腔「湾湾小何」音色。两条原路线都有问题：
+
+- 设备端实现小智协议：需要 TLS/WS + Opus + 设备激活，且与本项目
+  Voice Session/UI 两套"操作系统"并存；内部 RAM 与 flash 余量都不支持
+- Web 调用 xiaozhi.me console 内部 API 改人设/音色：C 级非公开接口，
+  不承诺稳定，且仍无法让设备听到官方 TTS
+
+调研确认官方服务支持 **WebSocket-only PTT**：OTA 拿激活码 → 控制台绑定 →
+re-OTA 拿 WS token → hello/listen start → 上行裸 Opus（16k/60ms）→
+`stt`/`llm`/`tts` + 下行 Opus（通常 24k）。设备身份只需稳定的
+`Device-Id`(MAC) + `Client-Id`(UUID) + User-Agent。
+
+**决策**：在 **Bridge 模拟一台 xiaozhi 设备**，设备端协议零改动：
+
+1. Bridge 持久化设备身份；`POST /api/v1/xiaozhi/connect` 触发 OTA，
+   未绑定返回 6 位码给 Web 展示并轮询 `/activate`（202→3s，200→完成）。
+2. 绑定后 re-OTA 保存 `websocket.url/token`（token AES-256-GCM 落库）。
+3. 设备 `app=xiaozhi` 的 `/voice/interact` 走官方回合：PCM→Opus 上行，
+   下行 Opus 解码→16k PCM，按现有 type-1 帧直通（官方 TTS，不听本地 TTS）。
+4. 未配置/OTA/WS 失败自动回落现有 ASR+LLM+TTS（与 Muse 同款）。
+
+**理由**：与 ADR-004 同构——凭据只进 Bridge、设备零协议改动、全部可在
+Mac 上验证；人设/音色仍由用户在官方控制台配置，Bridge 不碰 console API。
+
+**后果**：
+- 依赖 Opus 编解码（倾向 cgo libopus；CI 加 `libopus-dev`）与官方服务
+  的稳定性；协议变化/额度限制需 re-OTA 或降级
+- 激活必须人工在 xiaozhi.me 输入 6 位码；一个 Bridge 身份对应一个官方设备
+- 官方 TTS 音频直通后，Voice 页的「小智音色」只在回落链路生效

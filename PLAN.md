@@ -351,15 +351,49 @@ ESP32 不保存 Provider API Key。所有密钥由 Bridge 管理。
 
 ## 5.5 Xiaozhi AI
 
-- 独立业务 App，与 Muse App 对称：每个第三方语音生态一个
-  App，只带各自的 UI 和协议客户端。
-- 对接小智协议/服务（WS/MQTT、设备激活）。
-- 复用系统级 Voice Session 服务（采集/播放/VAD/opus），不私有化
-  音频硬件。
-- 第一版优先语音输入、AI 回复、语音播放。
-- 不直接接管硬件驱动。
-- 先确认当前小智主线 IDF 版本与 Waveshare BSP
-  的兼容性，再决定是组件集成还是独立移植。
+**状态：规划中（2026-11-15 调研完成，尚未实现）。**
+
+目标：设备「小智」App 使用**官方 xiaozhi.me 服务**的 Agent——人设、音色
+（如台湾腔「湾湾小何」）、ASR/LLM/TTS 都由官方服务端决定，而不是当前
+本机 ASR→AstrBot→TTS 链路。
+
+架构（与 Muse ADR-004 同构）：**Bridge 模拟一台 xiaozhi 设备**，设备端零协议
+改动（仍打 `/api/v1/voice/interact?app=xiaozhi`）。
+
+1. **身份与激活**：Bridge 持久化设备身份 `Device-Id`（本地管理 MAC）与
+   `Client-Id`（UUIDv4）；`POST https://api.tenclass.net/xiaozhi/ota/`
+   （头 `Device-Id` / `Client-Id` / `User-Agent` / `Activation-Version: 1`）。
+   未绑定时响应含 `activation.code`，Web「小智」页展示 6 位码与绑定步骤；
+   用户在 xiaozhi.me 控制台添加设备后重新 OTA，取得
+   `websocket.url` / `websocket.token`（token AES-256-GCM 落库）。
+2. **会话**：WSS（`Authorization: Bearer`、`Protocol-Version: 1`）；
+   hello（`opus/16000/1/60`）→ `listen start manual` → 上行 PCM 16k 编成
+   Opus 60ms/960 样本 → `listen stop` → 收 `stt`/`llm`/`tts` 与下行 Opus
+   （通常 24kHz，解码后重采样 16k）。
+3. **设备直通**：`app=xiaozhi` 回合走官方服务，官方 TTS 音频直接以现有
+   type-1 PCM 帧下发（不使用本地 TTS）；人设/音色以官方控制台为准。
+   未配置、OTA/WS 失败时自动回落现有 ASR+LLM+TTS（与 Muse 同款降级）。
+4. **Web**：小智页显示 未启用 / 待绑定（激活码）/ 已连接 / 失败；轮询绑定
+   状态，提供「重新检测」「重置设备身份」。Voice 页的小智音色仅作回落链路。
+
+**Phase**：
+- A. Bridge connector：OTA/激活、WS、Opus 编解码、`cmd/xiaozhi-probe`
+  真网跑通「激活 → STT → 回复 → TTS WAV」。
+- B. voice 集成（stream 直通 + 回落）+ Web 配置/状态。
+- C. （可选）设备顶栏显示官方连接状态/激活码。
+
+**依赖与风险**：
+- Opus：倾向 cgo `hraban/opus`（本机 libopus 已装；CI 需 `libopus-dev`），
+  或纯 Go WASM 方案保持无 cgo——Phase A 用真网音质/延迟定夺。
+- 官方服务闭源，协议可能变化；鉴权失败时重新 OTA 刷新 token。
+- 免费额度有限；官方 Agent 配置变更以下一次会话为准。
+- 激活必须由用户在 xiaozhi.me 控制台输入 6 位码，无法自动化。
+
+**验证**：`cmd/xiaozhi-probe` 真网（激活→转写→回复→TTS）；设备 PTT 听到
+官方音色与人设；未配置/断网回落本地链路；`scripts/check.sh` 全绿。
+
+设备侧仍复用共享 UI 与 Voice Session，不接管硬件驱动；不引入 MQTT/UDP
+（PTT 场景 WebSocket 已够，见 docs/XIAOZHI_PROTOCOL.md）。
 
 ## 5.6 Zhipu Quota
 

@@ -8,6 +8,8 @@ import { request } from '@/api/client'
 const bridgeOk = ref<boolean | null>(null)
 const themeName = ref('')
 
+const adminUrl = typeof window !== 'undefined' ? window.location.origin : ''
+
 const themes = ['星云紫', '极光青', '落日橙', '蔷薇粉']
 
 onMounted(async () => {
@@ -42,7 +44,7 @@ const groups = [
       { to: '/bots', label: 'AstrBot', desc: '机器人实例与连接（设备端对话对接，可多个）' },
       { to: '/voice', label: '语音设置', desc: '语音识别 Key（可跳转官方控制台获取）与各 App 音色' },
       { to: '/muse', label: 'Muse', desc: '云端连接凭据（配对导出）与连通性测试' },
-      { to: '/xiaozhi', label: '小智', desc: '小智官方后台入口与本机语音配置' },
+      { to: '/xiaozhi', label: '小智', desc: '官方服务未接入（规划中）；当前走 Bridge 语音链路，可配台湾腔音色' },
       { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
       { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
       { to: '/weather', label: '天气', desc: 'Open-Meteo 免 Key；自动 IP 定位或手动城市' },
@@ -65,6 +67,26 @@ const groups = [
         <template v-if="themeName"> · 当前主题：{{ themeName }}</template>
       </p>
     </header>
+
+    <div class="card">
+      <h3 class="mb-2 font-semibold">使用与访问</h3>
+      <ul class="space-y-1 text-sm text-dim">
+        <li>当前后台：<span class="text-accent2">{{ adminUrl }}</span></li>
+        <li>
+          局域网：手机/另一台电脑打开
+          <code>http://&lt;Mac 局域网 IP&gt;:5173</code>（Vite 已监听 0.0.0.0；
+          首次可能需要在 macOS 防火墙里放行 node）。
+        </li>
+        <li>
+          设备：刷好固件后走 Wi-Fi；接了电池即可拔掉 USB 独立运行。
+          AI 回复依赖本机 Bridge 常驻，且 Mac 不能休眠。
+        </li>
+        <li>
+          安全：仅限可信局域网；若设置了 <code>BRIDGE_TOKEN</code>，浏览器需在
+          localStorage 写入 <code>bridge_token</code>。
+        </li>
+      </ul>
+    </div>
 
     <div v-for="g in groups" :key="g.title" class="space-y-3">
       <h2 class="text-sm font-medium text-dim">{{ g.title }}</h2>

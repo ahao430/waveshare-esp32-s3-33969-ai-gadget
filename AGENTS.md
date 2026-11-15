@@ -20,6 +20,8 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | Bridge API | `bridge/internal/api/` | 标准库 net/http，Go 1.22+ 路由模式 `GET /api/v1/...` |
 | Bridge 配置存储 | `bridge/internal/storage/` | bots/app_settings 表；密钥字段 Encrypt 后存 JSON |
 | AI 上游（AstrBot/OpenAI 兼容） | `bridge/internal/ai/` | astrbot payload 契约见 astrbot.go 头注释 |
+| 语音链路 / 音色试听 | `bridge/internal/voice/` | ASR→LLM→TTS；`POST /api/v1/voice/preview` 只读试听（不落配置/不改冷却） |
+| 小智官方服务（规划） | `docs/XIAOZHI_PROTOCOL.md`、`PLAN.md §5.5` | Bridge 模拟设备（OTA 激活 + WS + Opus）；**当前未实现** |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
 | 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/` | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
 | 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c` | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块 |
@@ -66,6 +68,46 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 5. 新增头文件后 ninja 依赖不回溯——`touch main.c` 强制重编
 6. GOT_IP 等事件回调里更新 UI：必须持显示锁；Wi-Fi 启动要在 UI 构建之后
 
+### 2026-11 稳定性踩坑（真机，勿回退）
+
+1. **绘制缓冲固定内部 RAM 10 行双缓冲**（`use_psram=false`，
+   `max_transfer_sz=480*10*2`）。放 PSRAM 时 SPI 每块要在内部 RAM 临时
+   分配同尺寸 bounce buffer，聊天页内存碎片化后必失败 →
+   `Draw bitmap failed: NO_MEM` → 花屏 + flush 卡死 + 看门狗重启。
+2. **语音回合用常驻静态栈任务**（`xTaskCreateStatic` + `.bss` 14KB）。
+   pthread 动态栈在内部 RAM 碎片化时 ENOMEM（rc=12，状态卡"思考中"）；
+   栈放 PSRAM 会 `InstrFetchProhibited`。
+3. **LVGL 心跳看门狗**：判据是 `g_lvgl_beat` 连续 15s 不推进，不是
+   「锁 BUSY 连续 3 次」——聊天页重绘慢时会误杀。hangprobe 栈 8KB
+   （4KB 实测溢出）。TWDT 10s 负责真楔死自愈（约 20s，rst:0xc）。
+4. **选机器人面板**：拉列表 worker 栈 ≥16KB（12KB 实测溢出），UI 构建用
+   `lv_async_call` 回 LVGL 线程。
+5. `ui_launcher_rebuild` 前必须清页点数组（悬垂指针 LoadProhibited）；
+   波浪背景 buffer 要复用，否则重建泄漏。
+6. 远端配置两段式：`ui_remote_config_prefetch`（不持锁做网络/文件）→
+   `ui_remote_config_refresh`（持锁应用 + `app_manager_clear` + 重建桌面）；
+   GOT_IP 后必须补拉，否则开机排布/主题不生效。
+7. **字体**：lv_font_conv 默认 RLE 压缩，必须开 `LV_USE_FONT_COMPRESSED`
+   （固件 Kconfig + 模拟器 lv_conf.h），否则空心方块；生成 struct 自带的
+   `.fallback = NULL` 会覆盖挂接；GBK 区间会混入 7000+ 繁体导致 flash 溢出。
+   当前**不压缩、无 L2 回退**（用户决策），app 分区余 5%（232KB）——
+   加功能前先裁剪字体/素材。
+8. 启动期约 50% 概率显示管线楔死仍是已知问题（HARDWARE §2.10），
+   由 TWDT 自动重启自愈；不要再用「加看门狗」重复治疗。
+
+### 当前能力边界（对外说明别说过头）
+
+- **小智 App 不是官方服务**：走 Bridge 的本机 ASR→LLM→TTS；`xiaozhi.me`
+  目前只是设置页入口。官方接入方案（Bridge 模拟设备）见 PLAN §5.5，未实现。
+- **Wi-Fi/Bridge 地址是编译期配置**：`firmware/main/wifi_secret.h`（2.4GHz）；
+  Web「网络与配网」页是流程设计/mock，真机运行期配网未实现。Mac IP 变了
+  要改头文件重刷（建议 DHCP 保留）。
+- 设备只连 Bridge（`http://<MacIP>:8081`），不连 Web；Mac 睡眠/关机则对话失败。
+- **局域网后台**：Bridge 监听 `:8081` 全部网卡，Vite 已 `host: true`，
+  手机访问 `http://<MacIP>:5173`。仅限可信局域网；设了 `BRIDGE_TOKEN` 时
+  浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）。
+- **USB 线**：只负责供电/串口日志；接了电池可拔线独立运行，没接电池拔线即断电。
+
 ### LVGL 版本差异（移植期主要摩擦）
 - 模拟器 LVGL 9.2.2 / 固件更新：`lv_obj_add_flag/clear_flag` 在固件是
   deprecated-error，改用 `lv_obj_set_hidden/clickable` 等专用 setter
@@ -97,5 +139,7 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 
 ## 服务端口（开发机常驻）
 
-- Bridge `:8081`（master key 在 /tmp/bridge.log 启动行；日志同处）
-- Web `:5173`；模拟器 GUI 可常开（bridge 模式实时连）
+- Bridge `:8081`（监听全部网卡；master key 在 `bridge/bridge.env`，日志 `/tmp/bridge.log`；
+  重启必须带同一个 `BRIDGE_MASTER_KEY`，否则加密凭据读不出来）
+- Web `:5173`（Vite `host: true`，局域网 `http://<MacIP>:5173`；`/api` 服务端代理到 127.0.0.1:8081）
+- 模拟器 GUI 可常开（bridge 模式实时连）

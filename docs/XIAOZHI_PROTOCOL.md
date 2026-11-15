@@ -155,3 +155,82 @@ audio_manager（codec_dev）、display_manager。
 
 设备端 App（apps/xiaozhi）的边界不变：协议客户端只管
 hello/listen/tts 帧与会话状态机，音色/提示词是服务端会话属性。
+
+## 5. OTA 激活与官方服务接入（2026-11-15 调研，规划中）
+
+> 结论先行：官方服务可以用「**Bridge 模拟一台 xiaozhi 设备**」接入，
+> 不需要 console 内部 API，也不需要设备端实现协议。**当前未实现**，
+> 方案已写入 PLAN §5.5。
+
+### 5.1 OTA（激活与端点发现）
+
+```http
+POST https://api.tenclass.net/xiaozhi/ota/
+Device-Id: 02:11:22:33:44:55      # 稳定 MAC（本地管理位）
+Client-Id: <uuidv4>               # 持久化，擦除 NVS 会变
+User-Agent: <board>/<version>
+Activation-Version: 1             # 无硬件序列号；有序列号才是 2
+Content-Type: application/json
+```
+
+请求体是设备系统信息（`version:2`、`mac_address`、`uuid`、`chip_model_name`、
+`application{name,version}`、`board{type,name,mac}`、`protocol.features` 等）。
+未绑定时响应示例：
+
+```json
+{
+  "websocket": {"url": "wss://api.tenclass.net/xiaozhi/v1/", "token": "..."},
+  "server_time": {"timestamp": 1768454488884, "timezone_offset": 480},
+  "activation": {
+    "code": "539000",
+    "message": "xiaozhi.me\n539000",
+    "challenge": "8dcafd09-fa80-4a4e-b97b-851918ee1b08"
+  }
+}
+```
+
+- 用户到 xiaozhi.me 控制台「添加设备」输入 6 位码；设备侧轮询
+  `POST <ota>/activate`（`Activation-Version: 1`，body `{}`）：
+  **202 = 等待绑定（3s 后重试），200 = 已绑定**。
+- 绑定成功后重新 OTA，响应不再有 `activation`，拿到 `websocket.url/token`。
+- 官方响应可能同时带 `mqtt` 块；PTT 场景可直接忽略，只走 WebSocket。
+
+### 5.2 WebSocket 与音频（确认值）
+
+- 握手头：`Authorization: Bearer <token>`、`Protocol-Version: 1`、
+  `Device-Id`、`Client-Id`。
+- hello：`{"type":"hello","version":1,"transport":"websocket",
+  "features":{"mcp":false,"aec":false},"audio_params":{
+  "format":"opus","sample_rate":16000,"channels":1,"frame_duration":60}}`；
+  服务端 10s 内回 hello（含 `session_id` 与下行 `audio_params`）。
+- PTT：`listen start manual` → 二进制 Opus 包（**v1 = 裸包，一包一帧，
+  无长度前缀**）→ `listen stop`。
+- 上行 16kHz mono、60ms = **960 样本**（PCM 1920B）；下行常见 24kHz，
+  解码后重采样到 16k；VBR/DTX 导致包长不固定。
+- 服务端事件：`stt`（转写）、`llm`（emotion/text）、`tts`
+  （start / sentence_start+text / stop）、`mcp`（不实现就别 advertise）、
+  `system`/`alert`。`tts stop` 即回合结束（manual 模式回 idle）。
+- 心跳：WebSocket ping 20s；120s 无数据视为死连接；非 1000/1001 关闭
+  需重连，鉴权失败要重新 OTA。
+
+### 5.3 Bridge 模拟设备流程
+
+1. Bridge 生成并持久化 `Device-Id`（`02:` 开头的随机 MAC）与 `Client-Id`
+   （UUIDv4），存 `app_settings.xiaozhi`；token 用 AES-256-GCM 加密。
+2. `POST /api/v1/xiaozhi/connect` 触发 OTA；未绑定返回 6 位码给 Web
+   展示并轮询；绑定后保存 WS URL/token。
+3. 设备 PTT → `app=xiaozhi` 的 `/voice/interact` → Bridge 开/复用 WSS，
+   PCM→Opus 上行，解码下行 Opus→16k PCM，按现有 type-1 帧直通给设备；
+   `stt` 作为转写、`tts sentence_start` 文本作为字幕，`tts stop` 收尾。
+4. 未配置/OTA/WS 失败 → 自动回落现有 ASR+LLM+TTS（Muse 同款）。
+5. Opus 编解码库候选：cgo `hraban/opus`（libopus，质量最稳；本机已装，
+   CI 需 `libopus-dev`）或纯 Go WASM `jj11hh/opus`（无 cgo，采用度低）。
+   Phase A 用真网音质/延迟定夺。
+
+### 5.4 与 §4 的关系
+
+§4 的「官方路径只做跳转」是在**设备端实现协议**前提下的结论；改为
+Bridge 模拟设备后，官方 Agent 的人设/音色仍由用户在 xiaozhi.me 控制台
+配置（Bridge 不碰 console 内部 API），设备端只负责录音/播放。自建
+server 仍是可选路径（同一协议，改 OTA/WS 地址即可）。
+
