@@ -119,3 +119,5 @@
 | 主页排布（Web 配置） | ✅ | /api/v1/launcher（order=可见顺序，不在列表=隐藏；目录+校验）；设备 app_def_t 加 key、启动拉取重排；Web 排布页（↑↓/隐藏/恢复/分页预览）；e2e：设置提到第一+隐藏 3 个 → 桌面顺序与页点（2 页 2 点）像素验证 |
 | 天气 App 全链路 | ✅ | Open-Meteo 免 Key（IP 定位 ip-api/ipwho.is + 手动城市 Geocoding）；Bridge 缓存 10min+保温；Web 配置页（自动/手动）；ui_weather 页面（当前+5日）；字体重生成（°+天气字典+GB2312 一级字库治动态中文豆腐） |
 | 应用配置四域（机器人/ZCode/监控/按键） | ✅ | Bridge bots 表+app_settings（astrbot 订阅自动迁移）；/bots CRUD+probe、/zcode config+sessions、/monitor config+动态源、/keys；Web 四配置页；模拟器按键映射拉取+KEY3 长按 PTT（A/B 快照验证 Web 下发生效） |
+| 主页排布真机生效 | ✅ | 根因：真机 ui_init 时 Wi-Fi 未起，拉不到 Web 排布且 GOT_IP 后无人补拉。修复：app_manager_clear+register_apps 可重跑；remote_cfg_task 两段式（prefetch 不持锁抓 theme/bg/keys/launcher，refresh 持锁应用+重建桌面）。附带修复 ui_launcher_rebuild 两颗雷：g_page_dots 悬垂指针（重建即 LoadProhibited 崩溃）、波浪背景 buffer 重建泄漏。真机验证：好启动 6.5s 内 layout applied + remote config applied + 探针 FREE。启动期 wedge 为先前已存在问题（HARDWARE.md §2.10 归因） |
+| Web 后台信息架构重排 | ✅ | 主页排布并入外观；网络页合并首次配网+后台二维码（当前地址码+局域网演进说明）；代理独立 tab；聊天机器人→AstrBot；模型 API→语音设置（/voice，ASR 卡片加"去获取"直达官方控制台，音色表加 AstrBot 项跳实例设置）；Muse/小智独立 tab（小智提供 xiaozhi.me 控制台入口）；订阅中心每实例"去获取"（有 base_url 跳站点、否则官方地址） |

@@ -296,3 +296,24 @@
 注意：Muse 的 `files` LittleFS（0xA30000–0xE30000）与我们的 `assets`
 分区（0xC10000–0xF90000）重叠——刷回本固件后必须重跑
 `scripts/flash_companion.sh`，否则伴宠资源被清。
+
+### 2.10 启动期显示管线挂死（wedge，未解，2026-11-15 归因实验）
+
+**症状**：复位启动后 ~8–14s，LVGL 任务持锁卡死（`probe#N lvgl_lock=BUSY`
+不再恢复），随后控制台无输出（其余任务看似存活，esptool 仍可通信复位）。
+复位彩票：同一固件连续复位，约 30–50% 概率触发；好启动时一切正常。
+
+**归因实验（2026-11-15）**：
+- 优先级继承证明持锁者是 **lvgl 任务本身**（cfg_fetch 若持锁会被 lvgl
+  任务的优先级 6 抬升，实测卡死时 cfg_fetch 仍为创建优先级 4）→ 卡在
+  lv_timer_handler / flush 内部，即显示管线类问题（同 §2.7 坑#2 家族）；
+- 对照组：**改动前固件（HEAD 无运行时重建桌面）8 轮复位 wedge 4 轮
+  （50%）**，新固件约 30% → **先前已存在**，与"联网后重拉主页排布并
+  重建桌面"的改动无关（该改动在好启动上验证通过：layout applied +
+  remote config applied + 探针持续 FREE）。
+
+**排除项**：power_manager_snapshot（缓存读，I2C 在独立任务）、状态栏
+定时器（只读 ds_state 缓存）、屏保（2 分钟才触发）。
+
+**下一步**（root-cause 时）：hangprobe 检测到 BUSY 时抓 lvgl 任务
+`esp_backtrace`（hangprobe/net_probe 探针因此暂缓清理）。

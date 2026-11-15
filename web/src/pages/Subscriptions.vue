@@ -19,7 +19,7 @@ const message = ref('')
 const saving = ref(false)
 
 // 本页只管额度：订阅实例 + 额度查询凭据。
-// 语音识别等能力 Key 在「模型 API」页（/models），两者不要混。
+// 语音识别等能力 Key 在「语音设置」页（/voice），两者不要混。
 // 凭据卡动态化（修"kimi 默认项删不掉"）：只显示已配置凭据、或被
 // 某个订阅实例用到的 kind——都没用就不占地方。
 const allKinds = ['zhipu', 'kimi', 'deepseek', 'gpt', 'claude', 'minimax', 'mimo', 'newapi']
@@ -34,7 +34,7 @@ const providerTitle: Record<string, string> = {
   newapi: 'NewAPI 中转站',
 }
 const providerHint: Record<string, string> = {
-  zhipu: '仅用于查询 Coding Plan 额度（语音识别请去「模型 API」配置）',
+  zhipu: '仅用于查询 Coding Plan 额度（语音识别请去「语音设置」配置）',
   kimi: '仅用于查询 Coding Plan 额度',
   deepseek: '官方余额接口（/user/balance）',
   gpt: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
@@ -119,6 +119,23 @@ const subKindNames: Record<string, string> = {
 const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
 const subAdding = ref(false)
 
+/* 「去获取」跳转目标：中转站类有 base_url 就跳站点；否则跳官方控制台 */
+const officialUrls: Record<string, string> = {
+  zhipu: 'https://open.bigmodel.cn',
+  kimi: 'https://www.kimi.com',
+  deepseek: 'https://platform.deepseek.com',
+  gpt: 'https://chatgpt.com',
+  claude: 'https://claude.ai',
+  minimax: 'https://platform.minimax.cn',
+  mimo: 'https://mimo.mi.com',
+  opencode: 'https://opencode.ai/zen',
+  newapi: '',
+}
+function fetchUrlFor(s: SubInfo): string {
+  if (s.base_url) return s.base_url
+  return officialUrls[s.kind] ?? ''
+}
+
 async function loadSubs() {
   try {
     const r = await request<{ subscriptions: SubInfo[] }>('/api/v1/subscriptions')
@@ -175,7 +192,7 @@ async function remove(id: string) {
   <h1 class="page-title">订阅额度</h1>
   <p class="page-sub">
     本页只负责<b>额度</b>：订阅实例（设备订阅页显示什么）+ 额度查询凭据（抓额度用的 Key）。
-    语音识别等能力 Key 在 <RouterLink to="/models" class="text-accent2">模型 API</RouterLink> 页配置。
+    语音识别等能力 Key 在 <RouterLink to="/voice" class="text-accent2">语音设置</RouterLink> 页配置。
     Key 经 AES-256-GCM 加密落库（需 <code class="text-accent2">BRIDGE_MASTER_KEY</code>），明文不回显、不入日志。
   </p>
 
@@ -189,12 +206,21 @@ async function remove(id: string) {
     <div v-if="subs.length === 0" class="mb-2 text-sm text-dim">还没有订阅，添加一个：</div>
     <div class="space-y-2">
       <div v-for="s in subs" :key="s.id" class="flex items-center justify-between rounded border border-line px-3 py-2">
-        <div>
+        <div class="min-w-0">
           <span class="font-medium">{{ s.label }}</span>
           <span class="ml-2 text-xs text-dim">{{ subKindNames[s.kind] ?? s.kind }}</span>
           <span class="ml-2 badge" :class="s.has_token ? '' : '!text-warn'">{{ s.has_token ? '已配 Key' : '无 Key' }}</span>
         </div>
-        <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
+        <div class="flex shrink-0 gap-1">
+          <a
+            v-if="fetchUrlFor(s)"
+            class="btn-ghost !px-2 !py-1"
+            :href="fetchUrlFor(s)"
+            target="_blank"
+            rel="noopener"
+          >去获取 ↗</a>
+          <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
+        </div>
       </div>
     </div>
     <div class="mt-3 flex flex-wrap items-end gap-2">

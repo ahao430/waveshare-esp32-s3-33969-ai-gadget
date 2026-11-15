@@ -281,7 +281,7 @@ async function probe(id: string) {
 </script>
 
 <template>
-  <h1 class="page-title">聊天机器人</h1>
+  <h1 class="page-title">AstrBot</h1>
   <p class="page-sub">
     设备端 AstrBot 应用（对话与语音）的上游。AstrBot 侧无需创建机器人——走
     HTTP OpenAPI：WebUI <b>设置 → OpenAPI → 创建 API Key</b>（对话勾

@@ -29,19 +29,20 @@ const groups = [
   {
     title: '公共配置',
     items: [
-      { to: '/appearance', label: '外观', desc: '主题色下发、自定义背景图' },
-      { to: '/network', label: '网络与配网', desc: 'Wi-Fi 配置方式说明、设备热点' },
-      { to: '/provisioning', label: '后台二维码', desc: '本后台地址全屏码（设备扫码直达）' },
+      { to: '/appearance', label: '外观', desc: '主题色、自定义背景、主页排布（一屏 4 个自动分页）' },
+      { to: '/network', label: '网络与配网', desc: 'Wi-Fi 管理、首次配网流程、后台二维码' },
+      { to: '/proxy', label: '代理', desc: '出站 HTTP 代理（Direct / HTTP CONNECT）' },
       { to: '/keys', label: '物理按键', desc: '三键短按/长按映射（长按电源/BOOT 固定）' },
-      { to: '/launcher', label: '主页排布', desc: '桌面应用顺序/显示隐藏（一屏 4 个自动分页）' },
     ],
   },
   {
     title: '应用配置',
     items: [
-      { to: '/subscriptions', label: '订阅中心', desc: '额度订阅实例（智谱/Kimi/OpenCode/NewAPI/Mock）' },
-      { to: '/bots', label: '聊天机器人', desc: 'AstrBot 机器人创建（设备端对话对接，可多个）' },
-      { to: '/models', label: '模型 API', desc: '语音识别等能力 Key（与额度查询分开）' },
+      { to: '/subscriptions', label: '订阅中心', desc: '额度订阅实例（智谱/Kimi/DeepSeek/Coding Plan/NewAPI）' },
+      { to: '/bots', label: 'AstrBot', desc: '机器人实例与连接（设备端对话对接，可多个）' },
+      { to: '/voice', label: '语音设置', desc: '语音识别 Key（可跳转官方控制台获取）与各 App 音色' },
+      { to: '/muse', label: 'Muse', desc: '云端连接凭据（配对导出）与连通性测试' },
+      { to: '/xiaozhi', label: '小智', desc: '小智官方后台入口与本机语音配置' },
       { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
       { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
       { to: '/weather', label: '天气', desc: 'Open-Meteo 免 Key；自动 IP 定位或手动城市' },

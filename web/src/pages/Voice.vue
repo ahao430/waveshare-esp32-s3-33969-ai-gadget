@@ -1,6 +1,7 @@
 <script setup lang="ts">
-// 模型 API 配置：设备 AI 能力实际调用到的 Key（与"订阅额度查询"完全分开）。
-// 目前是语音识别（ASR）；后续直连对话模型/TTS 也放这里。
+// 语音设置（原「模型 API」页，2026-11-15 更名并聚焦语音）：
+// 设备语音能力实际调用的 Key（ASR）与各 App 的朗读音色。
+// Muse 云端连接移到「Muse」页；聊天人设在「AstrBot」页。
 // Key 经 AES-256-GCM 加密落库（需 BRIDGE_MASTER_KEY），明文不回显。
 import { computed, onMounted, ref } from 'vue'
 
@@ -31,13 +32,21 @@ const providerTitle: Record<string, string> = {
 }
 const providerHint: Record<string, string> = {
   siliconflow: '注册 cloud.siliconflow.cn → API 密钥；新账号有免费额度',
-  volcengine: 'console.volcengine.com → 语音技术 → 创建应用（开"语音识别大模型"+"语音合成大模型"）。Key 格式 AppID:AccessToken',
-  deepseek: 'platform.deepseek.com → API Keys。同一个 Key 同时用于识别与合成（音色 stella 女 / tide 男）',
-  minimax: 'platform.minimax.cn → 账户管理 → 接口密钥',
-  mimo: 'mimo.mi.com 控制台创建 API Key',
+  volcengine: '语音技术 → 创建应用（开"语音识别大模型"+"语音合成大模型"）。Key 格式 AppID:AccessToken',
+  deepseek: '同一个 Key 同时用于识别与合成（音色 stella 女 / tide 男）',
+  minimax: '账户管理 → 接口密钥',
+  mimo: '控制台创建 API Key',
+}
+// 「去获取」直达各官方控制台/密钥页
+const providerConsole: Record<string, string> = {
+  siliconflow: 'https://cloud.siliconflow.cn/account/ak',
+  volcengine: 'https://console.volcengine.com/speech',
+  deepseek: 'https://platform.deepseek.com/api_keys',
+  minimax: 'https://platform.minimax.cn',
+  mimo: 'https://mimo.mi.com',
 }
 
-/* ---- 各 App 音色（Muse / 小智 / ZCode；大肥鱼用机器人实例设置）---- */
+/* ---- 各 App 音色（Muse / 小智 / ZCode；AstrBot 用实例设置；大肥鱼=首个 AstrBot 实例）---- */
 type VoicePref = { provider?: string; voice?: string }
 const appVoice = ref<Record<string, VoicePref>>({ muse: {}, xiaozhi: {}, zcode: {} })
 const appVoiceMsg = ref('')
@@ -83,6 +92,9 @@ const voices: Record<string, { id: string; label: string }[]> = {
     { id: 'tide', label: 'tide（男声）' },
   ],
   volcengine: volcVoices,
+  // Edge 免费通道实测可用（2026-11-15 真网逐个探测 25 个候选，
+  // Azure 目录里的晓涵/晓秋/云泽等 12 个返回 Unsupported voice；
+  // 目录与 bridge/internal/voice/voices_live_test.go 保持同步）
   edge: [
     { id: '', label: '默认（晓晓 女声）' },
     { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声）' },
@@ -102,92 +114,9 @@ const voices: Record<string, { id: string; label: string }[]> = {
 }
 const voiceOptions = (engine: string) => voices[engine] ?? voices['']
 
-/* ---- Muse 云端连接（配对凭据；加密落库）---- */
-type MuseCfg = {
-  node_id: string
-  noise_host: string
-  api_url: string
-  proxy_url: string
-  has_creds: boolean
-}
-const muse = ref<MuseCfg>({ node_id: '', noise_host: '', api_url: '', proxy_url: '', has_creds: false })
-const museToken = ref('')
-const museRefresh = ref('')
-const museMsg = ref('')
-const museProbe = ref('')
-const museBusy = ref(false)
-
-async function loadMuse() {
-  try {
-    const r = await request<MuseCfg>('/api/v1/muse/config')
-    muse.value = {
-      node_id: r.node_id ?? '',
-      noise_host: r.noise_host ?? 'hatch.metaaivm.com',
-      api_url: r.api_url ?? 'https://api.muse.ai',
-      proxy_url: r.proxy_url ?? '',
-      has_creds: !!r.has_creds,
-    }
-  } catch {
-    /* 未配置 */
-  }
-}
-
-async function saveMuse() {
-  museBusy.value = true
-  museMsg.value = ''
-  try {
-    const body: Record<string, unknown> = {
-      node_id: muse.value.node_id,
-      noise_host: muse.value.noise_host,
-      api_url: muse.value.api_url,
-      proxy_url: muse.value.proxy_url,
-    }
-    if (museToken.value) {
-      body.creds = { access_token: museToken.value, refresh_token: museRefresh.value }
-    }
-    await request('/api/v1/muse/config', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    museToken.value = ''
-    museRefresh.value = ''
-    museMsg.value = '✓ 已保存（下一次语音请求生效）'
-    await loadMuse()
-  } catch (e) {
-    museMsg.value = `✗ ${e instanceof Error ? e.message : e}`
-  } finally {
-    museBusy.value = false
-  }
-}
-
-async function probeMuse() {
-  museBusy.value = true
-  museProbe.value = '测试中…'
-  try {
-    const r = await request<{ ok: boolean; step?: string; error?: string; vm_id?: string }>(
-      '/api/v1/muse/probe',
-      { method: 'POST' },
-    )
-    museProbe.value = r.ok ? `✓ 连接正常（VM ${r.vm_id?.slice(0, 8)}…）` : `✗ ${r.step}: ${r.error}`
-  } catch (e) {
-    museProbe.value = `✗ ${e instanceof Error ? e.message : e}`
-  } finally {
-    museBusy.value = false
-  }
-}
-
-async function clearMuse() {
-  if (!confirm('删除 Muse 凭据？（Muse App 会回落到常规语音链路）')) return
-  await request('/api/v1/muse/config', { method: 'DELETE' })
-  muse.value.has_creds = false
-  museMsg.value = '已删除'
-}
-
 onMounted(async () => {
   await load()
   await loadAppVoice()
-  await loadMuse()
 })
 
 async function loadAppVoice() {
@@ -275,11 +204,11 @@ async function remove(id: string) {
 </script>
 
 <template>
-  <h1 class="page-title">模型 API</h1>
+  <h1 class="page-title">语音设置</h1>
   <p class="page-sub">
-    设备 AI 能力实际调用的 Key（语音识别等）。与「订阅中心」的额度查询凭据是两件事：
-    这里决定<b>能不能听写语音</b>，订阅中心决定<b>设备订阅页显示多少额度</b>。
-    聊天回复由「聊天机器人」页的 AstrBot/人设决定。
+    设备语音链路的 Key 与音色：按住说话 → 设备录音 → <b>这里配的 Key 转写</b> →
+    AstrBot/DeepSeek 回答 → TTS 朗读。与「订阅中心」的额度查询凭据是两件事；
+    聊天人设在「AstrBot」页，Muse 云端在「Muse」页。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') || message.includes('不可用') ? 'text-err' : 'text-ok'">
@@ -294,8 +223,6 @@ async function remove(id: string) {
       </span>
     </div>
     <p class="mb-3 text-xs text-dim">
-      链路：按住说话 → 设备录音 → <b>这里配的 Key 转写</b> → AstrBot/DeepSeek 回答 →
-      TTS 合成语音 → 设备播放。
       配任意一家即可；Bridge 选择顺序 硅基流动 → 火山豆包 → DeepSeek → MiniMax → MiMo → 智谱。
       语音合成默认 Edge-TTS（免费）；配了 DeepSeek/火山 Key 会按音色偏好自动路由。
     </p>
@@ -322,10 +249,13 @@ async function remove(id: string) {
           </div>
         </template>
         <template v-else>
-          <div class="flex gap-2">
+          <div class="flex flex-wrap gap-2">
             <button class="btn-ghost !px-2 !py-1" @click="startEdit(p)">
               {{ infoOf(p) ? '更换 Key' : '配置 Key' }}
             </button>
+            <a class="btn-ghost !px-2 !py-1" :href="providerConsole[p]" target="_blank" rel="noopener">
+              去获取 ↗
+            </a>
             <button v-if="infoOf(p)" class="btn-ghost !text-err !px-2 !py-1" @click="remove(p)">
               删除
             </button>
@@ -336,54 +266,9 @@ async function remove(id: string) {
   </div>
 
   <div class="card mt-4">
-    <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-      <h3 class="font-semibold">Muse 云端连接</h3>
-      <span class="badge" :class="muse.has_creds ? '!bg-ok/15 !text-ok' : '!text-warn'">
-        {{ muse.has_creds ? '已配置（Muse 页走 Muse 云端）' : '未配置（Muse 页走常规链路）' }}
-      </span>
-    </div>
-    <p class="mb-3 text-xs text-dim">
-      Muse 页的语音请求经 Bridge 连到你的 Muse VM（Noise 加密通道），回复文本由本地 TTS 朗读。
-      凭据来自一次性配对：官方固件配对后从设备 NVS 导出
-      <code>access_token</code> / <code>refresh_token</code> / <code>node_id</code>。
-      四项里 <b>node_id + access_token 必填</b>；改完保存后用「连通性测试」验证。
-    </p>
-    <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <label class="text-xs text-dim">node_id
-        <input v-model="muse.node_id" class="input mt-1" placeholder="homelink-xxxxxx" />
-      </label>
-      <label class="text-xs text-dim">noise_host
-        <input v-model="muse.noise_host" class="input mt-1" placeholder="hatch.metaaivm.com" />
-      </label>
-      <label class="text-xs text-dim">api_url
-        <input v-model="muse.api_url" class="input mt-1" placeholder="https://api.muse.ai" />
-      </label>
-      <label class="text-xs text-dim">proxy_url（可选，VM 需代理时）
-        <input v-model="muse.proxy_url" class="input mt-1" placeholder="http://127.0.0.1:7897" />
-      </label>
-      <label class="text-xs text-dim">access_token
-        <input v-model="museToken" class="input mt-1" type="password"
-               :placeholder="muse.has_creds ? '已配置（留空=不改）' : 'muse-secret-…'" />
-      </label>
-      <label class="text-xs text-dim">refresh_token（可选）
-        <input v-model="museRefresh" class="input mt-1" type="password"
-               :placeholder="muse.has_creds ? '已配置（留空=不改）' : 'ABRA.…'" />
-      </label>
-    </div>
-    <div class="mt-3 flex flex-wrap items-center gap-3">
-      <button class="btn" :disabled="museBusy" @click="saveMuse">保存</button>
-      <button class="btn-ghost" :disabled="museBusy" @click="probeMuse">连通性测试</button>
-      <button v-if="muse.has_creds" class="btn-ghost !text-err" :disabled="museBusy" @click="clearMuse">删除凭据</button>
-      <span v-if="museMsg" class="text-xs" :class="museMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ museMsg }}</span>
-      <span v-if="museProbe" class="text-xs" :class="museProbe.startsWith('✓') ? 'text-ok' : 'text-err'">{{ museProbe }}</span>
-    </div>
-  </div>
-
-  <div class="card mt-4">
     <h3 class="mb-1 font-semibold">各 App 音色</h3>
     <p class="mb-3 text-xs text-dim">
-      每个对话 App 可以有自己的引擎/音色；<b>大肥鱼</b>用「聊天机器人」页里实例的设置，
-      这里配置 Muse / 小智 / ZCode。未配置时回退默认实例。
+      每个对话 App 可以有自己的引擎/音色；未配置时回退默认实例。
     </p>
     <div class="space-y-2">
       <div v-for="row in appRows" :key="row.key" class="flex flex-wrap items-center gap-2">
@@ -404,6 +289,14 @@ async function remove(id: string) {
             {{ v.label }}
           </option>
         </select>
+      </div>
+      <!-- AstrBot App 的音色在机器人实例上配 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="w-16 text-sm">AstrBot</span>
+        <RouterLink to="/bots" class="badge !bg-accent/15 !text-accent hover:!bg-accent/25">
+          去 AstrBot 设置 →
+        </RouterLink>
+        <span class="text-xs text-dim">音色跟着机器人实例走（语音链路用列表第一个实例）</span>
       </div>
     </div>
     <div class="mt-3 flex items-center gap-3">
