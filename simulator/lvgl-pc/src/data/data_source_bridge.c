@@ -35,6 +35,7 @@ static char g_prewarm_url[256];
 static char g_providers_url[256];
 static char g_voice_url[256];
 static char g_chat_url[256];
+static char g_chat_reset_url[256];
 static char g_subs_url[256];
 static char g_name[176]; /* "bridge(" + g_base(160) + ")" 余量 */
 static char g_provider[24];
@@ -43,6 +44,7 @@ static char g_provider[24];
 static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len);
+static int bridge_chat_reset(void);
 static int bridge_fetch_background(const char *save_path);
 static int bridge_fetch_launcher(char *out_csv, int cap, int *count);
 static int bridge_fetch_weather(ds_weather_t *out);
@@ -499,6 +501,8 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
              bridge_url);
     snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers",
              bridge_url);
+    snprintf(g_chat_reset_url, sizeof(g_chat_reset_url), "%s/api/v1/chat/reset",
+             g_base);
     snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions",
              bridge_url);
     snprintf(g_subs_url, sizeof(g_subs_url), "%s/api/v1/quota/subscriptions",
@@ -510,6 +514,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .prewarm_zhipu = bridge_prewarm,
         .chat_send_stream = bridge_chat_stream,
         .voice_interact  = bridge_voice_interact,
+        .chat_reset      = bridge_chat_reset,
         .chat_providers  = bridge_chat_providers,
         .fetch_background = bridge_fetch_background,
         .fetch_theme      = bridge_fetch_theme,
@@ -849,6 +854,17 @@ static void voice_tts_cb(const char *data, size_t len, void *user)
     (void)user;
 }
 #endif
+
+/* 云端会话重置：POST /api/v1/chat/reset（Bridge 轮换 AstrBot session id） */
+static int bridge_chat_reset(void)
+{
+    char buf[128];
+    DSLOG("chat reset POST %s", g_chat_reset_url);
+    int status = http_post_json(g_chat_reset_url, "{}", buf, sizeof(buf),
+                                BRIDGE_TIMEOUT_MS * 2);
+    DSLOG("chat reset done: status=%d", status);
+    return status == 200 ? 0 : -1;
+}
 
 static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *pcm, int frames,
                                                char *transcript, int transcript_len,

@@ -16,12 +16,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
 // AstrBot 对话请求参数（2026-11-14 v1）：
 // username 固定 gadget 身份（stable app-controlled username，OpenAPI 要求）；
-// session_id 每实例稳定（机器人侧保持上下文记忆）。
+// session_id 每实例稳定（机器人侧保持上下文记忆）；
+// "清空历史"（设备端/未来 Web 端）经 ResetBotSession 轮换 session id，
+// 等效 AstrBot 网页端的"新建会话"——旧会话数据留在服务端但不影响新会话。
 const (
 	astrbotUsername  = "gadget"
 	astrbotTimeout   = 120 * time.Second
@@ -219,6 +222,33 @@ func lastUserContent(body []byte) string {
 }
 
 // astrbotComplete 非流式：收齐 SSE 全文后返回（voice 链路用）。
+// botSessionID：bot 实例的当前 session id（稳定段 + 轮换代）。
+// 代数 bumped = 新会话 = 机器人无记忆。
+var (
+	sessMu     sync.Mutex
+	sessBase   uint64                // 全局代：reset-all +1（覆盖未登记实例）
+	sessPerBot = map[string]uint64{} // 实例覆盖代（指定 bot 重置 +1）
+)
+
+func botSessionID(botID string) string {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	return fmt.Sprintf("gadget-bigfish-%s-%d", botID, sessBase+sessPerBot[botID])
+}
+
+// ResetBotSession 轮换指定 bot（空=全部）的会话；返回受影响实例数。
+func ResetBotSession(botID string) int {
+	sessMu.Lock()
+	defer sessMu.Unlock()
+	if botID == "" {
+		sessBase++                       // 全局代：无需预知实例清单
+		sessPerBot = map[string]uint64{} // 覆盖清零，统一走全局代
+		return 1
+	}
+	sessPerBot[botID]++
+	return 1
+}
+
 // astrbotPayload 组装 /api/v1/chat 请求体：
 //   - config_id 始终携带（配置文件=人设/模型套餐，粘滞在会话上；显式发
 //     "default" 才会把已改过的会话路由重置回默认——保证 Web 端改动即时生效）
@@ -231,7 +261,7 @@ func astrbotPayload(message string, u Upstream) map[string]any {
 	p := map[string]any{
 		"message":          message,
 		"username":         astrbotUsername,
-		"session_id":       "gadget-bigfish-" + u.ID,
+		"session_id":       botSessionID(u.ID),
 		"config_id":        cfg,
 		"enable_streaming": true,
 	}

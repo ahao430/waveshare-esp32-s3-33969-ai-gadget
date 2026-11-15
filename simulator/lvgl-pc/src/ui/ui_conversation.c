@@ -456,7 +456,17 @@ static void hist_open_cb(lv_event_t *e)
     lv_obj_center(wl);
 }
 
-/* 清空当前 App 对话历史（历史弹窗里的"清空"按钮） */
+/* 云端会话重置线程：HTTP 别卡 LVGL 线程（栈同 voice worker 预算） */
+static void *chat_reset_worker(void *arg)
+{
+    (void)arg;
+    int rc = ds_chat_reset();
+    CLOG("cloud session reset rc=%d", rc);
+    return NULL;
+}
+
+/* 清空当前 App 对话历史（历史弹窗里的"清空"按钮）：
+ * 本地气泡 + 云端记忆（AstrBot session 轮换，AI 不再带记忆）一起清 */
 static void hist_wipe_cb(lv_event_t *e)
 {
     lv_obj_t *mask = lv_event_get_user_data(e);
@@ -467,6 +477,15 @@ static void hist_wipe_cb(lv_event_t *e)
     }
     if (mask) lv_obj_delete(mask); /* 直接销毁弹窗（hist_close_cb 走 event 取参，不复用） */
     if (g_reply_lbl) lv_label_set_text(g_reply_lbl, "");
+
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 16 * 1024);
+    if (pthread_create(&tid, &attr, chat_reset_worker, NULL) == 0) {
+        pthread_detach(tid);
+    }
+    pthread_attr_destroy(&attr);
 }
 
 /* ---------------- 页面构建 ---------------- */

@@ -105,6 +105,13 @@ void ds_config_set_theme(int idx)
 static const ds_impl_t *g_impl;
 static char g_chat_provider[32] = "mock";
 
+int ds_chat_reset(void)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->chat_reset) return 0; /* mock/不支持：视为已清（本地已清） */
+    return g_impl->chat_reset();
+}
+
 void ds_init(const char *source, const char *bridge_url, const char *provider)
 {
     /* 已初始化且本次没给参数 = 不要动（只补默认值语义）。

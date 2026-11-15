@@ -148,7 +148,11 @@ ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int fra
 void ds_config_update(int brightness, int volume, int timeout_s);
 void ds_config_set_refresh_interval(int seconds); /* 订阅自动刷新间隔 */
 int ds_config_refresh_interval(void);
-void ds_config_set_theme(int idx);                /* UI 主题 */
+void ds_config_set_theme(int idx);
+
+/* 清空云端对话记忆（AstrBot session 轮换）。返回 0=成功 / -1=失败
+ * （mock=成功空操作）。设备端"清空历史"按钮：本地气泡 + 云端记忆一起清。 */
+int ds_chat_reset(void);                /* UI 主题 */
 
 /* 自定义背景（Web 上传到 Bridge，PLAN §8 外观）：
  * 尝试拉取 Bridge 背景并写入 save_path（建议 simulator 相对路径）。

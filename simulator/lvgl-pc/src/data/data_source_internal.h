@@ -36,6 +36,10 @@ typedef struct {
 	 * / 1=未配置默认（不写） / -1=失败。槽值域见 /api/v1/keys。 */
 	int (*fetch_keys)(char *pwr_short, char *boot_short,
 	                  char *key3_short, char *key3_long, int cap);
+	/* 清空云端会话记忆（可为 NULL=不支持）：0=已重置 / -1=失败。
+	 * AstrBot 靠 session_id 记忆，本地清气泡 ≠ 机器人失忆——此调用
+	 * 让 Bridge 轮换 session（等效"新建会话"）。 */
+	int (*chat_reset)(void);
 
 } ds_impl_t;
 

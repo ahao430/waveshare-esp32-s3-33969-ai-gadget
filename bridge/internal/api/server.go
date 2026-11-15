@@ -176,6 +176,13 @@ func NewHandler(d Deps) http.Handler {
 			}
 		})
 
+		// 会话重置：轮换 AstrBot session id（等效"新建会话"，机器人失忆）。
+		// 设备端"清空历史"调用；?bot=<id> 可指定实例，缺省=全部。
+		mux.HandleFunc("POST /api/v1/chat/reset", func(w http.ResponseWriter, r *http.Request) {
+			n := ai.ResetBotSession(r.URL.Query().Get("bot"))
+			writeJSON(w, logger, http.StatusOK, map[string]any{"reset": n})
+		})
+
 		// 语音一步式端点：PCM → WAV + 文本响应头（PLAN §5.3）。
 		if d.VoiceHandler != nil {
 			mux.HandleFunc("POST /api/v1/voice/interact", d.VoiceHandler.ServeInteract)
