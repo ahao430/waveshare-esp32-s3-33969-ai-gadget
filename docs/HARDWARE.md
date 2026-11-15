@@ -204,6 +204,17 @@
   修法：`ui_init()` + `saver_build()` 之后再开背光（顺带避免开机闪一屏
   未初始化的花屏）。真机复测：post-ui 3824ms → 背光 3825ms → Wi-Fi
   5154ms，heap_int 稳定 ~80KB，lvgl 心跳正常。
+- **伴宠帧动画走独立 assets 分区**（2026-11-15）：帧序列（5 个动作集
+  ×10~12 帧 RGB565A8 ≈2.23MB）app 分区装不下（只剩 ~240KB），OTA 分区
+  又不能挪作数据——分区表新增 `assets, data, undefined, 0xC10000, 2560K`
+  （ota_1 5M→4M 腾位）。工具链：`scripts/gen_companion_bin.sh`（PNG →
+  CMP1 blob：header + 32B 条目表 + RGB565A8 帧平面，LVGL 原生格式零解码）
+  + `scripts/flash_companion.sh`（烧 @0xC10000；改分区表要同步改脚本偏移）。
+  运行时 esp_partition_read 到 PSRAM 帧缓冲逐帧换图，原生尺寸零缩放
+  （避免 SW transform）。分区表重刷不影响 factory/NVS（偏移未动）。
+- **快速音量**（2026-11-15）：点状态栏右侧图标簇弹滑条（3s 自动关），
+  ds_config_update + audio_esp32_set_volume（codec 0~100 直映）；开机由
+  状态栏首次刷新把 Web 配置音量套到 codec（audio init 早于数据源）。
 - **线程绘制 + 任务通知同步会和 adapter 抢同一个通知**（2026-11-15）：
   `CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2` + `CONFIG_LV_USE_FREERTOS_TASK_NOTIFY=y`
   时，draw unit 的条件变量用 FreeRTOS task notification，而

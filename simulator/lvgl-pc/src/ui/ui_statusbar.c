@@ -5,6 +5,13 @@
 #include "ui_theme.h"
 #include "ui_statusbar.h"
 
+#ifdef ESP_PLATFORM
+#include "voice/audio_esp32.h"
+#define VOL_APPLY(v) audio_esp32_set_volume(v)
+#else
+#define VOL_APPLY(v) ((void)0)
+#endif
+
 static lv_obj_t *g_bar;
 static lv_obj_t *g_right;      /* 右侧图标簇（flex 行，右对齐） */
 static lv_obj_t *g_lbl_wifi;
@@ -13,6 +20,87 @@ static lv_obj_t *g_lbl_bolt;   /* 充电闪电（不充电时隐藏） */
 static lv_obj_t *g_lbl_pct;    /* "86%"（无电池时显示 "USB"） */
 
 static lv_timer_t *g_timer;
+
+/* ---- 快速音量弹窗（点状态栏右侧图标簇） ---- */
+static lv_obj_t *g_vol_pop;
+static lv_obj_t *g_vol_lbl;
+static lv_timer_t *g_vol_close;
+
+static void vol_apply(int v)
+{
+    ds_config_update(-1, v, -1); /* 状态 + Web 配置语义（bridge 同步 TODO 见 data_source） */
+    VOL_APPLY(v);
+}
+
+static void vol_close_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (g_vol_pop) {
+        lv_obj_delete(g_vol_pop);
+        g_vol_pop = NULL;
+        g_vol_lbl = NULL;
+    }
+    g_vol_close = NULL;
+}
+
+static void vol_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = lv_event_get_target(e);
+    int v = lv_slider_get_value(slider);
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d%%", v);
+    if (g_vol_lbl) lv_label_set_text(g_vol_lbl, buf);
+    vol_apply(v);
+    if (g_vol_close) lv_timer_reset(g_vol_close); /* 交互续命 */
+}
+
+static void vol_popup_open(void);
+
+static void vol_open_cb(lv_event_t *e)
+{
+    (void)e;
+    vol_popup_open();
+}
+
+static void vol_popup_open(void)
+{
+    if (g_vol_pop) { /* 已开：只续命 */
+        if (g_vol_close) lv_timer_reset(g_vol_close);
+        return;
+    }
+    int cur = ds_state()->volume;
+
+    g_vol_pop = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_vol_pop, 300, 96);
+    lv_obj_align(g_vol_pop, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_set_style_bg_color(g_vol_pop, UI_CARD, 0);
+    lv_obj_set_style_bg_opa(g_vol_pop, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(g_vol_pop, UI_LINE, 0);
+    lv_obj_set_style_border_width(g_vol_pop, 1, 0);
+    lv_obj_set_style_radius(g_vol_pop, 16, 0);
+    lv_obj_clear_flag(g_vol_pop, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *icon = ui_label(g_vol_pop,
+                              cur == 0 ? LV_SYMBOL_VOLUME_MID : LV_SYMBOL_VOLUME_MAX,
+                              &lv_font_montserrat_20, UI_ACCENT2);
+    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 14, 0);
+
+    g_vol_lbl = ui_label(g_vol_pop, "--%", &lv_font_montserrat_20, UI_TEXT);
+    lv_obj_align(g_vol_lbl, LV_ALIGN_RIGHT_MID, -14, 0);
+
+    lv_obj_t *sl = lv_slider_create(g_vol_pop);
+    lv_obj_set_width(sl, 150);
+    lv_obj_align(sl, LV_ALIGN_CENTER, 6, 0);
+    lv_slider_set_range(sl, 0, 100);
+    lv_slider_set_value(sl, cur, LV_ANIM_OFF);
+    lv_obj_add_event_cb(sl, vol_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%d%%", cur);
+    lv_label_set_text(g_vol_lbl, buf);
+
+    g_vol_close = lv_timer_create(vol_close_cb, 3000, NULL);
+}
 
 /* 电量 → 五档图标（LVGL FontAwesome 电池组） */
 static const char *batt_icon(int pct)
@@ -36,6 +124,14 @@ void ui_statusbar_refresh(void)
 {
     if (!g_bar) return;
     const gadget_state_t *s = ds_state();
+
+    /* 首次刷新：把（Web/默认）音量套到 codec——audio init 早于数据源，
+     * 只能等这里补（一次） */
+    static bool vol_boot_applied;
+    if (!vol_boot_applied) {
+        vol_boot_applied = true;
+        VOL_APPLY(s->volume);
+    }
 
     lv_obj_set_style_text_color(g_lbl_wifi, s->wifi_ok ? UI_TEXT_DIM : UI_ERR, 0);
 
@@ -98,7 +194,8 @@ void ui_statusbar_init(void)
     lv_obj_set_style_border_width(g_right, 0, 0);
     lv_obj_set_style_pad_all(g_right, 0, 0);
     lv_obj_clear_flag(g_right, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(g_right, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_right, LV_OBJ_FLAG_CLICKABLE); /* 点开快速音量 */
+    lv_obj_add_event_cb(g_right, vol_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_flex_flow(g_right, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(g_right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);

@@ -24,6 +24,9 @@ const vs_audio_ops_t *audio_esp32_ops(void);
 void audio_esp32_tts_reset(void);
 void audio_esp32_tts_write(const char *data, size_t len);
 
+/* 快速音量（状态栏弹窗/开机套用 Web 配置）；0~100 */
+void audio_esp32_set_volume(int pct);
+
 /* 流式语音（?stream=1 帧协议）：没有 WAV 头，攒够 0.5s 就开播，
  * 后续 PCM 边收边播；stream_end 后播放任务在缓冲耗尽时收尾。 */
 void audio_esp32_tts_begin_stream(void);

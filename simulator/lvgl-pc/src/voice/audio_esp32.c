@@ -201,6 +201,15 @@ static void play_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* 快速音量（状态栏弹窗）：0~100 直接映射 codec 音量 */
+void audio_esp32_set_volume(int pct)
+{
+    if (!atomic_load(&g_inited) || !g_spk) return;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    esp_codec_dev_set_out_vol(g_spk, pct);
+}
+
 /* ---- vs_audio_ops_t ---- */
 
 static int esp32_start_capture(void)
@@ -282,7 +291,8 @@ int audio_esp32_init(void)
     };
     esp_codec_dev_open(g_spk, &fs);
     esp_codec_dev_open(g_mic, &fs);
-    /* bring-up 定标：42dB 削波 → 18dB；音量 70 防破音 */
+    /* bring-up 定标：42dB 削波 → 18dB；音量初值 70（状态栏首次刷新会
+     * 用 Web 配置的 volume 覆盖——ui_statusbar VOL_APPLY） */
     esp_codec_dev_set_out_vol(g_spk, 70);
     esp_codec_dev_set_in_gain(g_mic, 18.0);
 

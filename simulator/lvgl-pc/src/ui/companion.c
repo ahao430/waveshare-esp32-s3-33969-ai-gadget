@@ -16,6 +16,70 @@
 
 #include "ui.h" /* UI_APP_* 枚举 */
 
+#ifdef ESP_PLATFORM
+/* 真机：帧动画存 assets 分区（scripts/gen_companion_bin.sh 打包、
+ * flash_companion.sh 烧写 @0xC10000）。运行时直读分区到 PSRAM 帧
+ * 缓冲，lv_image 原生 RGB565A8 零解码（图标嵌入同思路，但帧多且大，
+ * app 分区装不下 → 独立数据分区）。
+ * blob 布局见 gen_companion_bin.sh：CMP1 + count + entry[32B]* + frames */
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_partition.h"
+
+typedef struct {
+    char key[16];
+    uint32_t w, h, frames, fbytes, offset;
+} ast_ent_t;
+
+static const esp_partition_t *g_ast;
+static ast_ent_t *g_ents;
+static uint32_t g_ast_count;
+static uint8_t *g_fbuf;      /* PSRAM 帧缓冲（按最大帧惰性分配） */
+static size_t g_fbuf_cap;
+static lv_image_dsc_t g_dsc; /* 复用同一 dsc：data 指向 g_fbuf */
+
+static ast_ent_t *ast_find(const char *key)
+{
+    if (!g_ents) return NULL;
+    for (uint32_t i = 0; i < g_ast_count; i++) {
+        if (strncmp(g_ents[i].key, key, sizeof(g_ents[i].key)) == 0)
+            return &g_ents[i];
+    }
+    return NULL;
+}
+
+/* 一次性打开分区 + 校验头（probe 阶段调用；失败保持 NULL=无伴宠） */
+static bool ast_init(void)
+{
+    if (g_ast) return true;
+    if (g_ast == NULL) {
+        g_ast = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                         ESP_PARTITION_SUBTYPE_ANY, "assets");
+    }
+    if (!g_ast) {
+        ESP_LOGW("companion", "assets partition not found（跑 scripts/flash_companion.sh）");
+        return false;
+    }
+    char magic[4];
+    uint32_t count = 0;
+    if (esp_partition_read(g_ast, 0, magic, 4) != ESP_OK ||
+        esp_partition_read(g_ast, 4, &count, 4) != ESP_OK ||
+        memcmp(magic, "CMP1", 4) != 0 || count == 0 || count > 32) {
+        ESP_LOGW("companion", "assets blob invalid（magic/count），先烧资源包");
+        g_ast = NULL; /* 标记已试过：置空但用 g_ents 区分？改为标志 */
+        return false;
+    }
+    g_ents = malloc(count * sizeof(ast_ent_t));
+    if (!g_ents) return false;
+    if (esp_partition_read(g_ast, 8, g_ents, count * sizeof(ast_ent_t)) != ESP_OK) {
+        free(g_ents); g_ents = NULL; return false;
+    }
+    g_ast_count = count;
+    ESP_LOGI("companion", "assets ok: %u entries", (unsigned)count);
+    return true;
+}
+#endif
+
 #define COMPANION_ROOT "A:simulator/lvgl-pc/assets/companions"
 
 /* 每帧集合（dir 相对 COMPANION_ROOT；frames 运行时探测） */
@@ -43,7 +107,15 @@ static frame_set_t k_set_bigfish_speak = { "bigfish/speaking", 0 };
 static frame_set_t k_set_xiaozhi_wave = { "xiaozhi/wave", 0 };
 static frame_set_t k_set_muse_idle = { "muse/idle", 0 };
 
-/* 探测目录帧数（frame_00.png 起顺序存在） */
+/* 探测目录帧数：真机=查 assets 分区条目；模拟器=文件系统数帧 */
+#ifdef ESP_PLATFORM
+static int probe_frames(const char *dir_rel)
+{
+    if (!ast_init()) return 0;
+    const ast_ent_t *e = ast_find(dir_rel);
+    return e ? (int)e->frames : 0;
+}
+#else
 static int probe_frames(const char *dir_rel)
 {
     char path[160];
@@ -58,6 +130,7 @@ static int probe_frames(const char *dir_rel)
     }
     return n;
 }
+#endif /* ESP_PLATFORM probe_frames */
 
 static const frame_set_t *set_for(int app_id, vs_state_t st)
 {
@@ -85,7 +158,18 @@ static const frame_set_t *set_for(int app_id, vs_state_t st)
     }
 }
 
-/* 每角色显示几何（沿用过渡期 GIF 观感） */
+/* 每角色显示几何。真机=资源包原生尺寸（构建期已定尺寸，运行时零缩放
+ * ——SW transform 每帧变换的教训见 HARDWARE §2.7）；模拟器=源帧缩放。 */
+#ifdef ESP_PLATFORM
+static void apply_geometry(int app_id, lv_obj_t *img)
+{
+    switch (app_id) {
+    case UI_APP_CHAT:  lv_obj_set_size(img, 144, 82);  lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 112); break;
+    case UI_APP_XIAOZHI: lv_obj_set_size(img, 132, 117); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 92); break;
+    case UI_APP_MUSE:  lv_obj_set_size(img, 150, 134); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 80); break;
+    }
+}
+#else
 static void apply_geometry(int app_id, lv_obj_t *img)
 {
     switch (app_id) {
@@ -105,13 +189,39 @@ static void apply_geometry(int app_id, lv_obj_t *img)
         break;
     }
 }
+#endif /* ESP_PLATFORM apply_geometry */
 
+#ifdef ESP_PLATFORM
+static void frames_show(const frame_set_t *set, int idx)
+{
+    const ast_ent_t *e = ast_find(set->dir);
+    if (!e || idx >= (int)e->frames) return;
+    if (!g_fbuf || g_fbuf_cap < e->fbytes) {
+        void *nb = heap_caps_realloc(g_fbuf, e->fbytes, MALLOC_CAP_SPIRAM);
+        if (!nb) return;
+        g_fbuf = nb;
+        g_fbuf_cap = e->fbytes;
+    }
+    if (esp_partition_read(g_ast, e->offset + (uint32_t)idx * e->fbytes,
+                           g_fbuf, e->fbytes) != ESP_OK) {
+        return;
+    }
+    g_dsc.header.cf = LV_COLOR_FORMAT_RGB565A8;
+    g_dsc.header.w = (int32_t)e->w;
+    g_dsc.header.h = (int32_t)e->h;
+    g_dsc.header.stride = (uint32_t)e->w * 2;
+    g_dsc.data_size = e->fbytes;
+    g_dsc.data = g_fbuf;
+    lv_image_set_src(g_obj, &g_dsc);
+}
+#else
 static void frames_show(const frame_set_t *set, int idx)
 {
     char src[160];
     snprintf(src, sizeof(src), "%s/%s/frame_%02d.png", COMPANION_ROOT, set->dir, idx);
     lv_image_set_src(g_obj, src);
 }
+#endif
 
 static void frames_timer_cb(lv_timer_t *t)
 {
@@ -164,8 +274,12 @@ void companion_create(lv_obj_t *parent, int app_id, int16_t y)
     g_app = app_id;
     const frame_set_t *set = set_for(app_id, VS_IDLE);
     if (!set) {
+#ifdef ESP_PLATFORM
+        return; /* 真机无 GIF 文件系统：无资源就空着（日志在 ast_init 留过痕） */
+#else
         g_obj = gif_fallback(parent, app_id, VS_IDLE); /* 帧缺失 → GIF 回退 */
         return;
+#endif
     }
 
     g_obj = lv_image_create(parent);
