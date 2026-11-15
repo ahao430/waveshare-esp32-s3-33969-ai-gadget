@@ -116,6 +116,10 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 - **局域网后台**：Bridge 监听 `:8081` 全部网卡，Vite 已 `host: true`，
   手机访问 `http://<MacIP>:5173`。仅限可信局域网；设了 `BRIDGE_TOKEN` 时
   浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）。
+- **订阅实例 = 唯一配置入口**（Web 订阅中心）：实例自带 Key，保存时
+  Bridge 把 Key 投影到凭据表（语音 ASR `resolveAccount` 动态解析同一份）；
+  独立凭据编辑区已删（2026-11-16 用户拍板），别恢复两层概念。设备订阅页
+  只读订阅实例（subscriptions 表），凭据表仅是 Key 的投影+语音侧存储。
 - **Muse 授权必须先刷官方 SDK**：本项目固件不能发起 Muse 配对。流程是
   刷官方 Muse SDK 固件 → 手机 Muse App 配对授权 → `esptool read-flash
   0x11000 0xC000` 导出 NVS 凭据 → 刷回本项目固件 + 重烧伴宠 assets →

@@ -1,99 +1,14 @@
 <script setup lang="ts">
-// 订阅额度页：Provider 账号配置（PLAN §15.3 凭据加密存储的 Web 入口）。
-// Key 只进不出：保存后不回显；Bridge 侧 AES-256-GCM 落库。
-import { computed, onMounted, ref } from 'vue'
+// 订阅额度页：订阅实例 = 类型 + 名称 + 端点 + Key，一处配置全搞定。
+// Key 只进不出：保存后不回显；Bridge AES-256-GCM 落库，并同步投影到
+// 凭据表（语音 ASR / 智谱预热动态解析同 kind 的 Key——改一处两处生效）。
+// 2026-11-16 重构：砍掉独立"额度查询凭据"区（用户拍板：有实例就够了，
+// 此前"配了凭据没建实例 → 设备订阅页空白"的困惑即源于两层概念）。
+import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
-interface CredentialInfo {
-  provider_id: string
-  account_label: string
-  updated_at: string
-}
-
-const creds = ref<CredentialInfo[]>([])
-const editKey = ref('')
-const editLabel = ref('')
-const editing = ref<string>('') // 正在编辑的 provider id
-const message = ref('')
-const saving = ref(false)
-
-// 本页只管额度：订阅实例 + 额度查询凭据。
-// 语音识别等能力 Key 在「语音设置」页（/voice），两者不要混。
-// 凭据卡动态化（修"kimi 默认项删不掉"）：只显示已配置凭据、或被
-// 某个订阅实例用到的 kind——都没用就不占地方。
-const allKinds = ['zhipu', 'kimi', 'deepseek', 'gpt', 'claude', 'minimax', 'mimo', 'newapi']
-const providerTitle: Record<string, string> = {
-  zhipu: '智谱 GLM Coding Plan',
-  kimi: 'Kimi Coding Plan',
-  deepseek: 'DeepSeek 余额',
-  gpt: 'GPT Coding Plan',
-  claude: 'Claude Coding Plan',
-  minimax: 'MiniMax Coding Plan',
-  mimo: 'MiMo Coding Plan',
-  newapi: 'NewAPI 中转站',
-}
-const providerHint: Record<string, string> = {
-  zhipu: '仅用于查询 Coding Plan 额度（语音识别请去「语音设置」配置）',
-  kimi: '仅用于查询 Coding Plan 额度',
-  deepseek: '官方余额接口（/user/balance）',
-  gpt: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
-  claude: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
-  minimax: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
-  mimo: '中转站 Coding Plan：自动探测 kimi 形状 /usages 或 newapi 余额',
-  newapi: '控制台系统访问令牌（不是 sk- Key）',
-}
-const quotaCreds = computed(() => {
-  const used = new Set(subs.value.map((s) => s.kind))
-  const configured = new Set(creds.value.map((c) => c.provider_id))
-  return allKinds.filter((k) => configured.has(k) || used.has(k))
-})
-
-onMounted(() => { load(); loadSubs() })
-
-async function load() {
-  try {
-    const r = await request<{ credentials: CredentialInfo[] }>('/api/v1/credentials')
-    creds.value = r.credentials
-  } catch (e) {
-    message.value = `凭据列表不可用：${e instanceof Error ? e.message : e}（需 BRIDGE_MASTER_KEY）`
-  }
-}
-
-function infoOf(id: string): CredentialInfo | undefined {
-  return creds.value.find((c) => c.provider_id === id)
-}
-
-function startEdit(id: string) {
-  editing.value = id
-  editKey.value = ''
-  editLabel.value = infoOf(id)?.account_label ?? ''
-  message.value = ''
-}
-
-async function save(id: string) {
-  if (!editKey.value) return
-  saving.value = true
-  message.value = ''
-  try {
-    await request(`/api/v1/credentials/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_label: editLabel.value, api_key: editKey.value }),
-    })
-    message.value = `已保存 ${id}（下一次刷新即生效）`
-    editing.value = ''
-    editKey.value = ''
-    await load()
-  } catch (e) {
-    message.value = `保存失败：${e instanceof Error ? e.message : e}`
-  } finally {
-    saving.value = false
-  }
-}
-
-
-/* ---- 订阅实例管理（动态多订阅；设备端聚合展示） ---- */
+/* ---- 订阅实例管理（设备端订阅页 = 这里的镜像） ---- */
 interface SubInfo {
   id: string
   kind: string
@@ -116,8 +31,15 @@ const subKindNames: Record<string, string> = {
   opencode: 'OpenCode Zen',
   newapi: 'NewAPI 中转站',
 }
-const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
-const subAdding = ref(false)
+
+/* 各类型默认端点（与 Bridge provider 包常量一致；中转站类无默认必填）。
+ * 选类型即自动填入 Base URL，可手改；清空 = 用默认。 */
+const defaultBase: Record<string, string> = {
+  zhipu: 'https://open.bigmodel.cn',
+  kimi: 'https://api.kimi.com',
+  deepseek: 'https://api.deepseek.com',
+  opencode: 'https://opencode.ai/zen/go/v1',
+}
 
 /* 「去获取」跳转目标：中转站类有 base_url 就跳站点；否则跳官方控制台 */
 const officialUrls: Record<string, string> = {
@@ -136,6 +58,25 @@ function fetchUrlFor(s: SubInfo): string {
   return officialUrls[s.kind] ?? ''
 }
 
+const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
+const editingId = ref('') // ''=新增；非空=编辑该实例（POST 同 id 覆盖）
+const subAdding = ref(false)
+const message = ref('')
+
+// coding plan 家族（gpt/claude/minimax/mimo）与 newapi 走中转站，base_url 必填
+const needsBaseKinds = ['gpt', 'claude', 'minimax', 'mimo', 'newapi']
+function needsBase(kind: string) {
+  return needsBaseKinds.includes(kind)
+}
+
+/* 切类型：Base URL 自动填默认（中转站类清空待填），名称空则预填类型名 */
+function onKindChange() {
+  subForm.value.base_url = defaultBase[subForm.value.kind] ?? ''
+  if (!subForm.value.label) {
+    subForm.value.label = subKindNames[subForm.value.kind]?.replace(/（.*）/, '') ?? ''
+  }
+}
+
 async function loadSubs() {
   try {
     const r = await request<{ subscriptions: SubInfo[] }>('/api/v1/subscriptions')
@@ -145,16 +86,35 @@ async function loadSubs() {
   }
 }
 
-// coding plan 家族（gpt/claude/minimax/mimo）走中转站，base_url 必填
-const needsBaseKinds = ['gpt', 'claude', 'minimax', 'mimo', 'newapi']
-function needsBase(kind: string) {
-  return needsBaseKinds.includes(kind)
+function resetForm() {
+  editingId.value = ''
+  subForm.value = { kind: 'zhipu', label: '', base_url: '', token: '' }
+  onKindChange()
 }
 
-async function addSub() {
+/* 编辑：回填（base_url 空表示用默认 → 直接填默认值更直观；token 不回显，
+ * 留空=保留原 Key） */
+function editSub(s: SubInfo) {
+  editingId.value = s.id
+  subForm.value = {
+    kind: s.kind,
+    label: s.label,
+    base_url: s.base_url || defaultBase[s.kind] || '',
+    token: '',
+  }
+  message.value = ''
+}
+
+async function submitSub() {
   if (!subForm.value.label) return
   if (needsBase(subForm.value.kind) && !subForm.value.base_url) {
     message.value = '该类型需要填 Base URL（中转站地址）'
+    return
+  }
+  // 新增必须带 Key（Key 存实例里，没 Key 抓不了额度）；mock 演示除外。
+  // 编辑留空 = 保留原 Key（Bridge 侧处理）。
+  if (!editingId.value && !subForm.value.token && subForm.value.kind !== 'mock') {
+    message.value = '新增订阅需要填 API Key（抓取额度用）'
     return
   }
   subAdding.value = true
@@ -163,13 +123,15 @@ async function addSub() {
     await request('/api/v1/subscriptions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(subForm.value),
+      body: JSON.stringify(editingId.value ? { ...subForm.value, id: editingId.value } : subForm.value),
     })
-    message.value = `已添加订阅「${subForm.value.label}」`
-    subForm.value = { kind: subForm.value.kind, label: '', base_url: '', token: '' }
+    message.value = editingId.value
+      ? `已更新订阅「${subForm.value.label}」`
+      : `已添加订阅「${subForm.value.label}」`
+    resetForm()
     await loadSubs()
   } catch (e) {
-    message.value = `添加失败：${e instanceof Error ? e.message : e}`
+    message.value = `${editingId.value ? '更新' : '添加'}失败：${e instanceof Error ? e.message : e}`
   } finally {
     subAdding.value = false
   }
@@ -178,34 +140,38 @@ async function addSub() {
 async function removeSub(id: string) {
   if (!confirm('删除该订阅？设备端订阅页将不再显示它。')) return
   await request(`/api/v1/subscriptions/${id}`, { method: 'DELETE' })
+  if (editingId.value === id) resetForm()
   await loadSubs()
 }
 
-async function remove(id: string) {
-  if (!confirm(`删除 ${id} 的凭据？设备下一次刷新将无法抓取该 Provider。`)) return
-  await request(`/api/v1/credentials/${id}`, { method: 'DELETE' })
-  await load()
-}
+onMounted(() => {
+  loadSubs()
+  onKindChange()
+})
 </script>
 
 <template>
   <h1 class="page-title">订阅额度</h1>
   <p class="page-sub">
-    本页只负责<b>额度</b>：订阅实例（设备订阅页显示什么）+ 额度查询凭据（抓额度用的 Key）。
-    语音识别等能力 Key 在 <RouterLink to="/voice" class="text-accent2">语音设置</RouterLink> 页配置。
-    Key 经 AES-256-GCM 加密落库（需 <code class="text-accent2">BRIDGE_MASTER_KEY</code>），明文不回显、不入日志。
+    一个订阅实例 = 类型 + 名称 + 端点 + API Key，设备端订阅页显示这里配置的实例。
+    Key 经 AES-256-GCM 加密落库（需 <code class="text-accent2">BRIDGE_MASTER_KEY</code>），
+    明文不回显、不入日志；保存后会同步给语音识别等复用同类型 Key 的功能。
   </p>
 
-  <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') || message.includes('不可用') ? 'text-err' : 'text-ok'">
+  <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') ? 'text-err' : 'text-ok'">
     {{ message }}
   </p>
 
   <div class="card">
-    <h3 class="mb-1 font-semibold">订阅实例</h3>
-    <p class="mb-3 text-xs text-dim">设备端订阅页显示这里的配置；无任何配置时设备显示"请添加订阅"。</p>
+    <h3 class="mb-1 font-semibold">{{ editingId ? '编辑订阅' : '订阅实例' }}</h3>
+    <p class="mb-3 text-xs text-dim">
+      设备端订阅页显示这里的配置；无任何配置时设备显示"请添加订阅"。
+      中转站类型（GPT/Claude/MiniMax/MiMo/NewAPI）需填站点 Base URL，其余留空走官方端点。
+    </p>
     <div v-if="subs.length === 0" class="mb-2 text-sm text-dim">还没有订阅，添加一个：</div>
     <div class="space-y-2">
-      <div v-for="s in subs" :key="s.id" class="flex items-center justify-between rounded border border-line px-3 py-2">
+      <div v-for="s in subs" :key="s.id" class="flex items-center justify-between rounded border border-line px-3 py-2"
+           :class="editingId === s.id ? 'border-accent/50' : ''">
         <div class="min-w-0">
           <span class="font-medium">{{ s.label }}</span>
           <span class="ml-2 text-xs text-dim">{{ subKindNames[s.kind] ?? s.kind }}</span>
@@ -219,68 +185,31 @@ async function remove(id: string) {
             target="_blank"
             rel="noopener"
           >去获取 ↗</a>
+          <button class="btn-ghost !px-2 !py-1" @click="editSub(s)">编辑</button>
           <button class="btn-ghost !text-err !px-2 !py-1" @click="removeSub(s.id)">删除</button>
         </div>
       </div>
     </div>
     <div class="mt-3 flex flex-wrap items-end gap-2">
-      <select v-model="subForm.kind" class="input !w-auto">
+      <select v-model="subForm.kind" class="input !w-auto" :disabled="!!editingId" @change="onKindChange">
         <option v-for="k in subKinds" :key="k" :value="k">{{ subKindNames[k] }}</option>
       </select>
       <input v-model="subForm.label" class="input !w-40" placeholder="名称（如：智谱主号）" />
       <input v-model="subForm.base_url" class="input !w-56"
-             :placeholder="needsBase(subForm.kind) ? 'Base URL（必填：中转站地址）' : 'Base URL（可选）'" />
-      <input v-model="subForm.token" class="input !w-48" type="password" placeholder="API Key / Token（可选）" />
-      <button class="btn" :disabled="subAdding || !subForm.label" @click="addSub">添加订阅</button>
-    </div>
-  </div>
-
-  <h2 class="mt-6 mb-2 text-sm font-semibold text-dim">额度查询凭据（订阅页取数）</h2>
-
-  <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-    <div v-for="p in quotaCreds" :key="p" class="card">
-      <div class="mb-3 flex items-center justify-between">
-        <h3 class="font-semibold">{{ providerTitle[p] ?? p }}</h3>
-        <span class="badge" :class="infoOf(p) ? '!bg-ok/15 !text-ok' : ''">
-          {{ infoOf(p) ? `已配置 · ${infoOf(p)!.account_label || '未命名'}` : '未配置' }}
-        </span>
-      </div>
-
-      <p class="mb-2 text-xs text-dim">{{ providerHint[p] }}</p>
-      <div v-if="infoOf(p)" class="mb-3 text-xs text-dim">
-        更新于 {{ new Date(infoOf(p)!.updated_at).toLocaleString('zh-CN', { hour12: false }) }}
-      </div>
-
-      <template v-if="editing === p">
-        <div class="flex flex-col gap-3">
-          <input v-model="editLabel" class="input" placeholder="账号标签（可选）" />
-          <input
-            v-model="editKey"
-            class="input"
-            type="password"
-            :placeholder="infoOf(p) ? '输入新 Key 覆盖' : 'API Key'"
-          />
-          <div class="flex gap-2">
-            <button class="btn" :disabled="saving || !editKey" @click="save(p)">
-              {{ saving ? '保存中…' : '保存' }}
-            </button>
-            <button class="btn-ghost" @click="editing = ''">取消</button>
-          </div>
-        </div>
-      </template>
-      <template v-else>
-        <div class="flex gap-2">
-          <button class="btn-ghost" @click="startEdit(p)">
-            {{ infoOf(p) ? '更换 Key' : '配置 Key' }}
-          </button>
-          <button v-if="infoOf(p)" class="btn-ghost !text-err" @click="remove(p)">删除</button>
-        </div>
-      </template>
+             :placeholder="needsBase(subForm.kind) ? 'Base URL（必填：中转站地址）' : 'Base URL（默认官方端点）'" />
+      <input v-model="subForm.token" class="input !w-48" type="password"
+             :placeholder="editingId ? 'API Key（留空=保留原值）' : 'API Key（必填）'" />
+      <button class="btn" :disabled="subAdding || !subForm.label" @click="submitSub">
+        {{ subAdding ? '保存中…' : editingId ? '保存修改' : '添加订阅' }}
+      </button>
+      <button v-if="editingId" class="btn-ghost" @click="resetForm">取消</button>
     </div>
   </div>
 
   <div class="card mt-6 text-xs text-dim">
-    说明：额度抓取账号解析顺序 = 环境变量（ZHIPU_API_KEY 等）→ 此处配置的加密凭据。
-    保存后无需重启 Bridge，下一次「刷新」即生效。
+    说明：实例里的 Key 同时供语音识别（DeepSeek/智谱等）与额度抓取使用；
+    抓取账号解析顺序 = 环境变量 → 实例/凭据库。保存后无需重启 Bridge，
+    下一次刷新即生效。硅基流动等仅语音用的 Key 在
+    <RouterLink to="/voice" class="text-accent2">语音设置</RouterLink> 页配置。
   </div>
 </template>

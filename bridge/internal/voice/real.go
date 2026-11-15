@@ -153,7 +153,7 @@ func (r *RealInteractor) Transcribe(ctx context.Context, pcmL16 []byte) (string,
 	}
 	provider, key := r.pickASR()
 	if provider == "" || key == "" {
-		return "", fmt.Errorf("asr: 未配置语音识别 Key（Web 订阅管理 → 服务凭据：硅基流动 / MiniMax / MiMo）")
+		return "", fmt.Errorf("asr: 未配置语音识别 Key（Web 语音设置 → 语音识别 Key：硅基流动 / 豆包 / DeepSeek / MiniMax / MiMo）")
 	}
 	var text string
 	var err error

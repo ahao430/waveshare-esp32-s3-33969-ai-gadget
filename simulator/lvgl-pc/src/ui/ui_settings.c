@@ -48,6 +48,15 @@ static void qr_open_fullscreen_cb(lv_event_t *e)
     lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(mask, qr_close_cb, LV_EVENT_CLICKED, mask);
 
+    /* 空地址（如未连接 Bridge）：不渲染二维码（0 长度码无意义），给提示 */
+    if (url[0] == '\0') {
+        lv_obj_t *na = ui_label(mask, "地址未就绪：未连接 Bridge", &lv_font_cn_14, UI_TEXT);
+        lv_obj_align(na, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_t *hint0 = ui_label(mask, "点击任意处关闭", &lv_font_cn_14, UI_TEXT_DIM);
+        lv_obj_align(hint0, LV_ALIGN_BOTTOM_MID, 0, -20);
+        return;
+    }
+
     lv_obj_t *qr = lv_qrcode_create(mask);
     lv_qrcode_update(qr, url, (uint32_t)strlen(url));
     lv_obj_set_size(qr, 320, 320);
@@ -295,11 +304,21 @@ static void page_network(lv_obj_t *scr)
     lv_obj_t *ip = ui_label(card1, "192.168.1.42", &lv_font_montserrat_12, UI_TEXT_DIM);
     lv_obj_align(ip, LV_ALIGN_RIGHT_MID, -8, 0);
 
-    /* 三行链接（点击 → 全屏大码） */
+    /* 三行链接（点击 → 全屏大码）。「管理后台」用真实地址（Bridge 同机
+     * 的 Web :5173）——此前写死演示 IP 192.168.1.42，手机扫码 404。
+     * static：二维码回调持有的指针要活过本函数栈帧。 */
+    static char admin_url[96];
+    const char *admin_disp, *admin_qr;
+    if (ds_admin_url(admin_url, sizeof(admin_url)) == 0) {
+        admin_disp = admin_qr = admin_url;
+    } else {
+        admin_disp = "未连接 Bridge";
+        admin_qr  = ""; /* 空串：点击仍可弹层但不渲染码 */
+    }
     struct { const char *name; const char *url; const char *qr; } rows[] = {
         { "配网页",   "http://192.168.4.1",  "http://192.168.4.1" },
         { "小智后台", "xiaozhi.me/console",  "https://xiaozhi.me/console" },
-        { "管理后台", "http://192.168.1.42", "http://192.168.1.42" },
+        { "管理后台", admin_disp,            admin_qr },
     };
     for (int i = 0; i < 3; i++) {
         lv_obj_t *row = lv_button_create(scr);

@@ -213,4 +213,9 @@ int ds_chat_bots(char *out, int cap);
 int ds_chat_active_id(char *out, int cap);
 int ds_chat_set_active(const char *id);
 
+/* Web 后台地址（手机扫码打开管理页）：由 Bridge 基址推导
+ * http://<host>:5173（Web 与 Bridge 同机，Vite host:true）。
+ * 返回 0=已写 out / 1=不支持（mock/基址未知，UI 显示占位提示）。 */
+int ds_admin_url(char *out, int cap);
+
 #endif /* DATA_SOURCE_H */

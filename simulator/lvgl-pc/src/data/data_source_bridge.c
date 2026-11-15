@@ -54,6 +54,7 @@ static int bridge_fetch_weather(ds_weather_t *out);
 static int bridge_fetch_theme(int *theme);
 static int bridge_fetch_keys(char *pwr_short, char *boot_short,
                              char *key3_short, char *key3_long, int cap);
+static int bridge_admin_url(char *out, int cap);
 
 static void bridge_init(void)
 {
@@ -589,8 +590,28 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .fetch_keys       = bridge_fetch_keys,
         .fetch_weather    = bridge_fetch_weather,
         .fetch_launcher   = bridge_fetch_launcher,
+        .admin_url        = bridge_admin_url,
     };
     return &impl;
+}
+
+/* Web 后台与 Bridge 同机（Vite :5173 host:true）：从基址剥出 host 拼 5173。
+ * 设置页"管理后台"二维码用——此前写死演示地址 192.168.1.42，扫码 404。 */
+static int bridge_admin_url(char *out, int cap)
+{
+    if (g_base[0] == '\0') return 1;
+    const char *p = strstr(g_base, "://");
+    p = p ? p + 3 : g_base;
+    char host[64];
+    int i = 0;
+    while (p[i] != '\0' && p[i] != ':' && p[i] != '/' && i < (int)sizeof(host) - 1) {
+        i++;
+    }
+    if (i == 0) return 1;
+    memcpy(host, p, (size_t)i);
+    host[i] = '\0';
+    snprintf(out, (size_t)cap, "http://%s:5173", host);
+    return 0;
 }
 
 /* 自定义背景：GET /api/v1/appearance/background（≤256KB，Web 端已压到
