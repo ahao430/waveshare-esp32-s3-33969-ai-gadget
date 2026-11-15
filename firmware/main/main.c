@@ -790,12 +790,17 @@ void app_main(void)
     display_unlock();
     heap_report("post-ui");
 
-    /* 背光延后到首帧构建完：真机实测（2026-11-15）在 ui_init 之前调
-     * bsp_display_backlight_on() 会卡死在 esp_lcd_panel_io_tx_param 等
-     * SPI 总线——此时适配器首帧刷屏的 DMA 传输在途，主任务 tx_param
-     * 拿不到总线（LVGL 锁反而是空闲的，说明不是 GUI 线程问题）。
-     * 延后既避免死锁，也避免开机闪一屏未初始化的花屏。 */
+    /* 背光延后到首帧构建完 + 持显示锁串行化：真机实测（2026-11-15）
+     * 在 ui_init 之前调 bsp_display_backlight_on() 会卡死在
+     * esp_lcd_panel_io_tx_param 等 SPI 总线——适配器首帧刷屏 DMA 在途。
+     * 仅延后还不够：2026-11-16 实证延后后仍撞车——主任务无锁发 polling
+     * 事务，与 LVGL 任务的 QSPI 传输并发，撑 125s 后
+     * spi_device_release_bus 断言崩溃（连续对话首测触发）。持显示锁
+     * 与适配器互斥后，正常启动窗口安全；楔死启动则阻塞至 TWDT 自愈
+     * （不再走到断言路径）。 */
+    display_lock();
     bsp_display_backlight_on();
+    display_unlock();
 
     wifi_start();
     ESP_LOGI(TAG, "gadget up: shared UI + screensaver; wifi last");

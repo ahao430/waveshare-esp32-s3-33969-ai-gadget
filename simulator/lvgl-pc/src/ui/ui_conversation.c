@@ -130,13 +130,18 @@ static bool g_voice_enabled;
 static bool g_continuous; /* 连续对话（KEY3 短按/左上角按钮切换） */
 static bool g_cont_auto;      /* 当前 LISTENING 轮由连续模式自动开启 */
 static bool g_cont_heard;     /* 本轮已检测到人声（VAD） */
+static int g_cont_maxamp;     /* 本轮最大幅度（诊断/调阈值） */
 static uint32_t g_cont_loud_tick; /* 最后一次有声时刻（VAD 静音判据） */
 
-/* 连续对话参数（80ms poll 驱动；g_wave_amp 0..100） */
-#define CONT_SPEECH_AMP     10   /* 高于此算有声 */
+/* 连续对话参数（80ms poll 驱动；g_wave_amp 0..100）。
+ * 首版绝对阈值 10 真机全轮未触发（麦克风电平低）——改自适应：
+ * 有声 = amp ≥ 底噪+5 且 ≥4；底噪 EMA 只在判无声时更新。 */
 #define CONT_RESPEAK_GAP_MS 800  /* 回复播完 → 自动开听的间隔 */
 #define CONT_SILENCE_END_MS 1200 /* 有声后静音此时长 → 自动提交 */
 #define CONT_SILENCE_ROLL_MS 5000 /* 纯静音：滚动清缓冲等开口（不打服务端） */
+#define CONT_FLOOR_MARGIN    5    /* 高出底噪多少算有声 */
+#define CONT_AMP_MIN         4    /* 绝对下限（滤数字底噪抖动） */
+static int g_cont_floor;          /* 本轮底噪 EMA */
 
 /* voice_session 状态（从 ui_voice 移植） */
 static bool g_vs_inited;
@@ -361,9 +366,13 @@ static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
     g_wave_amp = (int)(rms * 300);
     if (g_wave_amp > 100) g_wave_amp = 100;
     g_wave_data = true;
-    if (g_wave_amp > CONT_SPEECH_AMP) { /* 连续对话 VAD：记录有声 */
+    /* 连续对话 VAD（自适应底噪 + 诊断幅度） */
+    if (g_wave_amp > g_cont_maxamp) g_cont_maxamp = g_wave_amp;
+    if (g_wave_amp >= g_cont_floor + CONT_FLOOR_MARGIN && g_wave_amp >= CONT_AMP_MIN) {
         g_cont_heard = true;
         g_cont_loud_tick = lv_tick_get();
+    } else {
+        g_cont_floor = (g_cont_floor * 7 + g_wave_amp) / 8;
     }
 }
 
@@ -443,15 +452,22 @@ static void continuous_toggle_cb_void(void)
     continuous_toggle_cb(NULL);
 }
 
+/* 自动轮没听到说话：放弃本轮（vs_cancel，不提交）并暂停连续模式 */
+static void cont_pause_no_speech(void)
+{
+    g_continuous = false;
+    g_cont_auto = false;
+    if (vs_state() == VS_LISTENING) vs_cancel();
+    if (g_cont_lbl) lv_obj_set_style_text_color(g_cont_lbl, UI_TEXT_DIM, 0);
+    if (g_status_lbl) lv_label_set_text(g_status_lbl, "连续对话已暂停（没听到说话）");
+}
+
 static void continuous_toggle_cb(lv_event_t *e)
 {
     (void)e;
     g_continuous = !g_continuous;
     if (!g_continuous && g_cont_auto && vs_state() == VS_LISTENING) {
-        /* 关闭时正在自动听：清空已录帧 → 本地"按住时间太短"拦截，
-         * 不把静音发去服务端 */
-        g_capture_frames = 0;
-        vs_ptt_end();
+        vs_cancel(); /* 关闭时正在自动听：放弃本轮（不提交不产文本） */
     }
     g_cont_auto = false;
     lv_obj_set_style_text_color(g_cont_lbl,
@@ -535,8 +551,16 @@ static void poll_timer_cb(lv_timer_t *t)
     if (st == VS_IDLE && last_st != VS_IDLE) idle_since = lv_tick_get();
     last_st = st;
     if (st == VS_LISTENING && lv_tick_elaps(listen_t0) > 20000) {
-        CLOG("ptt watchdog: force submit (20s)");
-        vs_ptt_end();
+        if (g_cont_auto && !g_cont_heard) {
+            /* 自动轮 20s 没听到说话：放弃并暂停连续（绝不把静音发服务端
+             * ——首版强提导致官方 ASR 对底噪幻觉出同一句，回复无限循环） */
+            CLOG("continuous: 20s no speech (maxamp=%d floor=%d) — pause",
+                 g_cont_maxamp, g_cont_floor);
+            cont_pause_no_speech();
+        } else {
+            CLOG("ptt watchdog: force submit (20s)");
+            vs_ptt_end();
+        }
     }
 
     /* 连续对话（免提）驱动：
@@ -547,22 +571,29 @@ static void poll_timer_cb(lv_timer_t *t)
         if (st == VS_IDLE && lv_tick_elaps(idle_since) > CONT_RESPEAK_GAP_MS) {
             g_cont_auto = true;
             g_cont_heard = false;
+            g_cont_floor = 0;
+            g_cont_maxamp = 0;
             cont_listen_t0 = lv_tick_get();
             CLOG("continuous: auto listen begin");
             vs_ptt_begin();
         } else if (st == VS_LISTENING && g_cont_auto) {
             if (g_cont_heard &&
                 lv_tick_elaps(g_cont_loud_tick) > CONT_SILENCE_END_MS) {
-                CLOG("continuous: silence %.0fms after speech, submit",
-                     (double)lv_tick_elaps(g_cont_loud_tick));
+                CLOG("continuous: silence %.0fms after speech (maxamp=%d) submit",
+                     (double)lv_tick_elaps(g_cont_loud_tick), g_cont_maxamp);
                 vs_ptt_end();
             } else if (!g_cont_heard &&
                        lv_tick_elaps(cont_listen_t0) > CONT_SILENCE_ROLL_MS) {
-                /* 一直没人开口：清掉静音继续等（不发服务端） */
+                /* 一直没人开口：清掉静音继续等（不发服务端）；
+                 * maxamp 留痕用于校准阈值 */
+                CLOG("continuous: roll silence (maxamp=%d floor=%d)",
+                     g_cont_maxamp, g_cont_floor);
                 g_capture_frames = 0;
+                g_cont_maxamp = 0;
                 cont_listen_t0 = lv_tick_get();
             } else if (g_capture_frames >= G_CAPTURE_SAMPLES - 1600) {
-                CLOG("continuous: capture near full, force submit");
+                CLOG("continuous: capture near full, force submit (maxamp=%d)",
+                     g_cont_maxamp);
                 vs_ptt_end();
             }
         }

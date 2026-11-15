@@ -56,6 +56,8 @@ const char *vs_owner(void);   /* NULL = 空闲 */
 /* Push-to-Talk（需先 acquire）。非法状态调用是 no-op。 */
 void vs_ptt_begin(void);
 void vs_ptt_end(void);
+/* 放弃本轮采集（Listening→Idle，不提交不产文本；连续对话静默退出用）。 */
+void vs_cancel(void);
 
 /* 引擎处理完成（Thinking → Speaking）。Thinking 超时兜底 15s。 */
 void vs_notify_engine_done(void);

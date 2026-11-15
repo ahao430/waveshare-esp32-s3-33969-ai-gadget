@@ -168,6 +168,19 @@ void vs_ptt_end(void)
     set_state(VS_THINKING, NULL);
 }
 
+/* vs_cancel 放弃本轮采集：Listening → Idle（停采集，不提交不产文本）。
+ * 连续对话"没听到说话"的静默退出用——vs_ptt_end 会进 Thinking 并把
+ * 静音发去服务端（真实表现：官方 ASR 对底噪幻觉出同一句 → 回复循环）。 */
+void vs_cancel(void)
+{
+    if (g_state != VS_LISTENING) {
+        VLOG("cancel ignored: state=%d", (int)g_state);
+        return;
+    }
+    if (g_ops && g_ops->stop_capture) g_ops->stop_capture();
+    enter_idle("canceled");
+}
+
 void vs_notify_engine_done(void)
 {
     if (g_state == VS_THINKING) {
