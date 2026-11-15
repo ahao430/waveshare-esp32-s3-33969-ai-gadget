@@ -7,7 +7,7 @@
 #   条目×N（32B）: key[16] u32 w h frames frame_bytes offset
 #   帧数据：RGB565 平面 (w*h*2) + A8 平面 (w*h)——LVGL 原生格式零解码
 # 帧数/尺寸预算（assets 分区 2.5MB）：
-#   bigfish 三动作 144×82 原生 ×12 帧 ≈ 1.28MB
+#   bigfish 三动作 200×114（源 144×82 离线 LANCZOS 放大）×12 帧 ≈ 2.4MB
 #   xiaozhi/wave  132×117（0.6 缩）×10 帧 ≈ 0.46MB
 #   muse/idle     150×134（0.34 缩）×10 帧 ≈ 0.60MB
 # 烧写：scripts/flash_companion.sh（0xC10000）。
@@ -26,9 +26,9 @@ root, out = sys.argv[1], sys.argv[2]
 
 # (key=目录相对路径, 目标宽, 目标高, 保留帧数)
 SPECS = [
-    ("bigfish/idle",     144,  82, 12),
-    ("bigfish/thinking", 144,  82, 12),
-    ("bigfish/speaking", 144,  82, 12),
+    ("bigfish/idle",     200, 114, 12),
+    ("bigfish/thinking", 200, 114, 12),
+    ("bigfish/speaking", 200, 114, 12),
     ("xiaozhi/wave",     132, 117, 10),
     ("muse/idle",        150, 134, 10),
 ]
@@ -77,6 +77,6 @@ for key, tw, th, keep in SPECS:
 blob = b"CMP1" + struct.pack("<I", len(SPECS)) + b"".join(entries) + blobs
 with open(out, "wb") as f:
     f.write(blob)
-print(f"\n{out}: {len(blob)} bytes ({len(blob)/1024/1024:.2f}MB, 分区预算 2.5MB)")
-assert len(blob) <= 2560 * 1024, "超过 assets 分区预算"
+print(f"\n{out}: {len(blob)} bytes ({len(blob)/1024/1024:.2f}MB, 分区预算 3.5MB)")
+assert len(blob) <= 3584 * 1024, "超过 assets 分区预算"
 PY

@@ -18,6 +18,9 @@
 /* 创建 overlay 并启动 5s 刷新定时器（ui_init 调一次；幂等） */
 void ui_statusbar_init(void);
 
+/* 打开快速音量弹窗（对话页音量按钮复用；状态栏图标簇点击同款） */
+void ui_statusbar_volume_popup(void);
+
 /* 立即按 ds_state() 刷新（低电量事件等场景可主动调） */
 void ui_statusbar_refresh(void);
 

@@ -62,6 +62,12 @@ static void vol_open_cb(lv_event_t *e)
     vol_popup_open();
 }
 
+/* 对话页音量按钮也复用这个弹窗（ui.h 系外露） */
+void ui_statusbar_volume_popup(void)
+{
+    vol_popup_open();
+}
+
 static void vol_popup_open(void)
 {
     if (g_vol_pop) { /* 已开：只续命 */

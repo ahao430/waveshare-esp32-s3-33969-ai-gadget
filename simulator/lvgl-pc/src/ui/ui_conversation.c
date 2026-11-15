@@ -31,6 +31,7 @@
 #include "ui.h"
 #include "ui_gesture.h"
 #include "ui_keys.h"
+#include "ui_statusbar.h"
 #include "ui_theme.h"
 
 /* PTT 事件留痕：按下/抬起/丢失任何一个没到，表现都是"按住说话没反应"
@@ -277,6 +278,12 @@ static void continuous_toggle_cb(lv_event_t *e)
     }
 }
 
+static void vol_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_statusbar_volume_popup();
+}
+
 static void ptt_pressed_cb(lv_event_t *e)
 {
     (void)e;
@@ -395,6 +402,7 @@ static void hist_close_cb(lv_event_t *e)
     lv_obj_delete(mask);
 }
 
+static void hist_wipe_cb(lv_event_t *e);
 static void hist_open_cb(lv_event_t *e)
 {
     (void)e;
@@ -429,14 +437,36 @@ static void hist_open_cb(lv_event_t *e)
     lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
 
     lv_obj_t *close = lv_button_create(mask);
-    lv_obj_set_size(close, 160, 48);
-    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_set_size(close, 140, 48);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 86, -14);
     ui_style_card(close);
     lv_obj_set_style_bg_color(close, UI_ACCENT, 0);
     lv_obj_set_style_radius(close, 16, 0);
     lv_obj_add_event_cb(close, hist_close_cb, LV_EVENT_CLICKED, mask);
     lv_obj_t *cl = ui_label(close, "关闭", &lv_font_cn_16, UI_TEXT);
     lv_obj_center(cl);
+
+    lv_obj_t *wipe = lv_button_create(mask);
+    lv_obj_set_size(wipe, 140, 48);
+    lv_obj_align(wipe, LV_ALIGN_BOTTOM_MID, -86, -14);
+    ui_style_card(wipe);
+    lv_obj_set_style_radius(wipe, 16, 0);
+    lv_obj_add_event_cb(wipe, hist_wipe_cb, LV_EVENT_CLICKED, mask);
+    lv_obj_t *wl = ui_label(wipe, LV_SYMBOL_TRASH "  清空", &lv_font_cn_16, UI_TEXT_DIM);
+    lv_obj_center(wl);
+}
+
+/* 清空当前 App 对话历史（历史弹窗里的"清空"按钮） */
+static void hist_wipe_cb(lv_event_t *e)
+{
+    lv_obj_t *mask = lv_event_get_user_data(e);
+    int id = g_app_id;
+    if (id >= 0 && id < UI_APP_COUNT) {
+        g_hist_n[id] = 0;
+        memset(g_hist[id], 0, sizeof(g_hist[id]));
+    }
+    if (mask) lv_obj_delete(mask); /* 直接销毁弹窗（hist_close_cb 走 event 取参，不复用） */
+    if (g_reply_lbl) lv_label_set_text(g_reply_lbl, "");
 }
 
 /* ---------------- 页面构建 ---------------- */
@@ -518,6 +548,16 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_add_event_cb(hist_btn, hist_open_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t *hicon = ui_label(hist_btn, LV_SYMBOL_LIST, &lv_font_montserrat_16, UI_TEXT);
     lv_obj_center(hicon);
+
+    /* 快速音量：复用状态栏弹窗（含扬声器实时生效） */
+    lv_obj_t *vol_btn = lv_button_create(scr);
+    lv_obj_set_size(vol_btn, 56, 44);
+    lv_obj_align(vol_btn, LV_ALIGN_TOP_RIGHT, -64, 28);
+    ui_style_card(vol_btn);
+    lv_obj_set_style_radius(vol_btn, 14, 0);
+    lv_obj_add_event_cb(vol_btn, vol_btn_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *vicon = ui_label(vol_btn, LV_SYMBOL_VOLUME_MAX, &lv_font_montserrat_16, UI_TEXT);
+    lv_obj_center(vicon);
 
     companion_create(scr, app_id, 80);
 

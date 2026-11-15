@@ -164,7 +164,10 @@ static const frame_set_t *set_for(int app_id, vs_state_t st)
 static void apply_geometry(int app_id, lv_obj_t *img)
 {
     switch (app_id) {
-    case UI_APP_CHAT:  lv_obj_set_size(img, 144, 82);  lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 112); break;
+    case UI_APP_CHAT: /* 资源包已离线放大到 200×114（源 144×82 LANCZOS） */
+        lv_obj_set_size(img, 200, 114);
+        lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 96);
+        break;
     case UI_APP_XIAOZHI: lv_obj_set_size(img, 132, 117); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 92); break;
     case UI_APP_MUSE:  lv_obj_set_size(img, 150, 134); lv_obj_align(img, LV_ALIGN_TOP_MID, 0, 80); break;
     }
