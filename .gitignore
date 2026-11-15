@@ -7,6 +7,7 @@ bridge/bridge.env
 secrets/
 bridge/configs/*.local.*
 bridge/data/
+bridge/cmd/_*/   # 排障用的临时命令（勿入库）
 
 # ---- macOS ----
 .DS_Store
