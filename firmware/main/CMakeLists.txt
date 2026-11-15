@@ -22,7 +22,6 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/fonts/font_cn_14.c
     ${SIM_SRC_DIR}/ui/fonts/font_cn_16.c
     ${SIM_SRC_DIR}/ui/fonts/font_cn_20.c
-    ${SIM_SRC_DIR}/ui/fonts/font_cn_dyn_14.c
     # 数据源（mock 起步；Wi-Fi 就绪后 ds_init 切 bridge）
     ${SIM_SRC_DIR}/data/data_source.c
     ${SIM_SRC_DIR}/data/data_source_mock.c
@@ -47,6 +46,7 @@ idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
         esp_wifi esp_event esp_netif nvs_flash  # Wi-Fi/NVS
         esp_timer                               # esp_timer_get_time
         esp_driver_gpio esp_driver_i2c          # KEY3 ISR / I2C 扫描探针
+        pthread                                 # esp_pthread_set_cfg：线程栈放 PSRAM
         lwip)                                   # esp_sntp 对时
 
 # 临时排障：连续翻页压测（GADGET_STRESS_ANIM=0 带动画复现花屏）

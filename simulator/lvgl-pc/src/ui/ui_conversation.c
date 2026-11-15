@@ -128,6 +128,36 @@ static const char *conv_app_key(int app_id)
     return (def && def->key) ? def->key : "chat";
 }
 
+/* 统一线程创建。真机把线程栈放 PSRAM：
+ * 绘制缓冲改到内部 RAM（DMA 零拷贝）后，内部 RAM 只剩 ~41KB，
+ * 16KB 的语音线程栈 pthread_create 直接 ENOMEM（rc=12，真机实测：
+ * 状态永远停在"思考中"）。PSRAM 栈需要
+ * CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y（已开）。 */
+static int conv_thread_start(void *(*fn)(void *), void *arg, size_t stack)
+{
+#ifdef ESP_PLATFORM
+    /* 内部 RAM 栈（PSRAM 栈实测引发 InstrFetchProhibited 栈损坏）；
+     * 内部 RAM 由「字体不压缩 + WiFi 缓冲入 PSRAM」保证有余量 */
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, stack);
+    int rc = pthread_create(&tid, &attr, fn, arg);
+    if (rc == 0) pthread_detach(tid);
+    pthread_attr_destroy(&attr);
+    return rc;
+#else
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, stack);
+    int rc = pthread_create(&tid, &attr, fn, arg);
+    if (rc == 0) pthread_detach(tid);
+    pthread_attr_destroy(&attr);
+    return rc;
+#endif
+}
+
 static void *voice_worker(void *arg)
 {
     (void)arg;
@@ -183,16 +213,9 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
 
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
-        pthread_t tid;
-        /* ESP32 worker 栈预算：HTTP 链 + cJSON + 会话处理，给 16KB
-         *（栈上大缓冲已全部改为堆分配） */
-        pthread_attr_t attr;
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, 16 * 1024);
-        int prc = pthread_create(&tid, &attr, voice_worker, NULL);
+        /* HTTP 链 + cJSON + 会话处理；栈在 PSRAM（见 conv_thread_start） */
+        int prc = conv_thread_start(voice_worker, NULL, 16 * 1024);
         CLOG("voice worker spawn rc=%d frames=%d", prc, g_capture_frames);
-        pthread_attr_destroy(&attr);
-        pthread_detach(tid);
     }
 }
 
@@ -685,17 +708,10 @@ static void *bot_sync_worker(void *arg)
 
 static void bot_thread_start(void *(*fn)(void *), void *arg)
 {
-    pthread_t tid;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    /* HTTP 链路栈需求实测：http_request 4KB 缓冲 + 调用方 4KB 缓冲
-     *（bots/launcher）+ 1KB 请求行 + cJSON → 12KB 会溢出（真机点标题
-     * 后崩溃/卡死）；给 24KB */
-    pthread_attr_setstacksize(&attr, 24 * 1024);
-    if (pthread_create(&tid, &attr, fn, arg) == 0) {
-        pthread_detach(tid);
-    }
-    pthread_attr_destroy(&attr);
+    /* 栈需求实测：http_request 4KB + 调用方 4KB（bots）+ 1KB 请求行
+     * + cJSON，12KB 会溢出 → 24KB；真机走 PSRAM 栈（内部 RAM 留给
+     * SPI DMA 绘制缓冲，见 conv_thread_start） */
+    (void)conv_thread_start(fn, arg, 24 * 1024);
 }
 
 static void bot_sync_start(void) { bot_thread_start(bot_sync_worker, NULL); }
@@ -724,14 +740,7 @@ static void hist_wipe_cb(lv_event_t *e)
     if (mask) lv_obj_delete(mask); /* 直接销毁弹窗（hist_close_cb 走 event 取参，不复用） */
     if (g_reply_lbl) lv_label_set_text(g_reply_lbl, "");
 
-    pthread_t tid;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 16 * 1024);
-    if (pthread_create(&tid, &attr, chat_reset_worker, NULL) == 0) {
-        pthread_detach(tid);
-    }
-    pthread_attr_destroy(&attr);
+    (void)conv_thread_start(chat_reset_worker, NULL, 16 * 1024);
 }
 
 /* ---------------- 页面构建 ---------------- */

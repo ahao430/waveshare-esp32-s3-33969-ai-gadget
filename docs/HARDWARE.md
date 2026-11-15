@@ -346,9 +346,16 @@ RAM 分配同尺寸 bounce buffer**（`spicommon_dma_setup_priv_buffer`）。
 19.2KB/块（480×20）分配失败 → flush 卡死 → 看门狗重启。与字库无关（字体
 在 flash，压缩解码只用小块绘制缓冲）。
 
-修复（三管齐下，实测零 NO_MEM）：
-1. 显示分块 480×20 → **480×10（9.6KB/块）**，bounce buffer 需求减半；
-2. hangprobe 栈 12KB → **8KB**（4KB 会栈溢出——`vTaskList`+日志实测）；
-3. `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`，WiFi/LWIP 大缓冲允许落 PSRAM。
-回归：设备自检发一次 33280B 真实语音请求 → POST 完成、heap_int 52-57K、
-无 NO_MEM/无栈溢出。
+**最终配置（2026-11-15 收敛，经三轮反复后验证）**：
+1. 绘制缓冲**留在 PSRAM + 20 行**（曾试 10 行 / 搬内部 RAM 均引入新问题：
+   10 行时 bounce 需求虽减半但每帧 48 次分配更易碎片化；搬内部 RAM 会挤
+   掉 16KB 语音线程栈 → `pthread_create rc=12 (ENOMEM)`，状态永远卡"思考
+   中"，继续给线程用 PSRAM 栈则出现 `InstrFetchProhibited`（栈损坏））；
+2. `CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y`：WiFi/LWIP 大缓冲落 PSRAM，
+   内部 RAM 空闲从 ~55K 提到 **~84K**，20 行的 19.2KB bounce 分配稳定；
+3. hangprobe 栈 12KB → 8KB（4KB 会栈溢出——`vTaskList`+日志实测）；
+4. 字体不再压缩、不再带 GB2312-L2 回退（用户决策"只保留常用字"）：
+   flash 余量 5%，生僻机器人名会豆腐——用 `COMPRESS=1 DYN=1
+   scripts/gen_cn_font.sh` 可换回（余量 13%，代价见上）。
+回归（设备自检 `GADGET_SELFTEST_VOICE`，默认关）：完整 PTT 状态机
+LISTENING→THINKING→SPEAKING→IDLE 全通，零 NO_MEM、零 panic、heap 42→60K。

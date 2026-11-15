@@ -36,6 +36,7 @@
 #include "ui.h"
 #include "ui_keys.h"
 #include "data_source.h"
+#include "voice_session.h"
 
 #include <math.h>
 #include <string.h>
@@ -106,20 +107,16 @@ static void selftest_botpick_task(void *arg)
     ui_conversation_debug_bot_picker();
 #endif
 #if GADGET_SELFTEST_VOICE
-    /* 语音回归：模拟一次 1s PTT（16640 帧 = 与真机复现同尺寸），
-     * 验证语音期间 SPI DMA bounce buffer 不再分配失败 */
-    int16_t *pcm = heap_caps_malloc(16640 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
-    if (pcm) {
-        for (int i = 0; i < 16640; i++) pcm[i] = (int16_t)(12000 * sinf(i * 0.1f));
+    /* 语音回归：走完整 PTT 状态机（LISTENING→THINKING→SPEAKING），
+     * 真实采集麦克风 1.5s 后提交——复现用户"说话→思考→回答"全路径 */
+    vs_ptt_begin();
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    vs_ptt_end();
+    for (int i = 0; i < 40; i++) { /* 观察 20s 状态机 */
+        vTaskDelay(pdMS_TO_TICKS(500));
+        ESP_LOGW(TAG, "SELFTEST vs state=%d heap_int=%u", (int)vs_state(),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     }
-    char tr[192] = {0}, rep[384] = {0};
-    ds_voice_result_t r = pcm
-        ? ds_voice_interact("chat", pcm, 16640, tr, sizeof(tr), rep, sizeof(rep))
-        : DS_VOICE_ERROR;
-    free(pcm);
-    ESP_LOGW(TAG, "SELFTEST voice: rc=%d tr=%u rep=%u heap_int=%u", (int)r,
-             (unsigned)strlen(tr), (unsigned)strlen(rep),
-             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
 #endif
     vTaskDelete(NULL);
 }
@@ -291,7 +288,7 @@ static lv_display_t *display_start_custom(void)
     ESP_ERROR_CHECK(esp_lv_adapter_init(&lv_cfg));
 
     const bsp_display_config_t disp_config = {
-        .max_transfer_sz = 480 * 10 * 2, /* SPI 分块上限（内部 DMA 预算内） */
+        .max_transfer_sz = 480 * 20 * 2, /* SPI 分块上限（内部 DMA 预算内） */
     };
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_panel_io_handle_t io = NULL;
@@ -309,7 +306,11 @@ static lv_display_t *display_start_custom(void)
             .rotation = ESP_LV_ADAPTER_ROTATE_0,
             .hor_res = 480,
             .ver_res = 480,
-            .buffer_height = 10,
+            .buffer_height = 20,
+            /* 绘制缓冲留在 PSRAM（内部 RAM 太紧：搬内部会挤掉 16KB
+             * 语音线程栈 → pthread ENOMEM，且实测引发栈损坏崩溃）。
+             * 代价是 SPI 每块要在内部 RAM 分配 bounce buffer，靠下面
+             * 三条腾内部 RAM 的改动兜住。 */
             .use_psram = true,
             .enable_ppa_accel = false,
             .require_double_buffer = true,

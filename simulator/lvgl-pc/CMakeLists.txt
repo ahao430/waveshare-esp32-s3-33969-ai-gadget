@@ -55,7 +55,6 @@ add_executable(gadget_sim
   src/ui/fonts/font_cn_14.c
   src/ui/fonts/font_cn_16.c
   src/ui/fonts/font_cn_20.c
-  src/ui/fonts/font_cn_dyn_14.c
 )
 target_include_directories(gadget_sim PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}

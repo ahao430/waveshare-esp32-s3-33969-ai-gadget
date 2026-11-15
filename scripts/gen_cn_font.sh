@@ -107,11 +107,32 @@ for sz in $SIZES; do
     -o "$OUT_DIR/font_cn_${sz}.c"
 done
 
-# ---- 动态中文回退字体 ----
+# ---- 动态中文回退字体（DYN=1 才生成）----
+# 默认关闭：用户 2026-11-15 决策"只保留常用字"（GB2312 一级），
+# 代价是自定义机器人名里的生僻字（魅/薰）显示豆腐。
 # 机器人名等"服务器/用户自定义"中文不受源码字面量约束，常含 GB2312
 # 一级区以外的字（如实测：魅=GBK f7c8、薰=deb9）→ 单列 GBK 二级汉字
 # 区（0xD8-0xF7）小字体，14px / bpp2（约 150KB，flash 预算内），挂在
 # 16/20px 主字体的 fallback 上：主字体没有的字自动由它渲染，不再豆腐。
+if [ "${DYN:-0}" != "1" ]; then
+  echo "== 跳过动态回退字体（DYN=1 可启用）"
+  # 从主字体里摘掉 fallback（幂等）
+  python3 - "$OUT_DIR" <<'PYEOF2'
+import sys, pathlib, re
+out = pathlib.Path(sys.argv[1])
+for size in ("16", "20"):
+    p = out / f"font_cn_{size}.c"
+    if not p.exists():
+        continue
+    s = p.read_text(encoding="utf-8")
+    s = re.sub(r"extern const lv_font_t lv_font_cn_dyn_14;[^\n]*\n\n", "", s)
+    s = s.replace(".fallback = &lv_font_cn_dyn_14,", ".fallback = NULL,")
+    p.write_text(s, encoding="utf-8")
+PYEOF2
+  echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c（无动态回退，请重编模拟器）"
+  exit 0
+fi
+
 echo "== 生成动态名回退字体（GBK 二级区，14px bpp2）"
 DYNSYMS=$(python3 - <<'PYEOF'
 import sys
