@@ -101,6 +101,63 @@ func isHanOrCJKPunct(r rune) bool {
 	return false
 }
 
+// ---- 语音播报专用清洗（文字展示不用；用户 2026-11-15 反馈）----
+// 1. 括号内舞台指示（（笑着）/(thinking) 等）只上屏不朗读
+// 2. 句内英文占比过高且无中文 = 模型推理/元叙述，整句不朗读
+// 3. markdown 符号不朗读
+
+// stripParenNotes 去掉成对括号及其内容（全角/半角，一层）。
+// 落单的右括号保留（正文里偶尔出现）。
+func stripParenNotes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '（', '(':
+			depth++
+		case '）', ')':
+			if depth > 0 {
+				depth--
+			} else {
+				b.WriteRune(r)
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
+// isLikelyReasoning：句内 ≥12 个 ASCII 字母且汉字/中文标点占比 <30%
+// ——中文人设的正常回复句占比远高于此；英文推理句恰好相反。
+func isLikelyReasoning(s string) bool {
+	runes := []rune(s)
+	han, letters := 0, 0
+	for _, r := range runes {
+		switch {
+		case isHanOrCJKPunct(r):
+			han++
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z'):
+			letters++
+		}
+	}
+	return letters >= 12 && han*10 < len(runes)*3
+}
+
+// ttsSpeakText 单句 → 朗读文本；空串 = 这句不念。
+func ttsSpeakText(s string) string {
+	s = stripParenNotes(s)
+	s = stripMarkdown(s)
+	s = strings.TrimSpace(s)
+	if s == "" || isLikelyReasoning(s) {
+		return ""
+	}
+	return truncateSentences(s, maxVoiceReplyRunes)
+}
+
 // truncateSentences 按句截断到 limit 个字（rune），尽量落在句末标点后。
 func truncateSentences(s string, limit int) string {
 	runes := []rune(s)

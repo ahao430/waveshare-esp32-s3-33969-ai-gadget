@@ -50,3 +50,33 @@ func TestSanitizeStripsMarkdown(t *testing.T) {
 		t.Fatalf("markdown 未清理: %q", got)
 	}
 }
+
+func TestStripParenNotes(t *testing.T) {
+	cases := map[string]string{
+		"（笑着）今天有点冷。":              "今天有点冷。",
+		"带伞（认真）穿厚点。":              "带伞穿厚点。",
+		"半角也要去(thinking)掉。":         "半角也要去掉。",
+		"落单右括号)保留。":                 "落单右括号)保留。",
+		"没有括号的句子。":                  "没有括号的句子。",
+	}
+	for in, want := range cases {
+		if got := stripParenNotes(in); got != want {
+			t.Errorf("stripParenNotes(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestTtsSpeakTextSkipsReasoningAndParens(t *testing.T) {
+	// 推理句（英文长句）：不念
+	if got := ttsSpeakText("User asks again, note repetition with slight irritation."); got != "" {
+		t.Fatalf("reasoning should be dropped, got %q", got)
+	}
+	// 中文+括号描写：念正文去括号
+	if got := ttsSpeakText("（害羞地笑）今天带你吃火锅好不好？"); got != "今天带你吃火锅好不好？" {
+		t.Fatalf("paren note should be stripped, got %q", got)
+	}
+	// 带英文品牌名的正常中文句：照念
+	if got := ttsSpeakText("用 DeepSeek 查的，准没错。"); got == "" {
+		t.Fatalf("normal sentence with brand dropped")
+	}
+}

@@ -239,8 +239,13 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	rawRunes := utf8.RuneCountInString(reply)
 	reply = sanitizeVoiceReply(reply)
 
+	// 朗读版再去掉括号描写/推理句（头里的 reply 是展示版，含括号）
+	ttsText := ttsSpeakText(reply)
+	if ttsText == "" {
+		ttsText = truncateSentences(reply, maxVoiceReplyRunes) // 全被过滤：退回原文
+	}
 	t2 := time.Now()
-	wav, err := h.eng.Synthesize(ctx, reply)
+	wav, err := h.eng.Synthesize(ctx, ttsText)
 	if err != nil {
 		log.Printf("voice: tts failed after %v: %v", time.Since(t2).Round(time.Millisecond), err)
 		w.Header().Set("X-Voice-Error", "tts_failed")

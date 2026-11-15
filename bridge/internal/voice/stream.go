@@ -79,19 +79,21 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 	}
 
 	start := time.Now()
-	var spoken strings.Builder
-	var pending strings.Builder
-	reasoningHold := 0 // 中文正文出现前已扣住的纯 ASCII 字数
+	// 三条流水：pending=正在凑的半句；shown=上屏文本（含括号描写、
+	// 不含英文推理）；spoken=已朗读文本（去括号去 markdown 去推理句）。
+	// 用户要求（2026-11-15）：括号里的舞台指示"只显示文字，语音不念"；
+	// 英文思考串既不显示也不念。
+	var spoken, shown, pending strings.Builder
 
 	spokenRunes := func() int { return utf8.RuneCountInString(spoken.String()) }
 
-	// speak 把一句送去 TTS 并把 PCM 帧发出去
+	// speak 把清洗后的一句送去 TTS 并把 PCM 帧发出去
 	speak := func(sentence string) error {
-		sentence = strings.TrimSpace(sentence)
-		if utf8.RuneCountInString(sentence) < 2 {
+		t := ttsSpeakText(sentence) // 去括号/markdown；推理句返回空
+		if utf8.RuneCountInString(t) < 2 {
 			return nil
 		}
-		pcmWav, perr := h.eng.Synthesize(ctx, sentence)
+		pcmWav, perr := h.eng.Synthesize(ctx, t)
 		if perr != nil {
 			return fmt.Errorf("tts: %w", perr)
 		}
@@ -102,12 +104,12 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 		if err := writeFrame(w, framePCM, pcm); err != nil {
 			return err
 		}
-		spoken.WriteString(sentence)
+		spoken.WriteString(t)
 		return nil
 	}
 
-	// flushSentences 把 pending 里已完整的句子都念掉；返回是否已够长
-	flushSentences := func(final bool) (bool, error) {
+	// flushSentences 把 pending 里已完整的句子分流（shown 全收、spoken 过滤）
+	flushSentences := func(final bool) error {
 		for {
 			s, rest := splitFirstSentence(pending.String(), final)
 			if s == "" {
@@ -115,36 +117,44 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 			}
 			pending.Reset()
 			pending.WriteString(rest)
-			if err := speak(s); err != nil {
-				return true, err
+			if isLikelyReasoning(s) {
+				continue // 推理句：不显示也不念
 			}
+			shown.WriteString(s)
 			if spokenRunes() >= maxVoiceReplyRunes {
-				return true, nil
+				continue // 朗读够了，剩余句子只上屏
+			}
+			if err := speak(s); err != nil {
+				return err
 			}
 		}
-		return spokenRunes() >= maxVoiceReplyRunes, nil
+		return nil
 	}
 
 	emit := func(delta string) error {
 		pending.WriteString(delta)
-		// 中文正文之前可能有一段英文推理/元叙述：先扣住，等中文出现再丢前缀
-		if spokenRunes() == 0 && !hasCJK(pending.String()) {
-			reasoningHold = utf8.RuneCountInString(pending.String())
-			if reasoningHold < 120 {
-				return nil // 继续等中文
+		// 中文出现前：英文一律扣住不分流（推理链可以任意长；纯英文回复
+		// 走收尾 final 一把出）。旧逻辑 120 字后就放行英文 → 推理被念出来
+		//（2026-11-15 用户复现：播报 133 字、上限 110，混入英文思考串）。
+		if shown.Len() == 0 && !hasCJK(pending.String()) {
+			if pending.Len() > 8192 { // 有界：只留最近一半
+				trimmed := pending.String()[pending.Len()-4096:]
+				pending.Reset()
+				pending.WriteString(trimmed)
 			}
-			// 确实没有中文（纯英文人设）：照常念，不再扣
+			return nil
 		}
-		if i := chineseBodyStart(pending.String()); i > 0 {
-			trimmed := pending.String()[i:]
-			pending.Reset()
-			pending.WriteString(trimmed)
+		if shown.Len() == 0 {
+			if i := chineseBodyStart(pending.String()); i > 0 {
+				trimmed := pending.String()[i:]
+				pending.Reset()
+				pending.WriteString(trimmed)
+			}
 		}
-		enough, err := flushSentences(false)
-		if err != nil {
+		if err := flushSentences(false); err != nil {
 			return err
 		}
-		if enough {
+		if shown.Len() > 1600 { // 展示缓冲保护（设备 reply 上限 384B 量级）
 			return ai.ErrStreamDone
 		}
 		return nil
@@ -165,21 +175,24 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 			return
 		}
 	}
-	// 收尾：剩下的半句也念掉
-	if _, err := flushSentences(true); err != nil {
+	// 收尾：剩余半句分流；type2 帧发"上屏文本"（含括号描写）
+	if err := flushSentences(true); err != nil {
 		log.Printf("voice(stream): tail tts failed: %v", err)
 	}
 
-	out := strings.TrimSpace(spoken.String())
+	out := strings.TrimSpace(shown.String())
+	if out == "" {
+		out = strings.TrimSpace(spoken.String())
+	}
 	if out == "" {
 		out = "（没有可播报的内容）"
 	}
-	_ = writeFrame(w, frameText, []byte(out))
+	_ = writeFrame(w, frameText, []byte(truncateSentences(out, 380)))
 
-	log.Printf("voice(stream): app=%s audio=%dKB asr=%v llm+tts=%v 播报=%d字 total=%v",
+	log.Printf("voice(stream): app=%s audio=%dKB asr=%v llm+tts=%v 上屏=%d字 朗读=%d字 total=%v",
 		app, len(audio)/1024, tASR.Round(time.Millisecond),
 		time.Since(start).Round(time.Millisecond),
-		utf8.RuneCountInString(out), time.Since(t0).Round(time.Millisecond))
+		utf8.RuneCountInString(out), spokenRunes(), time.Since(t0).Round(time.Millisecond))
 }
 
 // stripWavHeader 去掉 RIFF/WAVE 头，只留 PCM（各 TTS 引擎输出 44B 头）。
