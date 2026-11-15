@@ -12,6 +12,8 @@ interface BotInfo {
   config_id?: string
   provider?: string
   model?: string
+  tts_provider?: string
+  tts_voice?: string
   updated_at: string
 }
 interface AstrBotConfig {
@@ -32,7 +34,51 @@ const connMsg = ref('')
 const connSaving = ref(false)
 
 /* ---- 实例 ---- */
-const form = ref({ id: '', label: '', config_id: '', provider: '', model: '' })
+const form = ref({
+  id: '',
+  label: '',
+  config_id: '',
+  provider: '',
+  model: '',
+  tts_provider: '',
+  tts_voice: '',
+})
+
+// TTS 引擎与音色（音色来自引擎能力；自动=配了 DeepSeek Key 用 DeepSeek，否则 Edge）
+const ttsEngines = [
+  { id: '', label: '自动（有 DeepSeek Key 用 DeepSeek，否则 Edge）' },
+  { id: 'deepseek', label: 'DeepSeek TTS' },
+  { id: 'edge', label: 'Edge-TTS（免费）' },
+]
+const ttsVoices: Record<string, { id: string; label: string }[]> = {
+  '': [
+    { id: '', label: '默认音色' },
+    { id: 'stella', label: 'DeepSeek · stella（女声）' },
+    { id: 'tide', label: 'DeepSeek · tide（男声）' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: 'Edge · 晓晓（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: 'Edge · 云希（男声）' },
+    { id: 'zh-CN-XiaoyiNeural', label: 'Edge · 晓伊（女声）' },
+    { id: 'zh-CN-YunyangNeural', label: 'Edge · 云扬（男声）' },
+  ],
+  deepseek: [
+    { id: '', label: '默认（stella 女声）' },
+    { id: 'stella', label: 'stella（女声）' },
+    { id: 'tide', label: 'tide（男声）' },
+  ],
+  edge: [
+    { id: '', label: '默认（晓晓 女声）' },
+    { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
+    { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声）' },
+    { id: 'zh-CN-YunyangNeural', label: '云扬（男声）' },
+  ],
+}
+const voiceOptions = (engine: string) => ttsVoices[engine] ?? ttsVoices['']
+
+const ttsLabel = (b: BotInfo) => {
+  const eng = b.tts_provider === 'deepseek' ? 'DeepSeek' : b.tts_provider === 'edge' ? 'Edge' : '自动'
+  return b.tts_voice ? `${eng} · ${b.tts_voice}` : eng
+}
 const configs = ref<AstrBotConfig[]>([])
 const cfgMsg = ref('')
 const fetchingCfg = ref(false)
@@ -132,7 +178,15 @@ async function fetchConfigs() {
 }
 
 function resetForm() {
-  form.value = { id: '', label: '', config_id: '', provider: '', model: '' }
+  form.value = {
+    id: '',
+    label: '',
+    config_id: '',
+    provider: '',
+    model: '',
+    tts_provider: '',
+    tts_voice: '',
+  }
 }
 
 async function addBot() {
@@ -144,6 +198,8 @@ async function addBot() {
       config_id: form.value.config_id,
       provider: form.value.provider,
       model: form.value.model,
+      tts_provider: form.value.tts_provider,
+      tts_voice: form.value.tts_voice,
     }
     if (form.value.id) body.id = form.value.id
     await request('/api/v1/bots', {
@@ -168,6 +224,8 @@ function editBot(b: BotInfo) {
     config_id: b.config_id ?? '',
     provider: b.provider ?? '',
     model: b.model ?? '',
+    tts_provider: b.tts_provider ?? '',
+    tts_voice: b.tts_voice ?? '',
   }
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
@@ -240,6 +298,22 @@ async function probe(id: string) {
       <button v-if="form.id" class="btn-ghost" @click="resetForm">取消编辑</button>
     </div>
     <p v-if="cfgMsg" class="mb-2 text-xs" :class="cfgMsg.startsWith('✓') ? 'text-ok' : 'text-err'">{{ cfgMsg }}</p>
+    <div class="mb-3 flex flex-wrap items-end gap-2">
+      <label class="text-xs text-dim">语音合成</label>
+      <select
+        v-model="form.tts_provider"
+        class="input !w-64"
+        @change="form.tts_voice = ''"
+      >
+        <option v-for="e in ttsEngines" :key="e.id" :value="e.id">{{ e.label }}</option>
+      </select>
+      <select v-model="form.tts_voice" class="input !w-56">
+        <option v-for="v in voiceOptions(form.tts_provider)" :key="v.id" :value="v.id">
+          {{ v.label }}
+        </option>
+      </select>
+      <span class="text-xs text-dim">语音链路使用列表第一个实例的设置</span>
+    </div>
     <details class="mb-2 text-xs text-dim">
       <summary class="cursor-pointer">高级：provider / 模型覆盖（通常留空）</summary>
       <div class="mt-2 flex flex-wrap gap-2">
@@ -256,6 +330,7 @@ async function probe(id: string) {
           <span class="font-medium">{{ b.label }}</span>
           <span class="ml-2 badge !bg-accent/15 !text-accent">{{ configName(b.config_id) }}</span>
           <span v-if="b.model" class="ml-1 badge">{{ b.model }}</span>
+          <span class="ml-1 badge">{{ ttsLabel(b) }}</span>
         </div>
         <div class="flex shrink-0 gap-1">
           <button class="btn-ghost !px-2 !py-1" :disabled="probingId !== ''" @click="probe(b.id)">测试</button>

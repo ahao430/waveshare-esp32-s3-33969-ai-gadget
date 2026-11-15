@@ -38,6 +38,15 @@ type RealInteractor struct {
 
 	dsMu       sync.Mutex
 	dsBrokenAt time.Time // DeepSeek TTS 冷却
+
+	// ttsPref 当前默认机器人的 TTS 偏好（引擎 + 音色）；nil=未接入
+	ttsPref func() (provider, voice string)
+}
+
+// SetTTSPreference 注入机器人实例的 TTS 偏好（main 里读 bots 表）。
+// provider="" 表示自动（配了 DeepSeek Key 用 DeepSeek，否则 Edge）。
+func (r *RealInteractor) SetTTSPreference(fn func() (string, string)) {
+	r.ttsPref = fn
 }
 
 func (r *RealInteractor) dsCooling() bool {
@@ -170,10 +179,17 @@ func (r *RealInteractor) markTTS(ok bool) {
 }
 
 func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, error) {
-	// 引擎顺序：TTS_PROVIDER 显式指定 > 配了 DeepSeek Key 时优先
-	// DeepSeek TTS（tide/stella 音色）> Edge-TTS（免费）> 哔声占位
+	// 引擎顺序：实例偏好（Web 机器人配置）> TTS_PROVIDER env > 自动
+	// （配了 DeepSeek Key 用 DeepSeek TTS，否则 Edge）> 哔声占位
+	prefProvider, prefVoice := "", ""
+	if r.ttsPref != nil {
+		prefProvider, prefVoice = r.ttsPref()
+	}
+	if prefProvider == "" {
+		prefProvider = os.Getenv("TTS_PROVIDER")
+	}
 	var order []string
-	switch os.Getenv("TTS_PROVIDER") {
+	switch prefProvider {
 	case "deepseek":
 		order = []string{"deepseek", "edge"}
 	case "edge":
@@ -196,7 +212,11 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 			if key == "" || r.dsCooling() {
 				continue
 			}
-			pcm, err := deepseekTTS(ctx, key, text, deepseekVoiceID())
+			voiceID := prefVoice
+			if voiceID == "" {
+				voiceID = deepseekVoiceID()
+			}
+			pcm, err := deepseekTTS(ctx, key, text, voiceID)
 			r.markDeepSeek(err == nil)
 			if err == nil {
 				return wrapWav(pcm), nil
@@ -206,7 +226,11 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 			if r.ttsCooling() {
 				continue
 			}
-			pcm, err := edgeSynthesize(ctx, text, r.ttsVoice)
+			edgeVoice := prefVoice
+			if edgeVoice == "" {
+				edgeVoice = r.ttsVoice
+			}
+			pcm, err := edgeSynthesize(ctx, text, edgeVoice)
 			r.markTTS(err == nil)
 			if err == nil {
 				return wrapWav(pcm), nil

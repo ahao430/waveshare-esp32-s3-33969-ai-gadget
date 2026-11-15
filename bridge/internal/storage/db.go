@@ -84,6 +84,8 @@ func Open(path string) (*DB, error) {
 	ensureColumn(sqlDB, "bots", "config_id", "TEXT NOT NULL DEFAULT ''")
 	ensureColumn(sqlDB, "bots", "provider", "TEXT NOT NULL DEFAULT ''")
 	ensureColumn(sqlDB, "bots", "model", "TEXT NOT NULL DEFAULT ''")
+	ensureColumn(sqlDB, "bots", "tts_provider", "TEXT NOT NULL DEFAULT ''") // deepseek|edge|''=自动
+	ensureColumn(sqlDB, "bots", "tts_voice", "TEXT NOT NULL DEFAULT ''")    // 音色 id/名字
 	return &DB{sql: sqlDB}, nil
 }
 

@@ -6,12 +6,13 @@
 //     可选 provider/model 覆盖；对话请求经 BotResolver 现读 DB 即时生效。
 //
 // 路由：
-//   GET/PUT /api/v1/astrbot/config   公用连接（token 只写不回）
-//   POST    /api/v1/astrbot/probe    用公用连接测试（可带 config_id）
-//   GET     /api/v1/astrbot/configs  用公用连接拉配置文件列表
-//   GET/POST /api/v1/bots            实例列表/新建或更新（label+config_id）
-//   DELETE  /api/v1/bots/{id}
-//   POST    /api/v1/bots/probe       测试某实例（公用连接 + 该实例 config）
+//
+//	GET/PUT /api/v1/astrbot/config   公用连接（token 只写不回）
+//	POST    /api/v1/astrbot/probe    用公用连接测试（可带 config_id）
+//	GET     /api/v1/astrbot/configs  用公用连接拉配置文件列表
+//	GET/POST /api/v1/bots            实例列表/新建或更新（label+config_id）
+//	DELETE  /api/v1/bots/{id}
+//	POST    /api/v1/bots/probe       测试某实例（公用连接 + 该实例 config）
 package api
 
 import (
@@ -117,11 +118,13 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 
 	mux.HandleFunc("POST /api/v1/bots", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ID       string `json:"id"`
-			Label    string `json:"label"`
-			ConfigID string `json:"config_id"`
-			Provider string `json:"provider"`
-			Model    string `json:"model"`
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			ConfigID    string `json:"config_id"`
+			Provider    string `json:"provider"`
+			Model       string `json:"model"`
+			TTSProvider string `json:"tts_provider"` // deepseek|edge|''=自动
+			TTSVoice    string `json:"tts_voice"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&body); err != nil {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
@@ -135,9 +138,18 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		if id == "" {
 			id = "bot-" + randomID()
 		}
-		// 实例不再存地址/token（公用连接见 astrbot config）
-		if err := db.SaveBot(id, body.Label, "", "",
-			body.ConfigID, body.Provider, body.Model, d.MasterKey); err != nil {
+		// 实例不再存地址/token（公用连接见 astrbot config）；编辑已有
+		// 实例时保留旧值，避免把升级前的兼容数据清掉（曾踩：更新机器人
+		// 导致公用连接回填失效、AstrBot 断连）
+		legacyBase, legacyToken := "", ""
+		if body.ID != "" {
+			if _, b, t, _, _, _, err := db.GetBot(body.ID, d.MasterKey); err == nil {
+				legacyBase, legacyToken = b, t
+			}
+		}
+		if err := db.SaveBot(id, body.Label, legacyBase, legacyToken,
+			body.ConfigID, body.Provider, body.Model,
+			body.TTSProvider, body.TTSVoice, d.MasterKey); err != nil {
 			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
 			return
 		}

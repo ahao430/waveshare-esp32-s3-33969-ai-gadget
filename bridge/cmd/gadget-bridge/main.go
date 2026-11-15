@@ -209,12 +209,28 @@ func main() {
 		Mimo:        func() string { return resolveAccount("mimo").APIKey },
 		Deepseek:    func() string { return resolveAccount("deepseek").APIKey },
 	}, os.Getenv("ZHIPU_BASE_URL"), chatRouter)
+	// 默认机器人的 TTS 偏好（实例配置：引擎 + 音色）
+	if db != nil {
+		voiceEng.SetTTSPreference(func() (string, string) { return db.DefaultBotTTS() })
+	}
 	voiceH := voice.NewHandler(voiceEng)
 
 	// 外观（自定义背景）目录：默认 db 同目录 appearance/；-db 空则 data/
 	appearanceDir := envOr("BRIDGE_APPEARANCE_DIR", filepath.Join(filepath.Dir(*dbPath), "appearance"))
 	if *dbPath == "" {
 		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
+	}
+
+	// 一次性迁移：旧版把地址/Token 存在 bots 行里——若公用连接还是空，
+	// 启动时从旧行搬到 app_settings.astrbot（之后实例更新不再丢凭据）
+	if db != nil && masterKey != nil {
+		if base, tok := db.GetAstrBotConn(masterKey); base != "" {
+			if raw, err := db.GetSetting(storage.SettingKeyAstrBot); err != nil || raw == "" {
+				if err := db.SaveAstrBotConn(base, tok, masterKey); err == nil {
+					logger.Info("astrbot conn migrated from legacy bot row")
+				}
+			}
+		}
 	}
 
 	// 大肥鱼对接 AstrBot 机器人实例：地址/Token 为公用连接
