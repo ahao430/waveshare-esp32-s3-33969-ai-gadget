@@ -11,6 +11,7 @@ const nav = [
   { to: '/launcher', label: '主页排布' },
   { to: '/subscriptions', label: '订阅中心' },
   { to: '/bots', label: '聊天机器人' },
+  { to: '/models', label: '模型 API' },
   { to: '/zcode', label: 'ZCode 远程' },
   { to: '/monitor', label: '服务器监控' },
   { to: '/weather', label: '天气' },

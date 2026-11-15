@@ -18,22 +18,16 @@ const editing = ref<string>('') // 正在编辑的 provider id
 const message = ref('')
 const saving = ref(false)
 
-// 凭据分两类：额度查询（设备订阅页取数）与语音识别（对话 App 录音转写）
+// 本页只管额度：订阅实例 + 额度查询凭据。
+// 语音识别等能力 Key 在「模型 API」页（/models），两者不要混。
 const quotaCreds = ['zhipu', 'kimi']
-const asrCreds = ['siliconflow', 'minimax', 'mimo']
 const providerTitle: Record<string, string> = {
   zhipu: '智谱 GLM Coding Plan',
   kimi: 'Kimi Coding Plan',
-  siliconflow: '硅基流动 SenseVoice',
-  minimax: 'MiniMax ASR (asr-1.0)',
-  mimo: '小米 MiMo ASR (v2.5)',
 }
 const providerHint: Record<string, string> = {
-  zhipu: '仅用于查询 Coding Plan 额度（不含语音识别）',
+  zhipu: '仅用于查询 Coding Plan 额度（语音识别请去「模型 API」配置）',
   kimi: '仅用于查询 Coding Plan 额度',
-  siliconflow: '语音识别；新账号有免费额度',
-  minimax: '语音识别 asr-1.0；控制台 → 接口密钥',
-  mimo: '语音识别 mimo-v2.5-asr；控制台生成 API Key',
 }
 
 onMounted(() => { load(); loadSubs() })
@@ -146,9 +140,9 @@ async function remove(id: string) {
 <template>
   <h1 class="page-title">订阅额度</h1>
   <p class="page-sub">
-    三件事分开：<b>订阅实例</b>（设备订阅页展示什么）· <b>额度查询凭据</b>（抓额度用）·
-    <b>语音识别凭据</b>（对话 App 录音转写用）。Key 经 AES-256-GCM 加密落库
-    （需 <code class="text-accent2">BRIDGE_MASTER_KEY</code>），明文不回显、不入日志。
+    本页只负责<b>额度</b>：订阅实例（设备订阅页显示什么）+ 额度查询凭据（抓额度用的 Key）。
+    语音识别等能力 Key 在 <RouterLink to="/models" class="text-accent2">模型 API</RouterLink> 页配置。
+    Key 经 AES-256-GCM 加密落库（需 <code class="text-accent2">BRIDGE_MASTER_KEY</code>），明文不回显、不入日志。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="message.includes('失败') || message.includes('不可用') ? 'text-err' : 'text-ok'">
@@ -180,51 +174,8 @@ async function remove(id: string) {
     </div>
   </div>
 
-  <h2 class="mt-6 mb-2 text-sm font-semibold text-dim">服务凭据（功能 Key）</h2>
-  <p class="mb-3 text-xs text-dim">
-    这里只放「调用能力用的 Key」，与上面「订阅实例（设备展示）」是两回事：
-    订阅实例决定设备订阅页显示什么，凭据决定 Bridge 怎么抓到数据/怎么转写语音。
-  </p>
-
-  <div class="card mb-4">
-    <h3 class="mb-1 font-semibold">语音识别 ASR（对话 App 使用）</h3>
-    <p class="mb-1 text-xs text-dim">
-      设备按住说话 → 录音上传 → <b>这里配的 Key</b> 转写成文字 → AstrBot/DeepSeek 回答 → Edge-TTS 合成语音播放。
-      配任意一个即可；优先级 硅基流动 → MiniMax → MiMo → 智谱（可用 <code>ASR_PROVIDER</code> 环境变量强制指定）。
-    </p>
-  </div>
-  <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-    <div v-for="p in asrCreds" :key="p" class="card">
-      <div class="mb-3 flex items-center justify-between">
-        <h3 class="font-semibold">{{ providerTitle[p] ?? p }}</h3>
-        <span class="badge" :class="infoOf(p) ? '!bg-ok/15 !text-ok' : ''">
-          {{ infoOf(p) ? `已配置 · ${infoOf(p)!.account_label || '未命名'}` : '未配置' }}
-        </span>
-      </div>
-      <p class="mb-2 text-xs text-dim">{{ providerHint[p] }}</p>
-      <div v-if="infoOf(p)" class="mb-3 text-xs text-dim">
-        更新于 {{ new Date(infoOf(p)!.updated_at).toLocaleString('zh-CN', { hour12: false }) }}
-      </div>
-      <template v-if="editing === p">
-        <div class="flex flex-col gap-3">
-          <input v-model="editLabel" class="input" placeholder="账号标签（可选）" />
-          <input v-model="editKey" class="input" type="password" :placeholder="infoOf(p) ? '输入新 Key 覆盖' : 'API Key'" />
-          <div class="flex gap-2">
-            <button class="btn" :disabled="saving || !editKey" @click="save(p)">{{ saving ? '保存中…' : '保存' }}</button>
-            <button class="btn-ghost" @click="editing = ''">取消</button>
-          </div>
-        </div>
-      </template>
-      <template v-else>
-        <div class="flex gap-2">
-          <button class="btn-ghost" @click="startEdit(p)">{{ infoOf(p) ? '更换 Key' : '配置 Key' }}</button>
-          <button v-if="infoOf(p)" class="btn-ghost !text-err" @click="remove(p)">删除</button>
-        </div>
-      </template>
-    </div>
-  </div>
-
   <h2 class="mt-6 mb-2 text-sm font-semibold text-dim">额度查询凭据（订阅页取数）</h2>
+
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
     <div v-for="p in quotaCreds" :key="p" class="card">
       <div class="mb-3 flex items-center justify-between">

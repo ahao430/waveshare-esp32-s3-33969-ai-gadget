@@ -11,6 +11,7 @@ export const router = createRouter({
     { path: '/launcher', name: 'launcher', component: () => import('@/pages/Launcher.vue') },
     { path: '/subscriptions', name: 'subscriptions', component: () => import('@/pages/Subscriptions.vue') },
     { path: '/bots', name: 'bots', component: () => import('@/pages/Bots.vue') },
+    { path: '/models', name: 'models', component: () => import('@/pages/ModelApi.vue') },
     { path: '/zcode', name: 'zcode', component: () => import('@/pages/Zcode.vue') },
     { path: '/monitor', name: 'monitor', component: () => import('@/pages/Monitor.vue') },
     { path: '/weather', name: 'weather', component: () => import('@/pages/Weather.vue') },
