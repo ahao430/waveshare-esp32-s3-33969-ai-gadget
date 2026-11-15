@@ -10,12 +10,15 @@
 # 不存在时自动从 google/fonts 仓库下载。
 #
 # 用法：改了 UI 中文文案后运行 scripts/gen_cn_font.sh，然后重编模拟器。
+#   默认生成 RLE 压缩字体（LVGL 原生解码，体积约为位图一半；需
+#   LV_USE_FONT_COMPRESSED=1，固件/模拟器均已开）。COMPRESS=0 → 位图。
+#   OUT_DIR=<dir> → 输出到别处（AB 对比体积用）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 FONT_TTF="${FONT_TTF:-/tmp/cnfont/NotoSansSC.ttf}"
 FA_WOFF="simulator/lvgl-pc/build/_deps/lvgl-src/scripts/built_in_font/FontAwesome5-Solid+Brands+Regular.woff"
-OUT_DIR="simulator/lvgl-pc/src/ui/fonts"
+OUT_DIR="${OUT_DIR:-simulator/lvgl-pc/src/ui/fonts}"
 SIZES="12 14 16 20"
 
 if [ ! -f "$FONT_TTF" ]; then
@@ -29,6 +32,12 @@ if [ ! -f "$FA_WOFF" ]; then
   echo "错误：未找到 FontAwesome 字体（$FA_WOFF）——先完成模拟器首次构建" >&2
   exit 1
 fi
+
+# lv_font_conv 默认就开 RLE 压缩；--no-compress 才是关。COMPRESS=1 表示
+# 走默认（压缩），否则显式关闭（历史行为，位图直取）
+# 默认压缩（flash 预算紧：未压缩时 app 分区仅剩 2%）；COMPRESS=0 可关
+if [ "${COMPRESS:-1}" = "1" ]; then COMPRESS_FLAG=""; else COMPRESS_FLAG="--no-compress"; fi
+echo "== 字体模式：${COMPRESS_FLAG}"
 
 echo "== 提取 UI 源码字符集 + LVGL symbol 集"
 SYMBOLS=$(python3 - <<'PYEOF'
@@ -90,7 +99,7 @@ for sz in $SIZES; do
     --symbols "$FA_SYMBOLS" \
     --size "$sz" \
     --bpp 4 \
-    --no-compress \
+    $COMPRESS_FLAG \
     --no-kerning \
     --format lvgl \
     --lv-include "lvgl.h" \
@@ -121,7 +130,7 @@ PYEOF
 npx --yes lv_font_conv \
   --font "$FONT_TTF" \
   --symbols "$DYNSYMS" \
-  --size 14 --bpp 2 --no-compress --no-kerning \
+  --size 14 --bpp 2 $COMPRESS_FLAG --no-kerning \
   --format lvgl --lv-include "lvgl.h" \
   --lv-font-name "lv_font_cn_dyn_14" \
   -o "$OUT_DIR/font_cn_dyn_14.c"

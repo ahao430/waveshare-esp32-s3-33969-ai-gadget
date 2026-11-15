@@ -37,6 +37,9 @@
 #define LV_FS_STDIO_PATH 
 
 /* 字体：模拟器 UI 使用的全部字号（真机按需裁剪） */
+/* RLE 压缩字体解码（gen_cn_font.sh COMPRESS=1 生成；省 ~478KB flash）。
+ * 不开这个开关，压缩字体会渲染成空心方块（2026-11-15 实测） */
+#define LV_USE_FONT_COMPRESSED 1
 #define LV_FONT_MONTSERRAT_12 1
 #define LV_FONT_MONTSERRAT_14 1
 #define LV_FONT_MONTSERRAT_16 1
