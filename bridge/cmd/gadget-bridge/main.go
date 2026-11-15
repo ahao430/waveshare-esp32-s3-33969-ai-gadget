@@ -27,6 +27,8 @@ import (
 	"gadget-bridge/internal/komari"
 	"gadget-bridge/internal/muse"
 	"gadget-bridge/internal/quota"
+	"gadget-bridge/internal/quota/codingplan"
+	"gadget-bridge/internal/quota/deepseek"
 	"gadget-bridge/internal/quota/kimi"
 	"gadget-bridge/internal/quota/mock"
 	"gadget-bridge/internal/quota/newapi"
@@ -128,6 +130,21 @@ func main() {
 	}
 	if err := reg.Register(newapi.New()); err != nil {
 		logger.Error("register newapi", "err", err)
+		os.Exit(1)
+	}
+	// Coding Plan 中转订阅（kimi 形状 usages / newapi 形状余额自动探测）
+	for kind, name := range map[string]string{
+		"gpt": "GPT Coding Plan", "claude": "Claude Coding Plan",
+		"minimax": "MiniMax Coding Plan", "mimo": "MiMo Coding Plan",
+	} {
+		if err := reg.Register(codingplan.New(kind, name)); err != nil {
+			logger.Error("register codingplan", "kind", kind, "err", err)
+			os.Exit(1)
+		}
+	}
+	// DeepSeek 官方余额
+	if err := reg.Register(deepseek.New()); err != nil {
+		logger.Error("register deepseek", "err", err)
 		os.Exit(1)
 	}
 
@@ -333,6 +350,11 @@ func main() {
 		return cfg
 	}, logger)
 	weatherSvc.Warm(context.Background())
+	// Komari 预热：设备端 HTTP 超时 1.5s，冷缓存时同步抓上游要 1.3~1.5s
+	// → 设备永远拿不到数据。启动时后台预热，首个请求即有缓存。
+	if komariSvc != nil {
+		go komariSvc.Warm(context.Background())
+	}
 
 	handler := api.NewHandler(api.Deps{
 		Registry:        reg,
