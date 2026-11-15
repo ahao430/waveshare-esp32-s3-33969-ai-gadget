@@ -349,6 +349,15 @@ static void saver_build(void)
     g_key_activity_us = esp_timer_get_time();
 }
 
+/* LVGL 存活探针：跑在 LVGL 线程（lv_timer）。若屏幕冻结但日志仍每
+ * 15s 出现 → LVGL 活着、是显示/DMA 侧问题；若日志也停 → LVGL 线程
+ * 卡在刷新/等待。排障用，长期保留成本可忽略（1 行/15s）。 */
+static void lvgl_heartbeat_cb(lv_timer_t *t)
+{
+    (void)t;
+    ESP_LOGI(TAG, "lvgl alive: tick=%lu", (unsigned long)lv_tick_get());
+}
+
 /* ---- 实体键：去抖 ISR → 事件位 → 唤醒/UI 分发任务 ---- */
 static void IRAM_ATTR key_gpio_isr(void *arg)
 {
@@ -551,6 +560,7 @@ void app_main(void)
     bsp_display_lock(0);
     ui_init();
     saver_build();
+    lv_timer_create(lvgl_heartbeat_cb, 15000, NULL);
     bsp_display_unlock();
     heap_report("post-ui");
 

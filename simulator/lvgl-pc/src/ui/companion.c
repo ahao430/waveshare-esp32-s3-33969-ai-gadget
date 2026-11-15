@@ -174,7 +174,7 @@ void companion_create(lv_obj_t *parent, int app_id, int16_t y)
     g_ctx.set = set;
     g_ctx.idx = 0;
     frames_show(set, 0);
-    g_timer = lv_timer_create(frames_timer_cb, 125, &g_ctx); /* 8fps */
+    g_timer = lv_timer_create(frames_timer_cb, 200, &g_ctx); /* 5fps（降重绘负载） */
 }
 
 void companion_set_state(int app_id, vs_state_t st)

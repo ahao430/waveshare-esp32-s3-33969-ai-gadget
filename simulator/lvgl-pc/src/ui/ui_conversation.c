@@ -535,7 +535,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         g_status_lbl = NULL;
     }
 
-    g_poll_timer = lv_timer_create(poll_timer_cb, 50, NULL);
+    g_poll_timer = lv_timer_create(poll_timer_cb, 80, NULL); /* 12.5Hz：波形重绘降载 */
 }
 
 void ui_conversation_on_exit(void)
