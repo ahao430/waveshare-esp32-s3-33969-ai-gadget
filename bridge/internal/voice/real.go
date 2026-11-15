@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -212,7 +213,12 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	case "edge":
 		order = []string{"edge"}
 	default:
-		if r.asr.Deepseek != nil && r.asr.Deepseek() != "" {
+		// 自动模式：选中的音色是 Edge 形态（xxxNeural）时直接走 Edge，
+		// 不把它当 voice_id 发给 DeepSeek 白白失败并触发 DeepSeek 冷却
+		// （Web 自动档下拉里 Edge 音色与 stella/tide 混排）
+		if strings.Contains(prefVoice, "Neural") {
+			order = []string{"edge"}
+		} else if r.asr.Deepseek != nil && r.asr.Deepseek() != "" {
 			order = []string{"deepseek", "edge"}
 		} else {
 			order = []string{"edge"}

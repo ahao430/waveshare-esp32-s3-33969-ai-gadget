@@ -65,12 +65,24 @@ const ttsVoices: Record<string, { id: string; label: string }[]> = {
     { id: 'stella', label: 'stella（女声）' },
     { id: 'tide', label: 'tide（男声）' },
   ],
+  // Edge 免费通道实测可用（2026-11-15 真网逐个探测 25 个候选，
+  // Azure 目录里的晓涵/晓秋/云泽等 12 个返回 Unsupported voice；
+  // 目录与 bridge/internal/voice/voices_live_test.go 保持同步）
   edge: [
     { id: '', label: '默认（晓晓 女声）' },
     { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声）' },
-    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
     { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声）' },
+    { id: 'zh-CN-XiaoxuanNeural', label: '晓萱（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
     { id: 'zh-CN-YunyangNeural', label: '云扬（男声）' },
+    { id: 'zh-CN-YunjianNeural', label: '云健（男声）' },
+    { id: 'zh-CN-YunxiaNeural', label: '云夏（少年音）' },
+    { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（东北话·女）' },
+    { id: 'zh-CN-shaanxi-XiaoniNeural', label: '晓妮（陕西话·女）' },
+    { id: 'zh-HK-HiuMaanNeural', label: '曉曼（粤语·女）' },
+    { id: 'zh-HK-WanLungNeural', label: '雲龍（粤语·男）' },
+    { id: 'zh-TW-HsiaoChenNeural', label: '曉臻（台湾腔·女）' },
+    { id: 'zh-TW-YunJheNeural', label: '雲哲（台湾腔·男）' },
   ],
 }
 const voiceOptions = (engine: string) => ttsVoices[engine] ?? ttsVoices['']
