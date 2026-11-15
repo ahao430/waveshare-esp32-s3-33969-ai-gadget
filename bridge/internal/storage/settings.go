@@ -54,6 +54,7 @@ const (
 	SettingKeyLauncher  = "launcher"   // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
 	SettingKeyAstrBot   = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
 	SettingKeyVoiceApps = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}
+	SettingKeyMuse      = "muse"       // Muse 连接 {node_id, noise_host, api_url, proxy_url, enc_creds}
 )
 
 // SaveAstrBotConn 保存 AstrBot 公用连接（token 加密；空串=清除）。

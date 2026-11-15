@@ -164,6 +164,24 @@ func wrapWav(pcm []int16) []byte {
 // Handler 提供 HTTP 端点处理（api 包装配）。
 type Handler struct {
 	eng Interactor
+	// muse 非 nil 且 Available() 时，app=muse 的请求走 Muse 云端回合
+	// （Muse 出文本，TTS 仍用本项目引擎——上游只显示文字，我们多说一句）
+	muse MuseTurner
+}
+
+// MuseTurner Muse 回合接口（internal/muse.Manager 实现）。
+// 由 main 注入；未配置凭据时 Available()=false，自动回落到常规链路。
+type MuseTurner interface {
+	Available() bool
+	Ask(ctx context.Context, pcm []byte, onHeard, onText func(string)) (heard, reply string, err error)
+}
+
+// SetMuse 注入 Muse 回合实现（可选）。
+func (h *Handler) SetMuse(m MuseTurner) { h.muse = m }
+
+// museFor 该 app 是否走 Muse。
+func (h *Handler) museFor(app string) bool {
+	return app == "muse" && h.muse != nil && h.muse.Available()
 }
 
 func NewHandler(eng Interactor) *Handler { return &Handler{eng: eng} }
@@ -217,18 +235,33 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 
 	// 分段耗时：语音链路"慢"必须能看出卡在 ASR / LLM / TTS 哪一段
 	t0 := time.Now()
-	text, err := h.eng.Transcribe(ctx, audio)
-	if err != nil {
-		log.Printf("voice: asr failed after %v: %v", time.Since(t0).Round(time.Millisecond), err)
-		w.Header().Set("X-Voice-Error", "asr_failed")
-		http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
-		return
+	var text, replyText string
+	if h.museFor(app) {
+		// Muse 云端回合：识别与回答都由 Muse agent 完成，本地只做 TTS
+		heard, rep, merr := h.muse.Ask(ctx, audio, nil, nil)
+		if merr != nil {
+			log.Printf("voice(muse): 回合失败 after %v: %v", time.Since(t0).Round(time.Millisecond), merr)
+			// Muse 不可用不该让 Muse 页变成哑巴：回落到常规链路
+		} else {
+			text, replyText = heard, rep
+		}
 	}
 	tASR := time.Since(t0)
+	if text == "" && replyText == "" {
+		var err error
+		text, err = h.eng.Transcribe(ctx, audio)
+		if err != nil {
+			log.Printf("voice: asr failed after %v: %v", time.Since(t0).Round(time.Millisecond), err)
+			w.Header().Set("X-Voice-Error", "asr_failed")
+			http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
+			return
+		}
+	}
 
 	// 没听清拦截：ASR 无有效内容就不再打 LLM/TTS（省时省钱），
 	// 直接回提示文本 + 空 WAV（设备端播放空音频即秒结束，字幕照常）
-	if !speechValid(text) {
+	// Muse 已带回回答时，转写为空也不拦（服务端识别的转写偶尔不带正文）
+	if replyText == "" && !speechValid(text) {
 		log.Printf("voice: empty transcript after %v, skip llm/tts",
 			tASR.Round(time.Millisecond))
 		w.Header().Set("Content-Type", "audio/wav")
@@ -240,12 +273,16 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t1 := time.Now()
-	reply, err := h.eng.Respond(ctx, text)
-	if err != nil {
-		log.Printf("voice: llm failed after %v: %v", time.Since(t1).Round(time.Millisecond), err)
-		w.Header().Set("X-Voice-Error", "llm_failed")
-		http.Error(w, `{"error":"llm_failed"}`, http.StatusBadGateway)
-		return
+	reply := replyText
+	if reply == "" {
+		var err error
+		reply, err = h.eng.Respond(ctx, text)
+		if err != nil {
+			log.Printf("voice: llm failed after %v: %v", time.Since(t1).Round(time.Millisecond), err)
+			w.Header().Set("X-Voice-Error", "llm_failed")
+			http.Error(w, `{"error":"llm_failed"}`, http.StatusBadGateway)
+			return
+		}
 	}
 	tLLM := time.Since(t1)
 	// 语音场景清洗：丢掉英文推理前言、按句截断（TTS 只念中文正文）

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,8 +22,10 @@ import (
 
 	"gadget-bridge/internal/ai"
 	"gadget-bridge/internal/api"
+	museapi "gadget-bridge/internal/api"
 	"gadget-bridge/internal/events"
 	"gadget-bridge/internal/komari"
+	"gadget-bridge/internal/muse"
 	"gadget-bridge/internal/quota"
 	"gadget-bridge/internal/quota/kimi"
 	"gadget-bridge/internal/quota/mock"
@@ -234,6 +237,40 @@ func main() {
 		})
 	}
 	voiceH := voice.NewHandler(voiceEng)
+
+	// Muse 云端回合（app=muse）：凭据来自一次性配对后导出的 NVS 值，
+	// 加密存 Bridge（Web「模型 API」页可改）。未配置时 Available()=false，
+	// Muse 页自动回落常规链路，不会变哑巴。
+	if db != nil && masterKey != nil {
+		museMgr := &muse.Manager{
+			Creds: func() muse.Credentials {
+				return museapi.LoadMuseCredentials(db, masterKey)
+			},
+			Log: log.New(os.Stderr, "muse: ", log.LstdFlags),
+		}
+		// 环境变量兜底（首次装配/容器场景）：MUSE_ACCESS_TOKEN + MUSE_NODE_ID
+		if os.Getenv("MUSE_ACCESS_TOKEN") != "" && os.Getenv("MUSE_NODE_ID") != "" {
+			envCreds := muse.Credentials{
+				AccessToken:  os.Getenv("MUSE_ACCESS_TOKEN"),
+				RefreshToken: os.Getenv("MUSE_REFRESH_TOKEN"),
+				NodeID:       os.Getenv("MUSE_NODE_ID"),
+				NoiseHost:    os.Getenv("MUSE_NOISE_HOST"),
+				APIURL:       os.Getenv("MUSE_API_URL"),
+				ProxyURL:     os.Getenv("MUSE_PROXY_URL"),
+			}
+			base := museMgr.Creds
+			museMgr.Creds = func() muse.Credentials {
+				if c := base(); c.Ready() {
+					return c
+				}
+				return envCreds
+			}
+		}
+		voiceH.SetMuse(museMgr)
+		if museMgr.Available() {
+			logger.Info("muse voice enabled")
+		}
+	}
 
 	// 外观（自定义背景）目录：默认 db 同目录 appearance/；-db 空则 data/
 	appearanceDir := envOr("BRIDGE_APPEARANCE_DIR", filepath.Join(filepath.Dir(*dbPath), "appearance"))

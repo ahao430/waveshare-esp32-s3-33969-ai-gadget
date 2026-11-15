@@ -132,6 +132,7 @@ func NewHandler(d Deps) http.Handler {
 		serveVoiceApps(mux, d, logger)
 		serveZcode(mux, d, logger)
 		serveMonitorConfig(mux, d, logger)
+		serveMuseConfig(mux, d, logger)
 		serveKeys(mux, d, logger)
 		serveWeather(mux, d, logger)
 		serveLauncher(mux, d, logger)

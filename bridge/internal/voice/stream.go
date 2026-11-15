@@ -60,13 +60,30 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 	ctx = context.WithValue(ctx, ctxKeyVoiceApp{}, app)
 
 	t0 := time.Now()
-	text, err := h.eng.Transcribe(ctx, audio)
-	if err != nil {
-		log.Printf("voice(stream): asr failed after %v: %v",
-			time.Since(t0).Round(time.Millisecond), err)
-		w.Header().Set("X-Voice-Error", "asr_failed")
-		http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
-		return
+	muse := h.museFor(app)
+	var text, museReply string
+	var err error
+	if muse {
+		// Muse 云端回合：识别 + 回答都在 Muse agent 侧；这边只负责
+		// 分句 + TTS + 帧下发（复用下面整条流水线）
+		heard, rep, merr := h.muse.Ask(ctx, audio, nil, nil)
+		if merr != nil {
+			log.Printf("voice(stream,muse): 回合失败 after %v: %v",
+				time.Since(t0).Round(time.Millisecond), merr)
+			muse = false // 回落常规链路
+		} else {
+			text, museReply = heard, rep
+		}
+	}
+	if !muse {
+		text, err = h.eng.Transcribe(ctx, audio)
+		if err != nil {
+			log.Printf("voice(stream): asr failed after %v: %v",
+				time.Since(t0).Round(time.Millisecond), err)
+			w.Header().Set("X-Voice-Error", "asr_failed")
+			http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
+			return
+		}
 	}
 	tASR := time.Since(t0)
 
@@ -79,7 +96,8 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 	}
 
 	// 没听清拦截：不发 LLM/TTS，一帧提示文本即收工
-	if !speechValid(text) {
+	// （Muse 已带回回答时不拦——服务端转写偶尔不带正文）
+	if museReply == "" && !speechValid(text) {
 		log.Printf("voice(stream): empty transcript after %v, skip llm/tts",
 			tASR.Round(time.Millisecond))
 		_ = writeFrame(w, frameText, []byte("没听清，再按住说一次试试。"))
@@ -168,12 +186,21 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 		return nil
 	}
 
-	si, ok := h.eng.(StreamingInteractor)
-	if !ok {
-		_ = writeFrame(w, frameError, []byte("当前引擎不支持流式"))
-		return
+	var streamErr error
+	if museReply != "" {
+		// Muse 回复是一次性全文：直接喂给流水线，让它按句 TTS 出声
+		streamErr = emit(museReply)
+		if streamErr != nil && ai.IsStreamDone(streamErr) {
+			streamErr = nil
+		}
+	} else {
+		si, ok := h.eng.(StreamingInteractor)
+		if !ok {
+			_ = writeFrame(w, frameError, []byte("当前引擎不支持流式"))
+			return
+		}
+		streamErr = si.RespondStream(ctx, text, emit)
 	}
-	streamErr := si.RespondStream(ctx, text, emit)
 	if streamErr != nil && !ai.IsStreamDone(streamErr) {
 		// 已经有音频播出去了就不算彻底失败：把错误作为文本帧告诉设备
 		log.Printf("voice(stream): llm failed after %v: %v",

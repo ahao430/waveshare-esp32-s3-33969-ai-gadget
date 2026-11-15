@@ -48,6 +48,7 @@ func main() {
 	vmsOnly := flag.Bool("vms", false, "只拉 VM 列表")
 	proxy := flag.String("proxy", "http://127.0.0.1:7897", "HTTP 代理（空=环境变量）")
 	wait := flag.Duration("wait", 60*time.Second, "等回复的最长时间")
+	voiceWav := flag.String("voice", "", "16k/16bit/mono WAV：走完整语音回合（听写→回复）")
 	flag.Parse()
 
 	if *credsPath == "" {
@@ -131,6 +132,23 @@ func main() {
 		}
 	}()
 
+	if *voiceWav != "" {
+		pcm, err := readWavPCM16k(*voiceWav)
+		if err != nil {
+			log.Fatalf("读 WAV: %v", err)
+		}
+		log.Printf("语音回合：%d 字节 PCM (%.1fs)", len(pcm), float64(len(pcm)/2)/16000)
+		agent := &muse.Agent{}
+		_ = agent // 占位：下面直接用 conn 上的原子 API
+		heard, reply, err := runVoiceTurn(ctx, conn, pcm)
+		if err != nil {
+			log.Fatalf("语音回合失败: %v", err)
+		}
+		log.Printf("听写: %q", heard)
+		log.Printf("回复: %q", reply)
+		return
+	}
+
 	if *say == "" {
 		select {
 		case <-time.After(5 * time.Second):
@@ -191,4 +209,29 @@ func fetchVMs(proxyURL, api, token string) ([]vmInfo, error) {
 		return nil, fmt.Errorf("解析: %w (%.200s)", err, string(body))
 	}
 	return out.VMList, nil
+}
+
+// readWavPCM16k 取 WAV 的 data 块（要求 16k/16bit/mono）。
+func readWavPCM16k(path string) ([]byte, error) {
+	d, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(d) < 12 || string(d[:4]) != "RIFF" || string(d[8:12]) != "WAVE" {
+		return nil, fmt.Errorf("不是 WAV")
+	}
+	for i := 12; i+8 <= len(d); {
+		id := string(d[i : i+4])
+		sz := int(uint32(d[i+4]) | uint32(d[i+5])<<8 | uint32(d[i+6])<<16 | uint32(d[i+7])<<24)
+		off := i + 8
+		if id == "data" {
+			end := off + sz
+			if end > len(d) || sz <= 0 {
+				end = len(d)
+			}
+			return d[off:end], nil
+		}
+		i = off + sz + (sz & 1)
+	}
+	return nil, fmt.Errorf("没有 data 块")
 }
