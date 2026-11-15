@@ -19,17 +19,19 @@ const editLabel = ref('')
 const saving = ref(false)
 const message = ref('')
 
-// 语音识别：配置任一即可；Bridge 选择顺序 硅基流动 → MiniMax → MiMo →
-// 智谱（可用 ASR_PROVIDER 环境变量强制指定）
-const asrProviders = ['siliconflow', 'deepseek', 'minimax', 'mimo'] as const
+// 语音识别：配置任一即可；Bridge 选择顺序 硅基流动 → 火山豆包 →
+// DeepSeek → MiniMax → MiMo → 智谱（可用 ASR_PROVIDER 环境变量强制指定）
+const asrProviders = ['siliconflow', 'volcengine', 'deepseek', 'minimax', 'mimo'] as const
 const providerTitle: Record<string, string> = {
   siliconflow: '硅基流动 SenseVoice',
+  volcengine: '火山引擎 豆包（ASR + TTS）',
   deepseek: 'DeepSeek 语音（ASR + TTS）',
   minimax: 'MiniMax ASR (asr-1.0)',
   mimo: '小米 MiMo ASR (mimo-v2.5-asr)',
 }
 const providerHint: Record<string, string> = {
   siliconflow: '注册 cloud.siliconflow.cn → API 密钥；新账号有免费额度',
+  volcengine: 'console.volcengine.com → 语音技术 → 创建应用（开"语音识别大模型"+"语音合成大模型"）。Key 格式 AppID:AccessToken',
   deepseek: 'platform.deepseek.com → API Keys。同一个 Key 同时用于识别与合成（音色 stella 女 / tide 男）',
   minimax: 'platform.minimax.cn → 账户管理 → 接口密钥',
   mimo: 'mimo.mi.com 控制台创建 API Key',
@@ -47,15 +49,29 @@ const appRows = [
 ] as const
 
 const engines = [
-  { id: '', label: '自动（有 DeepSeek Key 用 DeepSeek，否则 Edge）' },
+  { id: '', label: '自动（按音色归属路由；无偏好时 DeepSeek > 火山 > Edge）' },
   { id: 'deepseek', label: 'DeepSeek TTS' },
+  { id: 'volcengine', label: '火山豆包 TTS' },
   { id: 'edge', label: 'Edge-TTS（免费）' },
+]
+// 火山音色：v1 接口可用的大模型 1.0 音色；BV001/BV002 免费授权，
+// 灿灿/炀炀需控制台"0 元下单"后可用
+const volcVoices = [
+  { id: '', label: '默认（BV001 通用女声）' },
+  { id: 'BV001_streaming', label: 'BV001 通用女声（免费）' },
+  { id: 'BV002_streaming', label: 'BV002 通用男声（免费）' },
+  { id: 'BV407_streaming', label: '灿灿（女声·亲切）' },
+  { id: 'BV406_streaming', label: '炀炀（男声·亲切）' },
 ]
 const voices: Record<string, { id: string; label: string }[]> = {
   '': [
     { id: '', label: '默认音色' },
     { id: 'stella', label: 'DeepSeek · stella（女声）' },
     { id: 'tide', label: 'DeepSeek · tide（男声）' },
+    { id: 'BV001_streaming', label: '火山 · BV001 通用女声（免费）' },
+    { id: 'BV002_streaming', label: '火山 · BV002 通用男声（免费）' },
+    { id: 'BV407_streaming', label: '火山 · 灿灿（女声）' },
+    { id: 'BV406_streaming', label: '火山 · 炀炀（男声）' },
     { id: 'zh-CN-XiaoxiaoNeural', label: 'Edge · 晓晓（女声）' },
     { id: 'zh-CN-YunxiNeural', label: 'Edge · 云希（男声）' },
     { id: 'zh-CN-XiaoyiNeural', label: 'Edge · 晓伊（女声）' },
@@ -66,12 +82,22 @@ const voices: Record<string, { id: string; label: string }[]> = {
     { id: 'stella', label: 'stella（女声）' },
     { id: 'tide', label: 'tide（男声）' },
   ],
+  volcengine: volcVoices,
   edge: [
     { id: '', label: '默认（晓晓 女声）' },
     { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（女声）' },
-    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
     { id: 'zh-CN-XiaoyiNeural', label: '晓伊（女声）' },
+    { id: 'zh-CN-XiaoxuanNeural', label: '晓萱（女声）' },
+    { id: 'zh-CN-YunxiNeural', label: '云希（男声）' },
     { id: 'zh-CN-YunyangNeural', label: '云扬（男声）' },
+    { id: 'zh-CN-YunjianNeural', label: '云健（男声）' },
+    { id: 'zh-CN-YunxiaNeural', label: '云夏（少年音）' },
+    { id: 'zh-CN-liaoning-XiaobeiNeural', label: '晓北（东北话·女）' },
+    { id: 'zh-CN-shaanxi-XiaoniNeural', label: '晓妮（陕西话·女）' },
+    { id: 'zh-HK-HiuMaanNeural', label: '曉曼（粤语·女）' },
+    { id: 'zh-HK-WanLungNeural', label: '雲龍（粤语·男）' },
+    { id: 'zh-TW-HsiaoChenNeural', label: '曉臻（台湾腔·女）' },
+    { id: 'zh-TW-YunJheNeural', label: '雲哲（台湾腔·男）' },
   ],
 }
 const voiceOptions = (engine: string) => voices[engine] ?? voices['']
@@ -186,10 +212,9 @@ async function remove(id: string) {
     </div>
     <p class="mb-3 text-xs text-dim">
       链路：按住说话 → 设备录音 → <b>这里配的 Key 转写</b> → AstrBot/DeepSeek 回答 →
-      Edge-TTS 合成语音 → 设备播放（TTS 免费、无需 Key）。
-      配任意一家即可；Bridge 选择顺序 硅基流动 → DeepSeek → MiniMax → MiMo → 智谱。
-      语音合成默认 Edge-TTS（免费）；配了 DeepSeek Key 会自动优先用 DeepSeek TTS
-      （可用 <code>TTS_PROVIDER=edge</code> 强制回免费 Edge）。
+      TTS 合成语音 → 设备播放。
+      配任意一家即可；Bridge 选择顺序 硅基流动 → 火山豆包 → DeepSeek → MiniMax → MiMo → 智谱。
+      语音合成默认 Edge-TTS（免费）；配了 DeepSeek/火山 Key 会按音色偏好自动路由。
     </p>
 
     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -206,7 +231,7 @@ async function remove(id: string) {
           <div class="flex flex-col gap-2">
             <input v-model="editLabel" class="input" placeholder="标签（可选）" />
             <input v-model="editKey" class="input" type="password"
-                   :placeholder="infoOf(p) ? '输入新 Key 覆盖' : 'API Key'" />
+                   :placeholder="p === 'volcengine' ? (infoOf(p) ? '输入新 Key 覆盖' : 'AppID:AccessToken') : (infoOf(p) ? '输入新 Key 覆盖' : 'API Key')" />
             <div class="flex gap-2">
               <button class="btn" :disabled="saving || !editKey" @click="save(p)">保存</button>
               <button class="btn-ghost" @click="editing = ''">取消</button>

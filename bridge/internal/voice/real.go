@@ -40,6 +40,9 @@ type RealInteractor struct {
 	dsMu       sync.Mutex
 	dsBrokenAt time.Time // DeepSeek TTS 冷却
 
+	volMu       sync.Mutex
+	volBrokenAt time.Time // 火山 TTS 冷却
+
 	// ttsPref 按 App 取 TTS 偏好（引擎 + 音色）；nil=未接入。
 	// app="" 或 "chat" → 默认机器人实例；"muse"/"xiaozhi" 等 → App 级配置。
 	ttsPref func(app string) (provider, voice string)
@@ -67,15 +70,40 @@ func (r *RealInteractor) markDeepSeek(ok bool) {
 	}
 }
 
+func (r *RealInteractor) volCooling() bool {
+	r.volMu.Lock()
+	defer r.volMu.Unlock()
+	return time.Since(r.volBrokenAt) < ttsCooldown
+}
+
+func (r *RealInteractor) markVolc(ok bool) {
+	r.volMu.Lock()
+	defer r.volMu.Unlock()
+	if ok {
+		r.volBrokenAt = time.Time{}
+	} else {
+		r.volBrokenAt = time.Now()
+	}
+}
+
+// volcCredsOK Key 是否形如 "AppID:AccessToken"（自动档判定用）。
+func volcCredsOK(key string) bool {
+	_, _, err := volcCreds(key)
+	return err == nil
+}
+
 // ASRKeys 各路 ASR 的 Key 解析器（动态读凭据库/env，保存即生效）。
-// 选择顺序：ASR_PROVIDER 显式指定 > siliconflow > minimax > mimo > zhipu
-// （前三个新账号有免费额度/按量便宜；智谱额度常被 coding plan 占满）。
+// 选择顺序：ASR_PROVIDER 显式指定 > siliconflow > volcengine > deepseek
+// > minimax > mimo > zhipu（SenseVoice 最便宜；豆包大模型 ASR 准确率
+// 更高；智谱额度常被 coding plan 占满）。volcengine Key 格式
+// "AppID:AccessToken"，同一应用同时供 TTS 使用。
 type ASRKeys struct {
 	Zhipu       func() string
 	Siliconflow func() string
 	Minimax     func() string
 	Mimo        func() string
 	Deepseek    func() string
+	Volcengine  func() string
 }
 
 func NewRealInteractor(asr ASRKeys, baseURL string, router *ai.Router) *RealInteractor {
@@ -95,6 +123,7 @@ func (r *RealInteractor) pickASR() (string, string) {
 	}
 	all := []cand{
 		{"siliconflow", r.asr.Siliconflow},
+		{"volcengine", r.asr.Volcengine},
 		{"deepseek", r.asr.Deepseek}, // 全家桶：ASR/TTS 同一 Key
 		{"minimax", r.asr.Minimax},
 		{"mimo", r.asr.Mimo},
@@ -137,6 +166,8 @@ func (r *RealInteractor) Transcribe(ctx context.Context, pcmL16 []byte) (string,
 		text, err = mimoTranscribe(ctx, key, pcmL16)
 	case "deepseek":
 		text, err = deepseekTranscribe(ctx, key, pcmL16)
+	case "volcengine":
+		text, err = volcengineTranscribe(ctx, key, pcmL16)
 	default:
 		text, err = zhipuTranscribe(ctx, key, r.baseURL, pcmL16)
 	}
@@ -210,16 +241,23 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 	switch prefProvider {
 	case "deepseek":
 		order = []string{"deepseek", "edge"}
+	case "volcengine":
+		order = []string{"volcengine", "edge"}
 	case "edge":
 		order = []string{"edge"}
 	default:
-		// 自动模式：选中的音色是 Edge 形态（xxxNeural）时直接走 Edge，
-		// 不把它当 voice_id 发给 DeepSeek 白白失败并触发 DeepSeek 冷却
-		// （Web 自动档下拉里 Edge 音色与 stella/tide 混排）
+		// 自动模式按音色形态路由：Edge 形态（xxxNeural）直接走 Edge、
+		// 火山形态（BV*）直接走火山——不把音色名发错厂家白白失败触发
+		// 冷却（Web 自动档下拉里三家音色混排）。无音色偏好时
+		// DeepSeek Key > 火山 Key > Edge。
 		if strings.Contains(prefVoice, "Neural") {
 			order = []string{"edge"}
+		} else if strings.HasPrefix(prefVoice, "BV") {
+			order = []string{"volcengine"}
 		} else if r.asr.Deepseek != nil && r.asr.Deepseek() != "" {
 			order = []string{"deepseek", "edge"}
+		} else if r.asr.Volcengine != nil && volcCredsOK(r.asr.Volcengine()) {
+			order = []string{"volcengine", "edge"}
 		} else {
 			order = []string{"edge"}
 		}
@@ -227,6 +265,23 @@ func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, e
 
 	for _, eng := range order {
 		switch eng {
+		case "volcengine":
+			if r.volCooling() {
+				continue
+			}
+			vkey := ""
+			if r.asr.Volcengine != nil {
+				vkey = r.asr.Volcengine()
+			}
+			if !volcCredsOK(vkey) {
+				continue
+			}
+			pcm, err := volcengineTTS(ctx, vkey, text, prefVoice)
+			r.markVolc(err == nil)
+			if err == nil {
+				return wrapWav(pcm), nil
+			}
+			log.Printf("voice: tts volcengine failed: %v", err)
 		case "deepseek":
 			key := ""
 			if r.asr.Deepseek != nil {

@@ -46,15 +46,29 @@ const form = ref({
 
 // TTS 引擎与音色（音色来自引擎能力；自动=配了 DeepSeek Key 用 DeepSeek，否则 Edge）
 const ttsEngines = [
-  { id: '', label: '自动（有 DeepSeek Key 用 DeepSeek，否则 Edge）' },
+  { id: '', label: '自动（按音色归属路由；无偏好时 DeepSeek > 火山 > Edge）' },
   { id: 'deepseek', label: 'DeepSeek TTS' },
+  { id: 'volcengine', label: '火山豆包 TTS' },
   { id: 'edge', label: 'Edge-TTS（免费）' },
+]
+// 火山音色：v1 接口可用的大模型 1.0 音色；BV001/BV002 免费授权，
+// 灿灿/炀炀需控制台"0 元下单"后可用
+const volcVoices = [
+  { id: '', label: '默认（BV001 通用女声）' },
+  { id: 'BV001_streaming', label: 'BV001 通用女声（免费）' },
+  { id: 'BV002_streaming', label: 'BV002 通用男声（免费）' },
+  { id: 'BV407_streaming', label: '灿灿（女声·亲切）' },
+  { id: 'BV406_streaming', label: '炀炀（男声·亲切）' },
 ]
 const ttsVoices: Record<string, { id: string; label: string }[]> = {
   '': [
     { id: '', label: '默认音色' },
     { id: 'stella', label: 'DeepSeek · stella（女声）' },
     { id: 'tide', label: 'DeepSeek · tide（男声）' },
+    { id: 'BV001_streaming', label: '火山 · BV001 通用女声（免费）' },
+    { id: 'BV002_streaming', label: '火山 · BV002 通用男声（免费）' },
+    { id: 'BV407_streaming', label: '火山 · 灿灿（女声）' },
+    { id: 'BV406_streaming', label: '火山 · 炀炀（男声）' },
     { id: 'zh-CN-XiaoxiaoNeural', label: 'Edge · 晓晓（女声）' },
     { id: 'zh-CN-YunxiNeural', label: 'Edge · 云希（男声）' },
     { id: 'zh-CN-XiaoyiNeural', label: 'Edge · 晓伊（女声）' },
@@ -65,6 +79,7 @@ const ttsVoices: Record<string, { id: string; label: string }[]> = {
     { id: 'stella', label: 'stella（女声）' },
     { id: 'tide', label: 'tide（男声）' },
   ],
+  volcengine: volcVoices,
   // Edge 免费通道实测可用（2026-11-15 真网逐个探测 25 个候选，
   // Azure 目录里的晓涵/晓秋/云泽等 12 个返回 Unsupported voice；
   // 目录与 bridge/internal/voice/voices_live_test.go 保持同步）

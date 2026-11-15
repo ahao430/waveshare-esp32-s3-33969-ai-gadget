@@ -208,6 +208,17 @@ func main() {
 		Minimax:     func() string { return resolveAccount("minimax").APIKey },
 		Mimo:        func() string { return resolveAccount("mimo").APIKey },
 		Deepseek:    func() string { return resolveAccount("deepseek").APIKey },
+		// 火山豆包：凭据库 "AppID:AccessToken"；env 双变量兜底
+		Volcengine: func() string {
+			if k := resolveAccount("volcengine").APIKey; k != "" {
+				return k
+			}
+			if id, tok := os.Getenv("VOLCENGINE_APP_ID"),
+				os.Getenv("VOLCENGINE_ACCESS_TOKEN"); id != "" && tok != "" {
+				return id + ":" + tok
+			}
+			return ""
+		},
 	}, os.Getenv("ZHIPU_BASE_URL"), chatRouter)
 	// TTS 偏好：App 级设置（Muse/小智等）优先，空则回退默认机器人实例
 	if db != nil {
