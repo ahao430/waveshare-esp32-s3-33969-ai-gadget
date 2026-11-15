@@ -150,6 +150,27 @@ func extractAstrBotEvent(payload string) (string, string, string) {
 	return typ, chain, extractAstrBotText(payload)
 }
 
+// astrbotErrorBody 识别请求级错误：AstrBot 拒绝请求时 HTTP 仍回 200，
+// body 是单行 JSON（非 SSE）{"status":"error","message":"…"}
+// （实测样例："session_id belongs to another username"）。
+func astrbotErrorBody(line string) string {
+	s := strings.TrimSpace(line)
+	if !strings.HasPrefix(s, "{") {
+		return ""
+	}
+	var probe struct {
+		Status  string `json:"status"`
+		Message string `json:"message"`
+	}
+	if json.Unmarshal([]byte(s), &probe) != nil {
+		return ""
+	}
+	if probe.Status == "error" && probe.Message != "" {
+		return probe.Message
+	}
+	return ""
+}
+
 // extractAstrBotText 宽容提取 SSE 事件里的文本：JSON 时依次找
 // content/text/delta/result 字段（含嵌套 data 包裹）；纯文本直通。
 func extractAstrBotText(payload string) string {
@@ -232,8 +253,6 @@ func lastUserContent(body []byte) string {
 }
 
 // astrbotComplete 非流式：收齐 SSE 全文后返回（voice 链路用）。
-// botSessionID：bot 实例的当前 session id（稳定段 + 轮换代）。
-// 代数 bumped = 新会话 = 机器人无记忆。
 
 // SessionStore 会话轮换代的持久化（main 注入 storage.DB；nil=仅内存，
 // Bridge 重启会退回旧代——服务端旧记忆复活，仅测试场景可接受）。
@@ -286,18 +305,16 @@ func astrbotIdentity(botID string) (username, sessionID string) {
 	defer sessMu.Unlock()
 	sessEnsure()
 	gen := sessGen(botID)
+	// session_id 用 v2 命名空间（gadget-sess-…）。旧命名（gadget-bigfish-…）
+	// 在改造前的公共 username=gadget 名下已被 AstrBot 绑定，新版服务端校验
+	// session 归属后整流拒绝（"session_id belongs to another username"，
+	// 2026-11-16 实测：老实例全挂、新实例正常）。换字符串一次性绕开历史
+	// 绑定，代价是放弃旧 session 的服务端上下文。
 	if gen == 0 {
-		return "gadget-" + botID, fmt.Sprintf("gadget-bigfish-%s-0", botID)
+		return "gadget-" + botID, fmt.Sprintf("gadget-sess-%s-0", botID)
 	}
 	return fmt.Sprintf("gadget-%s-r%d", botID, gen),
-		fmt.Sprintf("gadget-bigfish-%s-%d", botID, gen)
-}
-
-func botSessionID(botID string) string {
-	sessMu.Lock()
-	defer sessMu.Unlock()
-	sessEnsure()
-	return fmt.Sprintf("gadget-bigfish-%s-%d", botID, sessGen(botID))
+		fmt.Sprintf("gadget-sess-%s-%d", botID, gen)
 }
 
 // ResetBotSession 轮换指定 bot（空=全部）的会话并持久化；返回受影响实例数。
@@ -375,11 +392,17 @@ func astrbotStream(ctx context.Context, u Upstream, messages []ChatMessage,
 	debugEvents := os.Getenv("ASTRBOT_DEBUG_EVENTS") == "1"
 	seen := map[string]bool{}
 	emitted := false
+	errBody := ""
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64*1024), astrbotMaxChunks)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
+			// 请求级错误走非 SSE 的 JSON body（HTTP 仍是 200）——
+			// 不捕获就会被吞成 empty_response（2026-11-16 实测踩坑）
+			if msg := astrbotErrorBody(line); msg != "" && errBody == "" {
+				errBody = msg
+			}
 			continue
 		}
 		p := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -410,6 +433,9 @@ func astrbotStream(ctx context.Context, u Upstream, messages []ChatMessage,
 		}
 	}
 	if !emitted {
+		if errBody != "" {
+			return fmt.Errorf("astrbot: %s", errBody)
+		}
 		return fmt.Errorf("astrbot_empty_response")
 	}
 	return sc.Err()
@@ -473,11 +499,15 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 	}
 
 	var b strings.Builder
+	errBody := ""
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64*1024), astrbotMaxChunks)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if !strings.HasPrefix(line, "data:") {
+			if msg := astrbotErrorBody(line); msg != "" && errBody == "" {
+				errBody = msg
+			}
 			continue
 		}
 		p := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
@@ -494,6 +524,9 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 		b.WriteString(text)
 	}
 	if b.Len() == 0 {
+		if errBody != "" {
+			return "", fmt.Errorf("astrbot: %s", errBody)
+		}
 		return "", fmt.Errorf("astrbot_empty_response")
 	}
 	return b.String(), nil

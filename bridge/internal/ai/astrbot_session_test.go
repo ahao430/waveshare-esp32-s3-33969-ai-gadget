@@ -115,3 +115,33 @@ func TestStorageSessionGensRoundTrip(t *testing.T) {
 		t.Fatalf("round trip: %d/%v", g, per)
 	}
 }
+
+func TestSessionNamespaceV2(t *testing.T) {
+	resetSessionState(nil)
+	// v2 命名空间：旧 gadget-bigfish-* 在服务端绑死在公共 username=gadget
+	// 名下（"session_id belongs to another username"），新 session 必须避开
+	if _, s := astrbotIdentity("bot-a"); !strings.Contains(s, "gadget-sess-bot-a-0") {
+		t.Fatalf("gen0 session must use v2 namespace: %q", s)
+	}
+	ResetBotSession("bot-a")
+	_, s := astrbotIdentity("bot-a")
+	if !strings.Contains(s, "gadget-sess-bot-a-1") {
+		t.Fatalf("rotated session must use v2 namespace: %q", s)
+	}
+	if strings.Contains(s, "bigfish") {
+		t.Fatalf("old namespace leaked: %q", s)
+	}
+}
+
+func TestAstrbotErrorBody(t *testing.T) {
+	got := astrbotErrorBody(`{"status":"error","message":"session_id belongs to another username"}`)
+	if got != "session_id belongs to another username" {
+		t.Fatalf("error body: %q", got)
+	}
+	if astrbotErrorBody(`{"type":"plain","data":"hi"}`) != "" {
+		t.Fatal("normal event must not parse as error")
+	}
+	if astrbotErrorBody("data: {...}") != "" || astrbotErrorBody("") != "" {
+		t.Fatal("non-JSON lines must be ignored")
+	}
+}
