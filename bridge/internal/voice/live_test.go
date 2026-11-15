@@ -83,3 +83,62 @@ func TestZhipuASRLive(t *testing.T) {
 	}
 	t.Logf("transcript: %s", text)
 }
+
+// DeepSeek 语音全家桶真网冒烟（GADGET_VOICE_LIVE=1 + GADGET_DEEPSEEK_KEY）。
+func TestDeepSeekVoiceLive(t *testing.T) {
+	liveEnabled(t)
+	key := os.Getenv("GADGET_DEEPSEEK_KEY")
+	if key == "" {
+		t.Skip("set GADGET_DEEPSEEK_KEY to run deepseek live smoke")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	// TTS：合成 → 16k PCM → 时长/幅度检查
+	pcm, err := deepseekTTS(ctx, key, "你好，这是 DeepSeek 语音合成测试。", "")
+	if err != nil {
+		t.Fatalf("tts: %v", err)
+	}
+	dur := float64(len(pcm)) / 16000
+	if dur < 1.0 || dur > 12.0 {
+		t.Fatalf("tts duration out of range: %.2fs", dur)
+	}
+	var peak int16
+	for i, v := range pcm {
+		if i%997 == 0 && (v > peak || -v > peak) {
+			if v > 0 {
+				peak = v
+			} else {
+				peak = -v
+			}
+		}
+	}
+	if peak < 1000 {
+		t.Fatalf("tts silent: peak=%d", peak)
+	}
+	t.Logf("tts ok: %.2fs peak=%d", dur, peak)
+	if p := os.Getenv("GADGET_DEEPSEEK_TTS_OUT"); p != "" {
+		if err := os.WriteFile(p, wrapWav(pcm), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+
+	// ASR：把刚合成的语音再转写回来（语义正确性人工核对）
+	p := os.Getenv("GADGET_ASR_PCM")
+	if p == "" {
+		t.Log("ASR skipped: set GADGET_ASR_PCM to a 16k mono pcm file")
+		return
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read pcm: %v", err)
+	}
+	text, err := deepseekTranscribe(ctx, key, raw)
+	if err != nil {
+		t.Fatalf("asr: %v", err)
+	}
+	t.Logf("asr text: %s", text)
+	if text == "" {
+		t.Fatal("empty transcript")
+	}
+}

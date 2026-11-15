@@ -15,6 +15,7 @@ package voice
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 	"time"
@@ -33,7 +34,26 @@ type RealInteractor struct {
 	ttsVoice string // Edge-TTS 音色（env EDGE_TTS_VOICE，空=晓晓）
 
 	ttsMu       sync.Mutex
-	ttsBrokenAt time.Time // 零值=从未失败；冷却判断 time.Since(brokenAt) < ttsCooldown
+	ttsBrokenAt time.Time // Edge-TTS 冷却（零值=正常）
+
+	dsMu       sync.Mutex
+	dsBrokenAt time.Time // DeepSeek TTS 冷却
+}
+
+func (r *RealInteractor) dsCooling() bool {
+	r.dsMu.Lock()
+	defer r.dsMu.Unlock()
+	return time.Since(r.dsBrokenAt) < ttsCooldown
+}
+
+func (r *RealInteractor) markDeepSeek(ok bool) {
+	r.dsMu.Lock()
+	defer r.dsMu.Unlock()
+	if ok {
+		r.dsBrokenAt = time.Time{}
+	} else {
+		r.dsBrokenAt = time.Now()
+	}
 }
 
 // ASRKeys 各路 ASR 的 Key 解析器（动态读凭据库/env，保存即生效）。
@@ -44,6 +64,7 @@ type ASRKeys struct {
 	Siliconflow func() string
 	Minimax     func() string
 	Mimo        func() string
+	Deepseek    func() string
 }
 
 func NewRealInteractor(asr ASRKeys, baseURL string, router *ai.Router) *RealInteractor {
@@ -63,6 +84,7 @@ func (r *RealInteractor) pickASR() (string, string) {
 	}
 	all := []cand{
 		{"siliconflow", r.asr.Siliconflow},
+		{"deepseek", r.asr.Deepseek}, // 全家桶：ASR/TTS 同一 Key
 		{"minimax", r.asr.Minimax},
 		{"mimo", r.asr.Mimo},
 		{"zhipu", r.asr.Zhipu},
@@ -102,6 +124,8 @@ func (r *RealInteractor) Transcribe(ctx context.Context, pcmL16 []byte) (string,
 		text, err = minimaxTranscribe(ctx, key, pcmL16)
 	case "mimo":
 		text, err = mimoTranscribe(ctx, key, pcmL16)
+	case "deepseek":
+		text, err = deepseekTranscribe(ctx, key, pcmL16)
 	default:
 		text, err = zhipuTranscribe(ctx, key, r.baseURL, pcmL16)
 	}
@@ -146,13 +170,49 @@ func (r *RealInteractor) markTTS(ok bool) {
 }
 
 func (r *RealInteractor) Synthesize(ctx context.Context, text string) ([]byte, error) {
-	if r.ttsCooling() {
-		return beepWav(text)
+	// 引擎顺序：TTS_PROVIDER 显式指定 > 配了 DeepSeek Key 时优先
+	// DeepSeek TTS（tide/stella 音色）> Edge-TTS（免费）> 哔声占位
+	var order []string
+	switch os.Getenv("TTS_PROVIDER") {
+	case "deepseek":
+		order = []string{"deepseek", "edge"}
+	case "edge":
+		order = []string{"edge"}
+	default:
+		if r.asr.Deepseek != nil && r.asr.Deepseek() != "" {
+			order = []string{"deepseek", "edge"}
+		} else {
+			order = []string{"edge"}
+		}
 	}
-	pcm, err := edgeSynthesize(ctx, text, r.ttsVoice)
-	r.markTTS(err == nil)
-	if err != nil {
-		return beepWav(text) // 音质降级，会话不断
+
+	for _, eng := range order {
+		switch eng {
+		case "deepseek":
+			key := ""
+			if r.asr.Deepseek != nil {
+				key = r.asr.Deepseek()
+			}
+			if key == "" || r.dsCooling() {
+				continue
+			}
+			pcm, err := deepseekTTS(ctx, key, text, deepseekVoiceID())
+			r.markDeepSeek(err == nil)
+			if err == nil {
+				return wrapWav(pcm), nil
+			}
+			log.Printf("voice: tts deepseek failed: %v", err)
+		case "edge":
+			if r.ttsCooling() {
+				continue
+			}
+			pcm, err := edgeSynthesize(ctx, text, r.ttsVoice)
+			r.markTTS(err == nil)
+			if err == nil {
+				return wrapWav(pcm), nil
+			}
+			log.Printf("voice: tts edge failed: %v", err)
+		}
 	}
-	return wrapWav(pcm), nil
+	return beepWav(text) // 音质降级，会话不断
 }

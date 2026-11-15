@@ -21,14 +21,16 @@ const message = ref('')
 
 // 语音识别：配置任一即可；Bridge 选择顺序 硅基流动 → MiniMax → MiMo →
 // 智谱（可用 ASR_PROVIDER 环境变量强制指定）
-const asrProviders = ['siliconflow', 'minimax', 'mimo'] as const
+const asrProviders = ['siliconflow', 'deepseek', 'minimax', 'mimo'] as const
 const providerTitle: Record<string, string> = {
   siliconflow: '硅基流动 SenseVoice',
+  deepseek: 'DeepSeek 语音（ASR + TTS）',
   minimax: 'MiniMax ASR (asr-1.0)',
   mimo: '小米 MiMo ASR (mimo-v2.5-asr)',
 }
 const providerHint: Record<string, string> = {
   siliconflow: '注册 cloud.siliconflow.cn → API 密钥；新账号有免费额度',
+  deepseek: 'platform.deepseek.com → API Keys。同一个 Key 同时用于识别与合成（音色 stella 女 / tide 男）',
   minimax: 'platform.minimax.cn → 账户管理 → 接口密钥',
   mimo: 'mimo.mi.com 控制台创建 API Key',
 }
@@ -110,7 +112,9 @@ async function remove(id: string) {
     <p class="mb-3 text-xs text-dim">
       链路：按住说话 → 设备录音 → <b>这里配的 Key 转写</b> → AstrBot/DeepSeek 回答 →
       Edge-TTS 合成语音 → 设备播放（TTS 免费、无需 Key）。
-      配任意一家即可；Bridge 选择顺序 硅基流动 → MiniMax → MiMo → 智谱。
+      配任意一家即可；Bridge 选择顺序 硅基流动 → DeepSeek → MiniMax → MiMo → 智谱。
+      语音合成默认 Edge-TTS（免费）；配了 DeepSeek Key 会自动优先用 DeepSeek TTS
+      （可用 <code>TTS_PROVIDER=edge</code> 强制回免费 Edge）。
     </p>
 
     <div class="grid grid-cols-1 gap-4 md:grid-cols-3">

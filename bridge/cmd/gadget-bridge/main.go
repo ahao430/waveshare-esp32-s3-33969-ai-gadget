@@ -207,6 +207,7 @@ func main() {
 		Siliconflow: func() string { return resolveAccount("siliconflow").APIKey },
 		Minimax:     func() string { return resolveAccount("minimax").APIKey },
 		Mimo:        func() string { return resolveAccount("mimo").APIKey },
+		Deepseek:    func() string { return resolveAccount("deepseek").APIKey },
 	}, os.Getenv("ZHIPU_BASE_URL"), chatRouter)
 	voiceH := voice.NewHandler(voiceEng)
 
