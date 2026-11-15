@@ -27,27 +27,39 @@ import (
 const ttsCooldown = 10 * time.Minute
 
 type RealInteractor struct {
-	zhipuKey func() string // 动态解析（保存 Key 后无需重启，与预热同语义）
-	baseURL  string        // ZHIPU_BASE_URL（空=国内站）
-	router   *ai.Router
-	ttsVoice string // Edge-TTS 音色（env EDGE_TTS_VOICE，空=晓晓）
+	zhipuKey   func() string // 动态解析（保存 Key 后无需重启，与预热同语义）
+	siliconKey func() string // 硅基流动 ASR（配置后优先于智谱）
+	baseURL    string        // ZHIPU_BASE_URL（空=国内站）
+	router     *ai.Router
+	ttsVoice   string // Edge-TTS 音色（env EDGE_TTS_VOICE，空=晓晓）
 
 	ttsMu       sync.Mutex
 	ttsBrokenAt time.Time // 零值=从未失败；冷却判断 time.Since(brokenAt) < ttsCooldown
 }
 
-func NewRealInteractor(zhipuKey func() string, baseURL string, router *ai.Router) *RealInteractor {
+func NewRealInteractor(zhipuKey, siliconKey func() string, baseURL string,
+	router *ai.Router) *RealInteractor {
 	return &RealInteractor{
-		zhipuKey: zhipuKey,
-		baseURL:  baseURL,
-		router:   router,
-		ttsVoice: os.Getenv("EDGE_TTS_VOICE"),
+		zhipuKey:   zhipuKey,
+		siliconKey: siliconKey,
+		baseURL:    baseURL,
+		router:     router,
+		ttsVoice:   os.Getenv("EDGE_TTS_VOICE"),
 	}
 }
 
 func (r *RealInteractor) Transcribe(ctx context.Context, pcmL16 []byte) (string, error) {
 	if len(pcmL16) == 0 {
 		return "", fmt.Errorf("empty_audio")
+	}
+	// ASR 引擎选择：配置了硅基流动 Key 就用它（新账号免费额度，
+	// 智谱余额不足 429 时的替代）；否则走智谱 GLM-ASR
+	if r.siliconKey != nil && r.siliconKey() != "" {
+		text, err := siliconflowTranscribe(ctx, r.siliconKey(), "", pcmL16)
+		if err != nil {
+			return "", fmt.Errorf("asr(siliconflow): %w", err)
+		}
+		return text, nil
 	}
 	text, err := zhipuTranscribe(ctx, r.zhipuKey(), r.baseURL, pcmL16)
 	if err != nil {

@@ -204,6 +204,7 @@ func main() {
 	// 在 voice 包内作为单测与降级实现。
 	voiceEng := voice.NewRealInteractor(
 		func() string { return resolveAccount("zhipu").APIKey },
+		func() string { return resolveAccount("siliconflow").APIKey },
 		os.Getenv("ZHIPU_BASE_URL"), chatRouter)
 	voiceH := voice.NewHandler(voiceEng)
 

@@ -18,7 +18,12 @@ const editing = ref<string>('') // 正在编辑的 provider id
 const message = ref('')
 const saving = ref(false)
 
-const supported = ['zhipu', 'kimi'] // 恒注册的 provider
+const supported = ['zhipu', 'kimi', 'siliconflow'] // 恒注册的 provider + 语音 ASR
+const providerTitle: Record<string, string> = {
+  zhipu: '智谱 GLM（额度 / 语音 ASR）',
+  kimi: 'Kimi（额度）',
+  siliconflow: '硅基流动（语音 ASR）',
+}
 
 onMounted(() => { load(); loadSubs() })
 
@@ -166,7 +171,7 @@ async function remove(id: string) {
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
     <div v-for="p in supported" :key="p" class="card">
       <div class="mb-3 flex items-center justify-between">
-        <h3 class="font-semibold capitalize">{{ p }}</h3>
+        <h3 class="font-semibold">{{ providerTitle[p] ?? p }}</h3>
         <span class="badge" :class="infoOf(p) ? '!bg-ok/15 !text-ok' : ''">
           {{ infoOf(p) ? `已配置 · ${infoOf(p)!.account_label || '未命名'}` : '未配置' }}
         </span>

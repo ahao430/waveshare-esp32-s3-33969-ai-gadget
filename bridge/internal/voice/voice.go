@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"math"
 	"net/http"
 	"sync/atomic"
@@ -188,6 +189,7 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 
 	text, err := h.eng.Transcribe(ctx, audio)
 	if err != nil {
+		log.Printf("voice: asr failed: %v", err) // 排障：不含密钥/音频内容
 		w.Header().Set("X-Voice-Error", "asr_failed")
 		http.Error(w, `{"error":"asr_failed"}`, http.StatusBadGateway)
 		return
