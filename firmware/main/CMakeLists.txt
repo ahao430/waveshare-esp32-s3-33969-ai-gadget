@@ -12,6 +12,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_keys.c
     ${SIM_SRC_DIR}/ui/ui_launcher.c
     ${SIM_SRC_DIR}/ui/ui_monitor.c
+    ${SIM_SRC_DIR}/ui/icons/icon_embed.c
     ${SIM_SRC_DIR}/ui/ui_settings.c
     ${SIM_SRC_DIR}/ui/ui_statusbar.c
     ${SIM_SRC_DIR}/ui/ui_theme.c
@@ -35,7 +36,7 @@ set(UI_SRC_LIST
 
 idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
     INCLUDE_DIRS "." "${SIM_SRC_DIR}" "${SIM_SRC_DIR}/ui" "${SIM_SRC_DIR}/ui/fonts"
-    "${SIM_SRC_DIR}/data" "${SIM_SRC_DIR}/voice"
+    "${SIM_SRC_DIR}/ui/icons" "${SIM_SRC_DIR}/data" "${SIM_SRC_DIR}/voice"
     PRIV_REQUIRES
         cjson                                   # data_source_bridge.c 解析 Bridge 响应
         waveshare__esp32_s3_touch_amoled_2_16   # BSP（显示/触摸/音频/I2C）

@@ -17,6 +17,10 @@
 #include "ui_gesture.h"
 #include "ui_theme.h"
 
+#ifdef ESP_PLATFORM
+#include "icon_embed.h" /* 真机图标：PNG 嵌入固件（gen_icon_embed.sh） */
+#endif
+
 static lv_obj_t *g_launcher;
 static lv_obj_t *g_lbl_clock;
 static lv_obj_t *g_lbl_date;
@@ -309,13 +313,31 @@ void ui_launcher_build(void)
             lv_obj_add_event_cb(tile_btn, tile_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)def->id);
 
             const int ICON = 108;
-            /* 素材缺位时回退符号占位（assets/icons/ 自备图标体系） */
-            bool has_icon = false;
+            /* 素材缺位时回退符号占位（assets/icons/ 自备图标体系）。
+             * 真机：PNG 编入固件（icon_embed 表，esp_lv_decoder 内存解码
+             * ——"A:" 文件协议仅模拟器有）；模拟器：文件存在性探测。 */
+            const void *icon_src = NULL;
+#ifdef ESP_PLATFORM
+            if (def->avatar) {
+                const char *slash = strrchr(def->avatar, '/');
+                const char *dot = strrchr(def->avatar, '.');
+                if (slash && dot && dot > slash) {
+                    char key[24];
+                    size_t n = (size_t)(dot - slash - 1);
+                    if (n > 0 && n < sizeof(key)) {
+                        memcpy(key, slash + 1, n);
+                        key[n] = '\0';
+                        icon_src = ui_icon_find(key);
+                    }
+                }
+            }
+#else
             if (def->avatar) {
                 FILE *f = fopen(def->avatar + (strncmp(def->avatar, "A:", 2) == 0 ? 2 : 0), "rb");
-                if (f) { fclose(f); has_icon = true; }
+                if (f) { fclose(f); icon_src = def->avatar; }
             }
-            if (has_icon) {
+#endif
+            if (icon_src) {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
                 lv_obj_set_size(holder, ICON, ICON);
                 lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 10);
@@ -332,7 +354,7 @@ void ui_launcher_build(void)
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
-                lv_image_set_src(img, def->avatar);
+                lv_image_set_src(img, icon_src);
                 /* 按源图实际宽度自适应缩放（88 头像/更大自备图标均可） */
                 lv_obj_update_layout(img);
                 int32_t src_w = lv_obj_get_width(img);
