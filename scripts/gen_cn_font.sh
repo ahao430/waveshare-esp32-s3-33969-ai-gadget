@@ -98,4 +98,55 @@ for sz in $SIZES; do
     -o "$OUT_DIR/font_cn_${sz}.c"
 done
 
-echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c（请重编模拟器）"
+# ---- 动态中文回退字体 ----
+# 机器人名等"服务器/用户自定义"中文不受源码字面量约束，常含 GB2312
+# 一级区以外的字（如实测：魅=GBK f7c8、薰=deb9）→ 单列 GBK 二级汉字
+# 区（0xD8-0xF7）小字体，14px / bpp2（约 150KB，flash 预算内），挂在
+# 16/20px 主字体的 fallback 上：主字体没有的字自动由它渲染，不再豆腐。
+echo "== 生成动态名回退字体（GBK 二级区，14px bpp2）"
+DYNSYMS=$(python3 - <<'PYEOF'
+import sys
+chars = set()
+# 严格走 gb2312 解码：只收 GB2312 二级汉字（3008 个简体字）。
+# 若用 gbk 解码同一区间会混入 7000+ 繁体/扩展字，固件超 105KB（实测）。
+for hi in range(0xD8, 0xF8):
+    for lo in range(0xA1, 0xFF):
+        try:
+            chars.add(bytes([hi, lo]).decode("gb2312"))
+        except UnicodeDecodeError:
+            pass
+sys.stdout.write("".join(sorted(chars)))
+PYEOF
+)
+npx --yes lv_font_conv \
+  --font "$FONT_TTF" \
+  --symbols "$DYNSYMS" \
+  --size 14 --bpp 2 --no-compress --no-kerning \
+  --format lvgl --lv-include "lvgl.h" \
+  --lv-font-name "lv_font_cn_dyn_14" \
+  -o "$OUT_DIR/font_cn_dyn_14.c"
+
+echo "== 给 16/20px 挂 fallback"
+python3 - "$OUT_DIR" <<'PYEOF'
+import sys, pathlib
+out = pathlib.Path(sys.argv[1])
+for size in ("16", "20"):
+    p = out / f"font_cn_{size}.c"
+    s = p.read_text(encoding="utf-8")
+    if "lv_font_cn_dyn_14" in s:
+        continue
+    # extern 必须在 #ifdef LV_LVGL_H_INCLUDE_SIMPLE 之外：固件走 #else
+    # 分支，写进 #ifdef 里声明不可见（真机编译 'undeclared' 实测）
+    # 必须在 include 之后（否则 lv_font_t 未定义）、且不放进
+    # #ifdef LV_LVGL_H_INCLUDE_SIMPLE（固件走 #else 分支不可见）
+    s = s.replace(f'#ifndef LV_FONT_CN_{size}',
+                  f'extern const lv_font_t lv_font_cn_dyn_14; /* 动态中文回退 */\n\n#ifndef LV_FONT_CN_{size}', 1)
+    # 生成器在结构体末尾自带 `.fallback = NULL,`——必须替换而不是在开头
+    # 插入（后写的字段覆盖前面，插在开头会被 NULL 覆盖 → 回退不生效）
+    s = s.replace(".fallback = NULL,",
+                  ".fallback = &lv_font_cn_dyn_14,")
+    p.write_text(s, encoding="utf-8")
+    print(f"  patched font_cn_{size}.c")
+PYEOF
+
+echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c + font_cn_dyn_14.c（请重编模拟器）"

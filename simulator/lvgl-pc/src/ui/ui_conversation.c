@@ -13,6 +13,7 @@
  */
 #include <math.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -498,10 +499,122 @@ static void *chat_reset_worker(void *arg)
     return NULL;
 }
 
-/* AstrBot 多实例切换：点标题 → 取列表 → 选下一个 → PUT 生效。
- * 后台线程（HTTP 不占 LVGL 任务）；切换后 Bridge 路由回落即用新实例
- * （语音/文本对话都跟随，TTS 音色也跟随实例设置）。 */
-static void *bot_switch_worker(void *arg)
+/* ---- AstrBot 多实例：点标题弹"选择机器人"面板 ---- */
+#define BOT_PICK_MAX 8
+static char s_pick_id[BOT_PICK_MAX][64];
+static char s_pick_label[BOT_PICK_MAX][32];
+static int s_pick_n;
+static lv_obj_t *g_picker_mask;
+
+static void picker_close_cb(lv_event_t *e)
+{
+    lv_obj_t *mask = lv_event_get_user_data(e);
+    if (mask) lv_obj_delete(mask);
+    if (g_picker_mask == mask) g_picker_mask = NULL;
+}
+
+static void bot_thread_start(void *(*fn)(void *), void *arg);
+static void bot_sync_start(void);
+
+/* 选中某只机器人：后台 PUT（HTTP 不占 LVGL 任务），回来后改标题+关面板 */
+static void *bot_pick_apply_worker(void *arg)
+{
+    int idx = (int)(intptr_t)arg;
+    if (idx < 0 || idx >= s_pick_n) return NULL;
+    char id[64], label[32];
+    snprintf(id, sizeof(id), "%s", s_pick_id[idx]);
+    snprintf(label, sizeof(label), "%s", s_pick_label[idx]);
+
+    int rc = ds_chat_set_active(id);
+    ui_lock();
+    if (rc == 0) {
+        snprintf(g_bot_label, sizeof(g_bot_label), "%s", label);
+        if (g_title_lbl) lv_label_set_text(g_title_lbl, g_bot_label);
+        if (g_status_lbl) lv_label_set_text(g_status_lbl, "已切换机器人");
+    } else if (g_status_lbl) {
+        lv_label_set_text(g_status_lbl, "切换失败（Bridge 未响应）");
+    }
+    if (g_picker_mask) {
+        lv_obj_delete(g_picker_mask);
+        g_picker_mask = NULL;
+    }
+    ui_unlock();
+    return NULL;
+}
+
+static void picker_item_cb(lv_event_t *e)
+{
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    bot_thread_start(bot_pick_apply_worker, (void *)(intptr_t)idx);
+}
+
+/* 建面板（调用方持显示锁）：列全部实例，当前项打勾。 */
+static void bot_picker_build(const char *list, const char *cur_id)
+{
+    s_pick_n = 0;
+    static char tmp[512];
+    snprintf(tmp, sizeof(tmp), "%s", list);
+    char *save = NULL;
+    for (char *line = strtok_r(tmp, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        if (s_pick_n >= BOT_PICK_MAX) break;
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        snprintf(s_pick_id[s_pick_n], sizeof(s_pick_id[0]), "%s", line);
+        snprintf(s_pick_label[s_pick_n], sizeof(s_pick_label[0]), "%s", tab + 1);
+        s_pick_n++;
+    }
+
+    lv_obj_t *mask = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(mask, 480, 480);
+    lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_color(mask, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(mask, 0, 0);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    g_picker_mask = mask;
+
+    lv_obj_t *title = ui_label(mask, "选择机器人", &lv_font_cn_20, UI_TEXT);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 14);
+
+    lv_obj_t *listbox = lv_obj_create(mask);
+    lv_obj_set_size(listbox, 400, 330);
+    lv_obj_align(listbox, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_set_style_bg_opa(listbox, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(listbox, 0, 0);
+    lv_obj_set_style_pad_all(listbox, 4, 0);
+    lv_obj_set_flex_flow(listbox, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(listbox, 8, 0);
+
+    for (int i = 0; i < s_pick_n; i++) {
+        bool on = (cur_id && strcmp(s_pick_id[i], cur_id) == 0);
+        lv_obj_t *btn = lv_button_create(listbox);
+        lv_obj_set_size(btn, LV_PCT(100), 52);
+        ui_style_card(btn);
+        lv_obj_set_style_radius(btn, 16, 0);
+        if (on) lv_obj_set_style_border_color(btn, UI_ACCENT, 0);
+        lv_obj_add_event_cb(btn, picker_item_cb, LV_EVENT_CLICKED,
+                            (void *)(intptr_t)i);
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s%.24s",
+                 on ? LV_SYMBOL_OK "  " : "", s_pick_label[i]);
+        lv_obj_t *l = ui_label(btn, buf, &lv_font_cn_16, on ? UI_ACCENT : UI_TEXT);
+        lv_obj_center(l);
+    }
+
+    lv_obj_t *close = lv_button_create(mask);
+    lv_obj_set_size(close, 160, 48);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 0, -16);
+    ui_style_card(close);
+    lv_obj_set_style_radius(close, 16, 0);
+    lv_obj_add_event_cb(close, picker_close_cb, LV_EVENT_CLICKED, mask);
+    lv_obj_t *cl = ui_label(close, "关闭", &lv_font_cn_16, UI_TEXT);
+    lv_obj_center(cl);
+}
+
+/* 点标题：后台拉列表+当前 → 持锁建面板 */
+static void *bot_picker_worker(void *arg)
 {
     (void)arg;
     static char list[512];
@@ -514,50 +627,8 @@ static void *bot_switch_worker(void *arg)
         return NULL;
     }
     (void)ds_chat_active_id(cur, sizeof(cur));
-
-    char next_id[64] = {0}, next_label[32] = {0};
-    char first_id[64] = {0}, first_label[32] = {0};
-    bool take_next = (cur[0] == '\0');
-    char tmp[sizeof(list)];
-    snprintf(tmp, sizeof(tmp), "%s", list);
-    char *save = NULL;
-    for (char *line = strtok_r(tmp, "\n", &save); line;
-         line = strtok_r(NULL, "\n", &save)) {
-        char *tab = strchr(line, '\t');
-        if (!tab) continue;
-        *tab = '\0';
-        const char *label = tab + 1;
-        if (!first_id[0]) {
-            snprintf(first_id, sizeof(first_id), "%s", line);
-            snprintf(first_label, sizeof(first_label), "%s", label);
-        }
-        if (take_next) {
-            snprintf(next_id, sizeof(next_id), "%s", line);
-            snprintf(next_label, sizeof(next_label), "%s", label);
-            take_next = false;
-        }
-        if (strcmp(line, cur) == 0) take_next = true;
-    }
-    if (!next_id[0]) { /* 当前是最后一个（或未知）→ 回到第一个 */
-        snprintf(next_id, sizeof(next_id), "%s", first_id);
-        snprintf(next_label, sizeof(next_label), "%s", first_label);
-    }
-
-    char msg[64];
-    if (strcmp(next_id, cur) == 0) {
-        snprintf(msg, sizeof(msg), "只有「%s」一个机器人", next_label);
-    } else if (ds_chat_set_active(next_id) == 0) {
-        snprintf(msg, sizeof(msg), "已切换：%s", next_label);
-    } else {
-        snprintf(msg, sizeof(msg), "切换失败（Bridge 未响应）");
-    }
-
     ui_lock();
-    if (next_label[0] && g_title_lbl) {
-        snprintf(g_bot_label, sizeof(g_bot_label), "%s", next_label);
-        lv_label_set_text(g_title_lbl, g_bot_label);
-    }
-    if (g_status_lbl) lv_label_set_text(g_status_lbl, msg);
+    bot_picker_build(list, cur);
     ui_unlock();
     return NULL;
 }
@@ -590,25 +661,25 @@ static void *bot_sync_worker(void *arg)
     return NULL;
 }
 
-static void bot_thread_start(void *(*fn)(void *))
+static void bot_thread_start(void *(*fn)(void *), void *arg)
 {
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, 12 * 1024); /* HTTP + cJSON */
-    if (pthread_create(&tid, &attr, fn, NULL) == 0) {
+    if (pthread_create(&tid, &attr, fn, arg) == 0) {
         pthread_detach(tid);
     }
     pthread_attr_destroy(&attr);
 }
 
-static void bot_switch_start(void) { bot_thread_start(bot_switch_worker); }
-static void bot_sync_start(void) { bot_thread_start(bot_sync_worker); }
+static void bot_sync_start(void) { bot_thread_start(bot_sync_worker, NULL); }
+static void bot_picker_start(void) { bot_thread_start(bot_picker_worker, NULL); }
 
-static void title_switch_cb(lv_event_t *e)
+static void title_pick_cb(lv_event_t *e)
 {
     (void)e;
-    bot_switch_start();
+    bot_picker_start();
 }
 
 /* 清空当前 App 对话历史（历史弹窗里的"清空"按钮）：
@@ -691,12 +762,11 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
     g_title_lbl = title_lbl;
     if (app_id == UI_APP_CHAT) {
-        /* AstrBot：标题即"当前机器人"入口——点击切到下一个实例
-         * （多机器人配置后设备端可切换；切换值落 Bridge，语音/文本
-         * 都跟随，重启保持） */
+        /* AstrBot：标题显示当前机器人，点它弹出"选择机器人"面板
+         * （多实例显式选择；切换值落 Bridge，语音/文本都跟随，重启保持） */
         if (g_bot_label[0]) lv_label_set_text(title_lbl, g_bot_label);
         lv_obj_add_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(title_lbl, title_switch_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_add_event_cb(title_lbl, title_pick_cb, LV_EVENT_CLICKED, NULL);
         bot_sync_start(); /* 拉一次当前机器人名（异步，不阻塞首帧） */
     }
 
@@ -735,6 +805,13 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_center(vicon);
 
     companion_create(scr, app_id, 80);
+
+    /* headless 验收钩子：GADGET_DEMO_BOT_PICK=1 进 AstrBot 页即弹
+     * 机器人选择面板（快照回归用；真机无此环境变量） */
+    if (app_id == UI_APP_CHAT && getenv("GADGET_DEMO_BOT_PICK") &&
+        getenv("GADGET_DEMO_BOT_PICK")[0] == '1') {
+        bot_picker_start();
+    }
 
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
     lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 262);
