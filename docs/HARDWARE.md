@@ -324,9 +324,13 @@
 - **对照实验**：完全移除 hangprobe 后复位 8 轮，仍 4 轮楔死 → 探针不是
   诱因，缺陷与探针无关（概率仍 ~50%）；
 - **自愈方案（已实现）**：hangprobe 注册任务看门狗（每 5s 喂），楔死时
-  TWDT 15s（`CONFIG_ESP_TASK_WDT_TIMEOUT_S=15` + `PANIC`）→ panic 重启。
-  实测：8.4s 楔死 → 28.5s 自动重启（`task_wdt: Aborting` + `rst:0xc`），
-  无需人工断电；坏启动后大概率下一次正常。
+  TWDT 10s（`CONFIG_ESP_TASK_WDT_TIMEOUT_S=10` + `PANIC`）→ panic 重启。
+  实测：8.4s 楔死 → 23.5s 自动重启，无需人工断电；坏启动后大概率下次正常。
+- **误杀修复（2026-11-15）**：早期判据是"连续 3 次拿不到锁"，但低内存下
+  重绘变慢会让三次采样都撞上 BUSY——`lvgl alive: tick` 仍在推进，属于
+  **误杀**（用户实测"又重启了"即此）。改为 **LVGL 心跳判据**：
+  `saver_tick`（LVGL 定时器，1s）累加 `g_lvgl_beat`，hangprobe 连续 15s
+  看不到心跳推进才重启。正常重绘再慢也不会误杀。
 - 仍待 root-cause：阻塞点的堆栈（需在楔死时用 TWDT panic 的 backtrace
   或 JTAG 抓 lvgl 任务栈）。
 

@@ -122,6 +122,9 @@ static void selftest_botpick_task(void *arg)
 }
 #endif
 
+/* LVGL 心跳（定义在 saver_tick；此处前置声明供看门狗使用） */
+static volatile uint32_t g_lvgl_beat;
+
 /* LVGL 探针 + 自愈看门狗。
  * 背景：启动期显示管线偶发卡死（约 30-50% 复位概率，HARDWARE §2.10：
  * lvgl 任务持锁卡在 flush/渲染内部），此前只能人工断电。这里连续
@@ -134,6 +137,7 @@ static void hang_probe_task(void *arg)
     static char tbuf[1024];
     bool net_done = false;
     int busy_streak = 0;
+    uint32_t last_beat = 0;
     /* 注册任务看门狗：若本任务自己卡死（实测：楔死时它卡在
      * esp_lv_adapter_lock 里不再打印），TWDT 30s 后 panic 重启。 */
     esp_task_wdt_add(NULL);
@@ -147,22 +151,26 @@ static void hang_probe_task(void *arg)
         /* 非阻塞 try-lock：带超时的锁在楔死时会把探针自己挂住
          * （200ms 那次实测连 probe#3 都出不来），try-lock 才能持续探测 */
         esp_err_t r = esp_lv_adapter_lock(0);
-        ESP_LOGI(TAG, "probe#%d lvgl_lock=%s heap_int=%u", i,
+        ESP_LOGI(TAG, "probe#%d lvgl_lock=%s heap_int=%u beat=%u", i,
                  r == ESP_OK ? "FREE" : "BUSY",
-                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-        if (r == ESP_OK) {
-            esp_lv_adapter_unlock();
-            busy_streak = 0;
-        } else {
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)g_lvgl_beat);
+        if (r == ESP_OK) esp_lv_adapter_unlock();
+
+        /* 判据是心跳是否推进（不是锁是否 BUSY）：LVGL 定时器 1s 一次，
+         * 连续 15s 没推进才算真楔死 → 重启自愈。 */
+        if (g_lvgl_beat == last_beat) {
             busy_streak++;
-            /* 只在锁被长期占用时 dump 任务表 */
-            vTaskList(tbuf);
-            ESP_LOGW(TAG, "tasks:\nName\tState\tPrio\tStack\tNum\n%s", tbuf);
             if (busy_streak >= 3) {
-                ESP_LOGE(TAG, "LVGL lock stuck %ds — watchdog restart (HARDWARE §2.10)",
+                vTaskList(tbuf);
+                ESP_LOGE(TAG, "LVGL heartbeat stuck %ds — watchdog restart (HARDWARE §2.10)",
                          busy_streak * 5);
+                ESP_LOGW(TAG, "tasks:\nName\tState\tPrio\tStack\tNum\n%s", tbuf);
                 esp_restart();
             }
+        } else {
+            last_beat = g_lvgl_beat;
+            busy_streak = 0;
         }
     }
 }
@@ -377,9 +385,13 @@ static void heap_report(const char *where)
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
 }
 
+/* LVGL 心跳：本回调跑在 LVGL 任务里。看门狗用它判断"真卡死"还是
+ * "采样瞬间恰好在重绘"——只看锁 BUSY 会误杀（2026-11-15 实测：
+ * 低内存下重绘变慢，三次采样都撞上 BUSY，但 lvgl alive tick 仍在推进）。 */
 static void saver_tick(lv_timer_t *t)
 {
     (void)t;
+    g_lvgl_beat++;
     battery_status_t st = power_manager_snapshot();
 
     static int beat = 0;
