@@ -45,7 +45,7 @@ static bool mock_ds_refresh(gadget_state_t *st)
     st->subs[1] = (ds_subscription_t){0};
     snprintf(st->subs[1].name, sizeof(st->subs[1].name), "DeepSeek");
     snprintf(st->subs[1].plan, sizeof(st->subs[1].plan), "官方余额（按量计费）");
-    snprintf(st->subs[1].balance, sizeof(st->subs[1].balance), "¥110.35");
+    snprintf(st->subs[1].balance, sizeof(st->subs[1].balance), "110.35");
     st->subs[1].valid = true;
 
     /* 演示服务器首刷填充（g_state 零初值——真机 bridge 无配置显示空态，

@@ -234,7 +234,16 @@ onMounted(() => {
   </p>
 
   <div class="card">
-    <h3 class="mb-1 font-semibold">{{ editingId ? '编辑订阅' : '订阅实例' }}</h3>
+    <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+      <h3 class="font-semibold">{{ editingId ? '编辑订阅' : '订阅实例' }}</h3>
+      <!-- 排序保存：调整后高亮（原来藏在列表下方且默认 disabled，几乎看不见） -->
+      <div v-if="subs.length > 1" class="flex items-center gap-2">
+        <span v-if="orderDirty" class="text-xs text-warn">顺序已调整（设备订阅页按此顺序显示）</span>
+        <button class="btn !px-3 !py-1 text-xs" :disabled="orderBusy || !orderDirty" @click="saveOrder">
+          {{ orderBusy ? '保存中…' : '保存排序' }}
+        </button>
+      </div>
+    </div>
     <p class="mb-3 text-xs text-dim">
       设备端订阅页显示这里的配置；无任何配置时设备显示"请添加订阅"。
       中转站类型（GPT/Claude/MiniMax/MiMo/NewAPI）需填站点 Base URL，其余留空走官方端点。
@@ -276,13 +285,7 @@ onMounted(() => {
         </div>
       </div>
     </div>
-    <div v-if="subs.length > 1" class="mt-2 flex items-center gap-2">
-      <button class="btn-ghost !px-3 !py-1" :disabled="orderBusy || !orderDirty" @click="saveOrder">
-        {{ orderBusy ? '保存中…' : '保存排序' }}
-      </button>
-      <span v-if="orderDirty" class="text-xs text-warn">顺序已调整（设备订阅页按此顺序显示，需保存）</span>
-    </div>
-    <div class="mt-3 flex flex-wrap items-end gap-2">
+        <div class="mt-3 flex flex-wrap items-end gap-2">
       <select v-model="subForm.kind" class="input !w-auto" :disabled="!!editingId" @change="onKindChange">
         <option v-for="k in subKinds" :key="k" :value="k">{{ subKindNames[k] }}</option>
       </select>

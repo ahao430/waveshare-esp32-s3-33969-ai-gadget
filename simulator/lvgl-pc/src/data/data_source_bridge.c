@@ -262,7 +262,10 @@ static void fetch_subscriptions(gadget_state_t *st)
             if (cJSON_IsString(plan)) {
                 strncpy(s->plan, plan->valuestring, sizeof(s->plan) - 1);
             }
-            /* 余额型（DeepSeek 等按量计费）：credits 首条 → 余额文本 */
+            /* 余额型（DeepSeek 等按量计费）：credits 首条 → 余额文本。
+             * 不显示货币符号：montserrat 字体无 ¥（U+00A5）会渲染成豆腐块；
+             * 单位是 CNY 时只留数字（副题"账户余额"已表意），其他币种
+             * 用 ASCII 单位前缀。 */
             const cJSON *credits = cJSON_GetObjectItem(snap, "credits");
             const cJSON *c0 = cJSON_IsArray(credits) ? cJSON_GetArrayItem(credits, 0) : NULL;
             if (c0) {
@@ -270,7 +273,7 @@ static void fetch_subscriptions(gadget_state_t *st)
                 const cJSON *unit = cJSON_GetObjectItem(c0, "unit");
                 if (cJSON_IsNumber(bal)) {
                     const char *u = cJSON_IsString(unit) ? unit->valuestring : "";
-                    if (strcmp(u, "CNY") == 0) u = "¥";
+                    if (strcmp(u, "CNY") == 0) u = "";
                     snprintf(s->balance, sizeof(s->balance), "%s%.2f", u, bal->valuedouble);
                 }
             }
