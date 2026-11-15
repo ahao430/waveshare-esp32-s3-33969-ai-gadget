@@ -76,7 +76,7 @@ static void launcher_swipe_timer_cb(lv_timer_t *t)
             if (nxt < 0 || nxt >= pages) return; /* 边界：不动 */
             s_swipe_consumed = true;             /* 抑制本次点击 */
             s_last_page = nxt;
-            lv_tileview_set_tile_by_index(s_tileview, (uint32_t)nxt, 0, LV_ANIM_ON);
+            lv_tileview_set_tile_by_index(s_tileview, (uint32_t)nxt, 0, LV_ANIM_OFF);
         }
     }
 }

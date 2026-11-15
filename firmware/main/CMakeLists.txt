@@ -47,3 +47,6 @@ idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
         esp_timer                               # esp_timer_get_time
         esp_driver_gpio esp_driver_i2c          # KEY3 ISR / I2C 扫描探针
         lwip)                                   # esp_sntp 对时
+
+# 临时排障：连续翻页压测（GADGET_STRESS_ANIM=0 带动画复现花屏）
+target_compile_definitions(${COMPONENT_LIB} PRIVATE GADGET_STRESS_FLIP GADGET_STRESS_ANIM=0)

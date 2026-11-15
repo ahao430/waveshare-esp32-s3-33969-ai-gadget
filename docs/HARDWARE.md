@@ -160,6 +160,10 @@
 - **桌面磁贴打开判定用按下/抬起位移**（≤10px 且 ≤600ms，且需
   `lv_indev_get_press_moved()==false`）：LV_EVENT_CLICKED 在 tileview
   横滑后仍会误发（滑动时误开 App，用户实测三轮回馈）。
+- **翻页瞬切，不做全屏滑动动画**（2026-11-15，用户实测花屏）：每次
+  翻页动画要连刷 480×360（≈345KB/帧 ×12 帧），连续滑动会灌爆 QSPI
+  DMA 队列 → 花屏+卡死（同坑#2 机理）。桌面翻页改为
+  `set_tile_by_index(..., LV_ANIM_OFF)` 单帧切换。
 - **性能配置必须对齐官方 adapter README**（2026-11-15，重大发现）：
   本项目固件此前是 `-Og + 160MHz + 单绘制单元 + 33ms 刷新 + LV_OS_NONE`，
   而官方 `examples/esp-idf/02_lvgl_demo_v9` 与 esp_lvgl_adapter README
