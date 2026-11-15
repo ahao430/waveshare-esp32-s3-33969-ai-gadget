@@ -108,8 +108,12 @@ func serveAstrBotChat(w http.ResponseWriter, body []byte, u Upstream, clientGone
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}
-		typ, text := extractAstrBotEvent(payload)
-		// complete 是全量收尾（与增量 plain 重复）；已有输出则跳过
+		typ, chain, text := extractAstrBotEvent(payload)
+		// 思考链（chain_type=reasoning）不进正文；complete 是全量收尾
+		// （与增量 plain 重复），已有输出则跳过
+		if isReasoningEvent(typ, chain) {
+			continue
+		}
 		if typ == "complete" && emitted {
 			continue
 		}
@@ -125,19 +129,26 @@ func serveAstrBotChat(w http.ResponseWriter, body []byte, u Upstream, clientGone
 	return nil
 }
 
-// extractAstrBotEvent 返回 (事件类型, 文本)。类型用于去重：AstrBot 先发
-// 增量 plain 事件、最后又发一条 complete（全量），都拼会重复两遍。
-func extractAstrBotEvent(payload string) (string, string) {
-	typ := ""
+// extractAstrBotEvent 返回 (事件类型, 链类型, 文本)。
+// 实测（2026-11-15 用户实例）：思考与正文都是 type=plain 增量，区别在
+// chain_type 字段——"reasoning"=模型思考链，null=正文；complete 为全量
+// 收尾（只含正文）。早期只看 type 白名单（reasoning/thinking…）从来没
+// 匹配上，思考增量全部被当正文发给设备念出来——这就是"总把思考读出来"
+// 的根因。
+func extractAstrBotEvent(payload string) (string, string, string) {
+	typ, chain := "", ""
 	if strings.HasPrefix(strings.TrimSpace(payload), "{") {
 		var probe map[string]any
 		if json.Unmarshal([]byte(payload), &probe) == nil {
 			if t, ok := probe["type"].(string); ok {
 				typ = t
 			}
+			if c, ok := probe["chain_type"].(string); ok {
+				chain = c
+			}
 		}
 	}
-	return typ, extractAstrBotText(payload)
+	return typ, chain, extractAstrBotText(payload)
 }
 
 // extractAstrBotText 宽容提取 SSE 事件里的文本：JSON 时依次找
@@ -314,16 +325,16 @@ func astrbotStream(ctx context.Context, u Upstream, messages []ChatMessage,
 		if p == "" || p == "[DONE]" {
 			continue
 		}
-		typ, text := extractAstrBotEvent(p)
-		if debugEvents && !seen[typ] {
-			seen[typ] = true
+		typ, chain, text := extractAstrBotEvent(p)
+		if debugEvents && !seen[typ+"/"+chain] {
+			seen[typ+"/"+chain] = true
 			preview := text
 			if len(preview) > 60 {
 				preview = preview[:60]
 			}
-			log.Printf("astrbot: event type=%q preview=%q", typ, preview)
+			log.Printf("astrbot: event type=%q chain=%q preview=%q", typ, chain, preview)
 		}
-		if isReasoningEvent(typ) {
+		if isReasoningEvent(typ, chain) {
 			continue
 		}
 		if typ == "complete" && emitted {
@@ -343,9 +354,14 @@ func astrbotStream(ctx context.Context, u Upstream, messages []ChatMessage,
 	return sc.Err()
 }
 
-// isReasoningEvent：模型的思维链事件（不同版本命名不同）。
-// 命中即丢弃——语音链路只念正文。
-func isReasoningEvent(typ string) bool {
+// isReasoningEvent：模型的思维链事件。主判据是 chain_type=reasoning
+// （实测形态：type=plain + chain_type=reasoning 的增量）；type 名单是
+// 对其他版本命名的防御。
+func isReasoningEvent(typ, chain string) bool {
+	if c := strings.ToLower(strings.TrimSpace(chain)); c != "" {
+		return c == "reasoning" || c == "reasoning_content" ||
+			c == "thinking" || c == "think" || c == "analysis"
+	}
 	switch strings.ToLower(typ) {
 	case "reasoning", "reasoning_content", "thinking", "think", "analysis":
 		return true
@@ -407,7 +423,10 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 		if p == "" || p == "[DONE]" {
 			continue
 		}
-		typ, text := extractAstrBotEvent(p)
+		typ, chain, text := extractAstrBotEvent(p)
+		if isReasoningEvent(typ, chain) {
+			continue // 思考链不进正文（非流式拼全量同样要滤）
+		}
 		if typ == "complete" && b.Len() > 0 {
 			continue // 全量收尾与增量重复
 		}

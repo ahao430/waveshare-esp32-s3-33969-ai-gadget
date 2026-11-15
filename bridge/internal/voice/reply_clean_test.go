@@ -53,11 +53,11 @@ func TestSanitizeStripsMarkdown(t *testing.T) {
 
 func TestStripParenNotes(t *testing.T) {
 	cases := map[string]string{
-		"（笑着）今天有点冷。":              "今天有点冷。",
-		"带伞（认真）穿厚点。":              "带伞穿厚点。",
-		"半角也要去(thinking)掉。":         "半角也要去掉。",
-		"落单右括号)保留。":                 "落单右括号)保留。",
-		"没有括号的句子。":                  "没有括号的句子。",
+		"（笑着）今天有点冷。":        "今天有点冷。",
+		"带伞（认真）穿厚点。":        "带伞穿厚点。",
+		"半角也要去(thinking)掉。": "半角也要去掉。",
+		"落单右括号)保留。":         "落单右括号)保留。",
+		"没有括号的句子。":          "没有括号的句子。",
 	}
 	for in, want := range cases {
 		if got := stripParenNotes(in); got != want {
@@ -78,6 +78,14 @@ func TestTtsSpeakTextSkipsReasoningAndParens(t *testing.T) {
 	// 带英文品牌名的正常中文句：照念
 	if got := ttsSpeakText("用 DeepSeek 查的，准没错。"); got == "" {
 		t.Fatalf("normal sentence with brand dropped")
+	}
+	// 星号舞台指示（RP 人设常见）：与括号同语义，只上屏不念
+	if got := ttsSpeakText("*凑近耳边* 我们去看电影吧。"); got != "我们去看电影吧。" {
+		t.Fatalf("asterisk note should be stripped, got %q", got)
+	}
+	// 括号+星号混用：都剥
+	if got := ttsSpeakText("（微笑）*拉起你的手* 走啦。"); got != "走啦。" {
+		t.Fatalf("mixed notes should be stripped, got %q", got)
 	}
 }
 

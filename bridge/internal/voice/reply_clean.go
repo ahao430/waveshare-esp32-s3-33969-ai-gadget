@@ -158,9 +158,34 @@ func isLikelyReasoning(s string) bool {
 	return letters >= 12 && han*10 < len(runes)*3
 }
 
+// stripAsteriskNotes 去掉成对星号及其内容（*她笑了笑* 这类 RP 舞台
+// 指示，与括号同语义：只上屏不朗读）。必须在 stripMarkdown 之前跑——
+// 后者把星号删掉后就只剩纯文本动作描写，无从辨认了。
+func stripAsteriskNotes(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '*':
+			if depth > 0 {
+				depth--
+			} else {
+				depth++
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
+}
+
 // ttsSpeakText 单句 → 朗读文本；空串 = 这句不念。
 func ttsSpeakText(s string) string {
 	s = stripParenNotes(s)
+	s = stripAsteriskNotes(s)
 	s = stripMarkdown(s)
 	s = strings.TrimSpace(s)
 	if s == "" || isLikelyReasoning(s) {

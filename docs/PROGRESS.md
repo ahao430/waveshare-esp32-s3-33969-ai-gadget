@@ -108,6 +108,7 @@
 | 电源管理方案 | ✅ | POWER_MANAGEMENT.md（前台独占/按能力后台/功耗测试 T01-T13） |
 | 订阅实例动态配置 | ✅ | Bridge subscriptions CRUD+聚合快照；Web 配置页；设备空态/横滑 |
 | AstrBot 对接 | ✅ | 大肥鱼对话路由 bot 实例（SSE 适配层）；Web kind 下拉 |
+| AstrBot 思考链过滤 | ✅ | 实测事件协议：思考与正文同为 type=plain 增量，区分字段是 chain_type（reasoning=思考 / null=正文）——旧的 type 白名单从未命中，思考一直被当正文念；三条消费路径（文字流式/语音流式/语音非流式）统一按 chain_type 过滤。真网 e2e：同一提问修复前 140+ 条英文思考事件，修复后设备收到 177 汉字 0 英文字母 |
 | 交互范式统一 | ✅ | 一屏四格横滑+页点；上滑返回；按键短按映射（ui_keys 分发）；ui_gesture 公共件 |
 | 素材管线 | ✅ | PNG 序列帧 290 帧（companions/ 规范目录）；companion 帧播放器 |
 | 语音崩溃修复 | ✅ | chunked 块 >8KB 写爆栈（read_chunked_body 分片）；GADGET_DEMO_VOICE 回归钩子 |
