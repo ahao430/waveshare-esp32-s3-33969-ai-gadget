@@ -248,18 +248,20 @@ void ui_launcher_build(void)
 
     /* ---- 状态栏（定稿图：左侧大时间+日期，右侧信号+电池） ---- */
     lv_obj_t *bar = lv_obj_create(g_launcher);
-    lv_obj_set_size(bar, LV_PCT(100), 64);
+    lv_obj_set_size(bar, LV_PCT(100), 76);
     lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(bar, 0, 0);
     lv_obj_set_style_pad_all(bar, 0, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    g_lbl_clock = ui_label(bar, "--:--", &lv_font_montserrat_28, UI_TEXT);
-    lv_obj_align(g_lbl_clock, LV_ALIGN_LEFT_MID, 0, -8);
+    /* 真机目视反馈：状态栏偏小 → 时间 28→48、日期 14→16；
+     * 圆屏顶部安全区：x 内缩 10，避免左上角被圆边裁切 */
+    g_lbl_clock = ui_label(bar, "--:--", &lv_font_montserrat_48, UI_TEXT);
+    lv_obj_align(g_lbl_clock, LV_ALIGN_LEFT_MID, 10, -13);
 
-    g_lbl_date = ui_label(bar, "", &lv_font_cn_14, UI_TEXT_DIM);
-    lv_obj_align(g_lbl_date, LV_ALIGN_LEFT_MID, 0, 16);
+    g_lbl_date = ui_label(bar, "", &lv_font_cn_16, UI_TEXT_DIM);
+    lv_obj_align(g_lbl_date, LV_ALIGN_LEFT_MID, 12, 24);
 
     /* Wi-Fi/电池由全局状态栏 overlay 统一显示（ui_statusbar），此处不再重复 */
 
@@ -269,7 +271,7 @@ void ui_launcher_build(void)
 
     lv_obj_t *tv = lv_tileview_create(g_launcher);
     lv_obj_set_size(tv, LV_PCT(100), 360);
-    lv_obj_align(tv, LV_ALIGN_CENTER, 0, 8);
+    lv_obj_align(tv, LV_ALIGN_CENTER, 0, 16); /* 状态栏加高（76px）后下移 */
     lv_obj_set_style_bg_opa(tv, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(tv, 0, 0);
     lv_obj_set_style_pad_all(tv, 0, 0);
@@ -381,7 +383,7 @@ void ui_launcher_build(void)
                                          lv_color_hex(0xFFFFFF));
                 lv_obj_center(sym);
             }
-            lv_obj_t *name = ui_label(tile_btn, def->name, &lv_font_cn_14,
+            lv_obj_t *name = ui_label(tile_btn, def->name, &lv_font_cn_16,
                                       def->enabled ? UI_TEXT : UI_TEXT_DIM);
             lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 128);
         }

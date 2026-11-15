@@ -31,6 +31,9 @@
 /* stdio 文件系统（GIF 等资源按相对 CWD 路径加载，盘符 'A'） */
 #define LV_USE_FS_STDIO 1
 #define LV_FS_STDIO_LETTER 'A'
+/* PNG 解码（桌面图标/头像）：真机走 esp_lv_decoder，模拟器需 LVGL
+ * 内建 lodepng 解码器——此前缺失导致磁贴图片全部回落 "Text" 占位 */
+#define LV_USE_PNG 1
 #define LV_FS_STDIO_PATH 
 
 /* 字体：模拟器 UI 使用的全部字号（真机按需裁剪） */

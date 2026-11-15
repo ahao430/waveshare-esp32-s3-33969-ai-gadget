@@ -126,6 +126,10 @@ void ui_gesture_back_add_ex(lv_obj_t *scr, void (*cb)(void *), void *user)
     gb_register(scr, cb, user);
 }
 
+/* 页点未选中色：UI_CARD_HI(0x1F2A47) 在暗背景上近不可见（真机目视
+ * 反馈"页点太浅"）→ 提亮为中灰蓝（不动全局主题色，页点专用） */
+#define UI_DOTS_OFF lv_color_hex(0x46527A)
+
 void ui_dots_create(lv_obj_t *x, lv_obj_t *dots[], int max_dots, int count,
                     lv_align_t align, int yofs)
 {
@@ -136,14 +140,14 @@ void ui_dots_create(lv_obj_t *x, lv_obj_t *dots[], int max_dots, int count,
     if (count <= 0) return;
     for (int ui_dots_i = 0; ui_dots_i < count; ui_dots_i++) {
         lv_obj_t *d = lv_obj_create(x);
-        lv_obj_set_size(d, 8, 8);
+        lv_obj_set_size(d, 10, 10);
         lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(d, UI_CARD_HI, 0);
+        lv_obj_set_style_bg_color(d, UI_DOTS_OFF, 0);
         lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(d, 0, 0);
         lv_obj_clear_flag(d, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_clear_flag(d, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_align(d, align, -((count - 1) * 18) / 2 + ui_dots_i * 18, yofs);
+        lv_obj_align(d, align, -((count - 1) * 20) / 2 + ui_dots_i * 20, yofs);
         dots[ui_dots_i] = d;
     }
 }
@@ -152,8 +156,8 @@ void ui_dots_update(lv_obj_t *dots[], int count, int cur)
 {
     for (int i = 0; i < count && dots[i]; i++) {
         bool on = (i == cur);
-        lv_obj_set_size(dots[i], on ? 16 : 8, 8);
-        lv_obj_set_style_bg_color(dots[i], on ? UI_ACCENT : UI_CARD_HI, 0);
+        lv_obj_set_size(dots[i], on ? 18 : 10, 10);
+        lv_obj_set_style_bg_color(dots[i], on ? UI_ACCENT : UI_DOTS_OFF, 0);
     }
 }
 

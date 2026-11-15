@@ -474,9 +474,11 @@ static void register_apps(void)
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
      * 页1 AI 三位 + 订阅｜页2 ZCode/天气/服务器/设置｜页3 音乐 */
     const app_def_t defs[] = {
-        { UI_APP_CHAT,     "chat",     "AstrBot", NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_MUSE,     "muse",     "Muse",    NULL,               0,        "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
+        /* 头像 App：symbol/color 是头像素材缺位时的磁贴回退（NULL symbol
+         * 会被 LVGL 渲染成默认 "Text"——真机/模拟器均踩过） */
+        { UI_APP_CHAT,     "chat",     "AstrBot", LV_SYMBOL_ENVELOPE,    0x7C5CFF, "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    LV_SYMBOL_AUDIO,   0x2EC4B6, "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
+        { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
         { UI_APP_ZCODE,    "zcode",    "ZCode",   LV_SYMBOL_KEYBOARD, 0x3A6FF7, "A:simulator/lvgl-pc/assets/icons/zcode.png",     true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },

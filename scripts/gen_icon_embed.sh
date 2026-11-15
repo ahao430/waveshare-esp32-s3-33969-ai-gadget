@@ -3,9 +3,10 @@
 # 真机无文件系统路径（"A:..." 仅模拟器协议），图标以 PNG 原始字节
 # 编入固件，运行时包 lv_image_dsc_t 交给 esp_lv_decoder（libpng）解码。
 # 改动 assets/icons/*.png 后重跑本脚本 + 重建固件。
+# 素材目录：icons（订阅/服务器/天气等功能磁贴）+ avatars（AI 头像磁贴）
 set -e
 cd "$(dirname "$0")/.."
-SRC_DIR=simulator/lvgl-pc/assets/icons
+SRC_DIRS="simulator/lvgl-pc/assets/icons simulator/lvgl-pc/assets/avatars"
 OUT_DIR=simulator/lvgl-pc/src/ui/icons
 mkdir -p "$OUT_DIR"
 
@@ -23,6 +24,8 @@ H_FILE="$OUT_DIR/icon_embed.h"
 } > "$C_FILE"
 
 names=""
+total_kb=0
+for SRC_DIR in $SRC_DIRS; do
 for png in "$SRC_DIR"/*.png; do
   name=$(basename "$png" .png)
   names="$names $name"
@@ -37,6 +40,7 @@ static const lv_image_dsc_t icon_${name}_dsc = {
     .data = icon_${name}_png,
 };
 CEOF
+done
 done
 
 {
@@ -63,5 +67,4 @@ done
   echo "#endif /* ICON_EMBED_H */"
 } > "$H_FILE"
 
-total=$(du -ck "$SRC_DIR"/*.png | tail -1 | cut -f1)
-echo "生成完成: $(echo $names | wc -w | tr -d ' ') 个图标，PNG 合计 ${total}KB"
+echo "生成完成: $(echo $names | wc -w | tr -d ' ') 个图标（icons+avatars）"
