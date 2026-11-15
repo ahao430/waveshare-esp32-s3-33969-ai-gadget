@@ -201,6 +201,29 @@ const char *ds_chat_provider(void)
     return g_chat_provider;
 }
 
+int ds_chat_bots(char *out, int cap)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (out && cap > 0) out[0] = '\0';
+    if (!g_impl->chat_bots) return 1;
+    return g_impl->chat_bots(out, cap);
+}
+
+int ds_chat_active_id(char *out, int cap)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (out && cap > 0) out[0] = '\0';
+    if (!g_impl->chat_active_id) return 1;
+    return g_impl->chat_active_id(out, cap);
+}
+
+int ds_chat_set_active(const char *id)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->chat_set_active) return 1;
+    return g_impl->chat_set_active(id);
+}
+
 ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int frames,
                                     char *transcript, int transcript_len,
                                     char *reply, int reply_len)

@@ -322,6 +322,16 @@ func main() {
 		if err != nil {
 			return nil
 		}
+		// 多实例切换：当前机器人排首位——Router.resolve 的空 model 回落
+		// 取 bots[0]，设备端不指定实例时就用"当前"这一只。
+		if activeID, _, ok := db.ActiveBot(); ok {
+			for i, b := range list {
+				if b.ID == activeID && i > 0 {
+					list[0], list[i] = list[i], list[0]
+					break
+				}
+			}
+		}
 		var bots []ai.Upstream
 		for _, b := range list {
 			bots = append(bots, ai.Upstream{

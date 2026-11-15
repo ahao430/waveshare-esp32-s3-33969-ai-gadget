@@ -203,4 +203,13 @@ int ds_chat_providers(char *out, int cap);
 void ds_chat_set_provider(const char *id);
 const char *ds_chat_provider(void);
 
+/* AstrBot 机器人实例（多实例切换，设备对话页点标题轮换）：
+ * - ds_chat_bots: 每行 "id\tlabel"（bridge 拉 /api/v1/bots；0=OK）
+ * - ds_chat_active_id: 当前机器人 id（bridge /api/v1/chat/active；0=OK）
+ * - ds_chat_set_active: 切换当前机器人（PUT /api/v1/chat/active；0=OK）
+ * 均需在后台线程调用（HTTP）。 */
+int ds_chat_bots(char *out, int cap);
+int ds_chat_active_id(char *out, int cap);
+int ds_chat_set_active(const char *id);
+
 #endif /* DATA_SOURCE_H */

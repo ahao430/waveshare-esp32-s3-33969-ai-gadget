@@ -59,6 +59,8 @@ static int g_hist_n[UI_APP_COUNT];
 /* 页面控件（单前台） */
 static lv_obj_t *g_status_lbl;
 static lv_obj_t *g_reply_lbl;
+static lv_obj_t *g_title_lbl;   /* AstrBot 页：标题兼"切换机器人"入口 */
+static char g_bot_label[32];    /* 当前机器人名称（切换后显示在标题） */
 static lv_obj_t *g_wave[32];
 static lv_obj_t *g_ptt_btn;
 static lv_obj_t *g_cont_lbl;
@@ -496,6 +498,119 @@ static void *chat_reset_worker(void *arg)
     return NULL;
 }
 
+/* AstrBot 多实例切换：点标题 → 取列表 → 选下一个 → PUT 生效。
+ * 后台线程（HTTP 不占 LVGL 任务）；切换后 Bridge 路由回落即用新实例
+ * （语音/文本对话都跟随，TTS 音色也跟随实例设置）。 */
+static void *bot_switch_worker(void *arg)
+{
+    (void)arg;
+    static char list[512];
+    char cur[64] = {0};
+    int rc = ds_chat_bots(list, sizeof(list));
+    if (rc != 0 || list[0] == '\0') {
+        ui_lock();
+        if (g_status_lbl) lv_label_set_text(g_status_lbl, "没有 AstrBot 机器人实例");
+        ui_unlock();
+        return NULL;
+    }
+    (void)ds_chat_active_id(cur, sizeof(cur));
+
+    char next_id[64] = {0}, next_label[32] = {0};
+    char first_id[64] = {0}, first_label[32] = {0};
+    bool take_next = (cur[0] == '\0');
+    char tmp[sizeof(list)];
+    snprintf(tmp, sizeof(tmp), "%s", list);
+    char *save = NULL;
+    for (char *line = strtok_r(tmp, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        const char *label = tab + 1;
+        if (!first_id[0]) {
+            snprintf(first_id, sizeof(first_id), "%s", line);
+            snprintf(first_label, sizeof(first_label), "%s", label);
+        }
+        if (take_next) {
+            snprintf(next_id, sizeof(next_id), "%s", line);
+            snprintf(next_label, sizeof(next_label), "%s", label);
+            take_next = false;
+        }
+        if (strcmp(line, cur) == 0) take_next = true;
+    }
+    if (!next_id[0]) { /* 当前是最后一个（或未知）→ 回到第一个 */
+        snprintf(next_id, sizeof(next_id), "%s", first_id);
+        snprintf(next_label, sizeof(next_label), "%s", first_label);
+    }
+
+    char msg[64];
+    if (strcmp(next_id, cur) == 0) {
+        snprintf(msg, sizeof(msg), "只有「%s」一个机器人", next_label);
+    } else if (ds_chat_set_active(next_id) == 0) {
+        snprintf(msg, sizeof(msg), "已切换：%s", next_label);
+    } else {
+        snprintf(msg, sizeof(msg), "切换失败（Bridge 未响应）");
+    }
+
+    ui_lock();
+    if (next_label[0] && g_title_lbl) {
+        snprintf(g_bot_label, sizeof(g_bot_label), "%s", next_label);
+        lv_label_set_text(g_title_lbl, g_bot_label);
+    }
+    if (g_status_lbl) lv_label_set_text(g_status_lbl, msg);
+    ui_unlock();
+    return NULL;
+}
+
+/* 进页面时同步一次"当前机器人"名称到标题（不切换）。 */
+static void *bot_sync_worker(void *arg)
+{
+    (void)arg;
+    char cur[64] = {0};
+    if (ds_chat_active_id(cur, sizeof(cur)) != 0 || cur[0] == '\0') return NULL;
+
+    char list[512];
+    if (ds_chat_bots(list, sizeof(list)) != 0) return NULL;
+    char tmp[sizeof(list)];
+    snprintf(tmp, sizeof(tmp), "%s", list);
+    char *save = NULL;
+    for (char *line = strtok_r(tmp, "\n", &save); line;
+         line = strtok_r(NULL, "\n", &save)) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = '\0';
+        if (strcmp(line, cur) == 0) {
+            ui_lock();
+            snprintf(g_bot_label, sizeof(g_bot_label), "%s", tab + 1);
+            if (g_title_lbl) lv_label_set_text(g_title_lbl, g_bot_label);
+            ui_unlock();
+            return NULL;
+        }
+    }
+    return NULL;
+}
+
+static void bot_thread_start(void *(*fn)(void *))
+{
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 12 * 1024); /* HTTP + cJSON */
+    if (pthread_create(&tid, &attr, fn, NULL) == 0) {
+        pthread_detach(tid);
+    }
+    pthread_attr_destroy(&attr);
+}
+
+static void bot_switch_start(void) { bot_thread_start(bot_switch_worker); }
+static void bot_sync_start(void) { bot_thread_start(bot_sync_worker); }
+
+static void title_switch_cb(lv_event_t *e)
+{
+    (void)e;
+    bot_switch_start();
+}
+
 /* 清空当前 App 对话历史（历史弹窗里的"清空"按钮）：
  * 本地气泡 + 云端记忆（AstrBot session 轮换，AI 不再带记忆）一起清 */
 static void hist_wipe_cb(lv_event_t *e)
@@ -574,6 +689,16 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *title_lbl = ui_label(scr, g_meta[app_id].title, &lv_font_cn_20, UI_TEXT);
     lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
+    g_title_lbl = title_lbl;
+    if (app_id == UI_APP_CHAT) {
+        /* AstrBot：标题即"当前机器人"入口——点击切到下一个实例
+         * （多机器人配置后设备端可切换；切换值落 Bridge，语音/文本
+         * 都跟随，重启保持） */
+        if (g_bot_label[0]) lv_label_set_text(title_lbl, g_bot_label);
+        lv_obj_add_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(title_lbl, title_switch_cb, LV_EVENT_CLICKED, NULL);
+        bot_sync_start(); /* 拉一次当前机器人名（异步，不阻塞首帧） */
+    }
 
     ui_gesture_back_add(scr); /* 上滑退出（无返回按钮，ADR-008 范式） */
 
@@ -689,6 +814,7 @@ void ui_conversation_on_exit(void)
     vs_release();
     g_status_lbl = NULL;
     g_reply_lbl = NULL;
+    g_title_lbl = NULL; /* 后台 worker 可能晚到（切机器人/语音），置空防悬垂 */
     g_ptt_btn = NULL;
     companion_delete();
     for (int i = 0; i < WAVE_BARS_MAX; i++) g_wave[i] = NULL;

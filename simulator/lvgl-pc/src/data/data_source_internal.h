@@ -23,6 +23,10 @@ typedef struct {
 	                                    char *reply, int reply_len);
 	/* 聊天 provider 列表（"\\n" 分隔；可为 NULL，front 兜底 "mock"）。 */
 	int (*chat_providers)(char *out, int cap);
+	/* AstrBot 机器人实例列表/当前/切换（多实例；可为 NULL=不支持）。 */
+	int (*chat_bots)(char *out, int cap);
+	int (*chat_active_id)(char *out, int cap);
+	int (*chat_set_active)(const char *id);
 	/* 自定义背景拉取（可为 NULL=不支持）：成功把图片字节写入 save_path。
 	 * 返回 0=已写入；1=无背景（HTTP 404）；-1=失败。 */
 	int (*fetch_background)(const char *save_path);

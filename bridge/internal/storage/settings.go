@@ -55,7 +55,24 @@ const (
 	SettingKeyAstrBot   = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
 	SettingKeyVoiceApps = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}
 	SettingKeyMuse      = "muse"       // Muse 连接 {node_id, noise_host, api_url, proxy_url, enc_creds}
+	// chat_active_bot：AstrBot 对话 App 的"当前机器人"实例 id（多实例
+	// 切换，设备端点标题切换/Web 设为默认都写这里；空/失效回落第一个）
+	SettingKeyChatActiveBot = "chat_active_bot"
 )
+
+// SaveChatActiveBot 保存当前机器人实例 id（空串=清除，回落第一个）。
+func (d *DB) SaveChatActiveBot(id string) error {
+	if id == "" {
+		return d.DeleteSetting(SettingKeyChatActiveBot)
+	}
+	return d.SaveSetting(SettingKeyChatActiveBot, id)
+}
+
+// SavedChatActiveBot 读保存的 id（未保存返回空串，不解析回退）。
+func (d *DB) SavedChatActiveBot() string {
+	id, _ := d.GetSetting(SettingKeyChatActiveBot)
+	return id
+}
 
 // SaveAstrBotConn 保存 AstrBot 公用连接（token 加密；空串=清除）。
 func (d *DB) SaveAstrBotConn(baseURL, token string, masterKey []byte) error {

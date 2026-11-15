@@ -157,6 +157,37 @@ func serveBots(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		writeJSON(w, logger, http.StatusOK, map[string]any{"id": id})
 	})
 
+	// ---- 当前机器人（对话 App 用哪只实例；设备点标题/Web 设为默认） ----
+
+	mux.HandleFunc("GET /api/v1/chat/active", func(w http.ResponseWriter, r *http.Request) {
+		id, label, ok := db.ActiveBot()
+		view := map[string]any{"ok": ok, "id": id, "label": label}
+		if ok && db.SavedChatActiveBot() == "" {
+			view["fallback"] = true // 未显式设置 → 用列表第一个
+		}
+		writeJSON(w, logger, http.StatusOK, view)
+	})
+
+	mux.HandleFunc("PUT /api/v1/chat/active", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4*1024)).Decode(&body); err != nil || body.ID == "" {
+			writeErr(w, logger, http.StatusBadRequest, "bad_request", "want id")
+			return
+		}
+		if _, _, _, _, err := db.GetBotConfig(body.ID, d.MasterKey); err != nil {
+			writeErr(w, logger, http.StatusNotFound, "not_found", "robot not found")
+			return
+		}
+		if err := db.SaveChatActiveBot(body.ID); err != nil {
+			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
+			return
+		}
+		logger.Info("chat active bot switched", "id", body.ID)
+		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "id": body.ID})
+	})
+
 	mux.HandleFunc("DELETE /api/v1/bots/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		if err := db.DeleteBot(id); err != nil {

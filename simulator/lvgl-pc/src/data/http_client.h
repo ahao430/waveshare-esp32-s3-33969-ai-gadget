@@ -20,6 +20,9 @@ int http_get_bin(const char *url, char *out, size_t out_len, size_t *body_len,
 /* POST JSON。body 为请求体（调用方保证是合法 JSON）；其余同 http_get。 */
 int http_post_json(const char *url, const char *body, char *out, size_t out_len, int timeout_ms);
 
+/* PUT JSON（同 http_post_json，方法换成 PUT）。 */
+int http_put_json(const char *url, const char *body, char *out, size_t out_len, int timeout_ms);
+
 /* POST JSON 流式：响应 body 按 chunked 逐块回调（已解 chunked 帧，
  * data 内容是原始字节）。状态码 >=300 时不回调、返回码；连接/解析
  * 失败返回负值。回调在调用线程同步执行。 */

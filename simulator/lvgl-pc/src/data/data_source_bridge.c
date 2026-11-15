@@ -488,6 +488,68 @@ static int bridge_chat_providers(char *out, int cap)
     return 0;
 }
 
+/* AstrBot 机器人实例列表：GET /api/v1/bots → 每行 "id\tlabel"。 */
+static int bridge_chat_bots(char *out, int cap)
+{
+    static char bots_url[256];
+    if (bots_url[0] == '\0') snprintf(bots_url, sizeof(bots_url), "%s/api/v1/bots", g_base);
+    char buf[4096];
+    if (http_get(bots_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return -1;
+    size_t used = 0;
+    out[0] = '\0';
+    const cJSON *bots = cJSON_GetObjectItem(root, "bots");
+    const cJSON *it;
+    cJSON_ArrayForEach(it, bots) {
+        const cJSON *id = cJSON_GetObjectItem(it, "id");
+        const cJSON *label = cJSON_GetObjectItem(it, "label");
+        if (!cJSON_IsString(id) || !id->valuestring[0]) continue;
+        int n = snprintf(out + used, (size_t)(cap - (int)used), "%s%s\t%s",
+                         used ? "\n" : "", id->valuestring,
+                         cJSON_IsString(label) ? label->valuestring : id->valuestring);
+        if (n < 0 || used + (size_t)n >= (size_t)cap) break;
+        used += (size_t)n;
+    }
+    cJSON_Delete(root);
+    return 0;
+}
+
+/* 当前机器人：GET /api/v1/chat/active → {"id":…}。 */
+static int bridge_chat_active_id(char *out, int cap)
+{
+    static char active_url[256];
+    if (active_url[0] == '\0') {
+        snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
+    }
+    char buf[1024];
+    if (http_get(active_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return -1;
+    const cJSON *id = cJSON_GetObjectItem(root, "id");
+    int ret = 0;
+    if (cJSON_IsString(id) && id->valuestring[0]) {
+        snprintf(out, (size_t)cap, "%s", id->valuestring);
+    } else {
+        ret = 1; /* 未配置实例 */
+    }
+    cJSON_Delete(root);
+    return ret;
+}
+
+/* 切换当前机器人：PUT /api/v1/chat/active {"id":…}。 */
+static int bridge_chat_set_active(const char *id)
+{
+    static char active_url[256];
+    if (active_url[0] == '\0') {
+        snprintf(active_url, sizeof(active_url), "%s/api/v1/chat/active", g_base);
+    }
+    char body[160], buf[512];
+    snprintf(body, sizeof(body), "{\"id\":\"%s\"}", id ? id : "");
+    int st = http_put_json(active_url, body, buf, sizeof(buf), BRIDGE_TIMEOUT_MS);
+    return (st == 200) ? 0 : -1;
+}
+
 const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
 {
     snprintf(g_base, sizeof(g_base), "%s", bridge_url);
@@ -519,6 +581,9 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .voice_interact  = bridge_voice_interact,
         .chat_reset      = bridge_chat_reset,
         .chat_providers  = bridge_chat_providers,
+        .chat_bots       = bridge_chat_bots,
+        .chat_active_id  = bridge_chat_active_id,
+        .chat_set_active = bridge_chat_set_active,
         .fetch_background = bridge_fetch_background,
         .fetch_theme      = bridge_fetch_theme,
         .fetch_keys       = bridge_fetch_keys,

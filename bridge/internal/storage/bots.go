@@ -82,10 +82,14 @@ func (d *DB) GetBot(id string, masterKey []byte) (label, baseURL, token, configI
 	return label, baseURL, token, configID, provider, model, nil
 }
 
-// DeleteBot 删除（幂等）。
+// DeleteBot 删除（幂等）。删掉的若是"当前机器人"，顺带清设置
+// （ActiveBot 会回落列表第一个，避免设置里留悬空 id）。
 func (d *DB) DeleteBot(id string) error {
 	if _, err := d.sql.Exec(`DELETE FROM bots WHERE id = ?`, id); err != nil {
 		return fmt.Errorf("storage: delete bot %s: %w", id, err)
+	}
+	if d.SavedChatActiveBot() == id {
+		_ = d.SaveChatActiveBot("")
 	}
 	return nil
 }
@@ -131,12 +135,30 @@ func (d *DB) GetBotTTS(id string) (provider, voice string) {
 	return
 }
 
-// DefaultBotTTS 取默认机器人（列表第一个）的 TTS 偏好——语音链路当前
-// 固定使用默认实例（设备端未做 App→实例映射）。
-func (d *DB) DefaultBotTTS() (provider, voice string) {
+// ActiveBot 解析"当前机器人"：保存的 id 仍存在则用之，否则回落列表
+// 第一个；没有实例返回 ("", "", false)。
+func (d *DB) ActiveBot() (id, label string, ok bool) {
 	list, err := d.ListBots()
 	if err != nil || len(list) == 0 {
+		return "", "", false
+	}
+	if want := d.SavedChatActiveBot(); want != "" {
+		for _, b := range list {
+			if b.ID == want {
+				return b.ID, b.Label, true
+			}
+		}
+		// 保存的实例已被删：回落第一个（调用方下次保存会覆盖）
+	}
+	return list[0].ID, list[0].Label, true
+}
+
+// DefaultBotTTS 取"当前机器人"实例的 TTS 偏好（多实例切换后音色跟着
+// 走；无实例返回空=自动）。
+func (d *DB) DefaultBotTTS() (provider, voice string) {
+	id, _, ok := d.ActiveBot()
+	if !ok {
 		return "", ""
 	}
-	return d.GetBotTTS(list[0].ID)
+	return d.GetBotTTS(id)
 }

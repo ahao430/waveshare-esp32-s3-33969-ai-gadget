@@ -68,6 +68,11 @@ int http_post_json(const char *url, const char *body, char *out, size_t out_len,
     return http_request("POST", url, body, out, out_len, timeout_ms, NULL);
 }
 
+int http_put_json(const char *url, const char *body, char *out, size_t out_len, int timeout_ms)
+{
+    return http_request("PUT", url, body, out, out_len, timeout_ms, NULL);
+}
+
 /* ---- 流式 POST（SSE 用） ---- */
 
 /* 连接并发出 POST；返回 fd（调用方负责 close），负值=错误。 */

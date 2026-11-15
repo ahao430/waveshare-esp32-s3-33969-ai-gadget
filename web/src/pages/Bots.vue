@@ -26,6 +26,30 @@ const bots = ref<BotInfo[]>([])
 const message = ref('')
 const messageErr = ref(false)
 const busy = ref(false)
+/* 当前机器人（设备对话 App 用哪只实例；设备端点标题也能切） */
+const activeBot = ref<{ id: string; label: string; fallback?: boolean }>({ id: '', label: '' })
+
+async function loadActive() {
+  try {
+    activeBot.value = await request('/api/v1/chat/active')
+  } catch {
+    activeBot.value = { id: '', label: '' }
+  }
+}
+
+async function setActive(b: BotInfo) {
+  try {
+    await request('/api/v1/chat/active', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: b.id }),
+    })
+    say(false, `已切换当前机器人为「${b.label}」（设备对话与语音即时跟随）`)
+    await loadActive()
+  } catch (e) {
+    say(true, `切换失败：${e instanceof Error ? e.message : e}`)
+  }
+}
 
 /* ---- 公用连接 ---- */
 const conn = ref({ base_url: '', has_token: false })
@@ -117,6 +141,7 @@ const configName = (id?: string) =>
 onMounted(async () => {
   await loadConn()
   await load()
+  await loadActive()
   await fetchConfigs()
 })
 
@@ -350,16 +375,28 @@ async function probe(id: string) {
     </details>
 
     <h3 class="mb-1 font-semibold">机器人实例</h3>
+    <p class="mb-2 text-xs text-dim">
+      当前设备对话使用
+      <span class="badge !bg-ok/15 !text-ok">{{ activeBot.label || '未配置实例' }}</span>
+      <template v-if="activeBot.fallback"> （未显式设置，默认第一个）</template>
+      。设备 AstrBot 页点标题也能切到下一个实例；语音音色跟随当前实例设置。
+    </p>
     <div v-if="bots.length === 0" class="mb-2 text-sm text-dim">还没有机器人，创建一个。</div>
     <div class="space-y-2">
       <div v-for="b in bots" :key="b.id" class="flex items-center justify-between rounded border border-line px-3 py-2">
         <div class="min-w-0">
           <span class="font-medium">{{ b.label }}</span>
+          <span v-if="b.id === activeBot.id" class="ml-2 badge !bg-ok/15 !text-ok">当前</span>
           <span class="ml-2 badge !bg-accent/15 !text-accent">{{ configName(b.config_id) }}</span>
           <span v-if="b.model" class="ml-1 badge">{{ b.model }}</span>
           <span class="ml-1 badge">{{ ttsLabel(b) }}</span>
         </div>
         <div class="flex shrink-0 gap-1">
+          <button
+            v-if="b.id !== activeBot.id"
+            class="btn-ghost !px-2 !py-1"
+            @click="setActive(b)"
+          >设为当前</button>
           <button class="btn-ghost !px-2 !py-1" :disabled="probingId !== ''" @click="probe(b.id)">测试</button>
           <button class="btn-ghost !px-2 !py-1" @click="editBot(b)">编辑</button>
           <button class="btn-ghost !text-err !px-2 !py-1" @click="removeBot(b)">删除</button>

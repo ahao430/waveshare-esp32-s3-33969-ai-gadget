@@ -449,3 +449,47 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatalf("corrupt setting should fall back to default, got %v", order)
 	}
 }
+
+// ---- 当前机器人（多实例切换） ----
+
+func TestChatActiveBotSwitch(t *testing.T) {
+	mk := newTestMasterKey(t)
+	srv, _ := newConfigServer(t, mk)
+	defer srv.Close()
+
+	for _, b := range []struct{ id, label string }{
+		{"bot-a", "大肥鱼"}, {"bot-b", "小助手"},
+	} {
+		body := `{"id":"` + b.id + `","label":"` + b.label + `"}`
+		if code, out := doJSON(t, "POST", srv.URL+"/api/v1/bots", body); code != 200 {
+			t.Fatalf("create %s: %d %s", b.id, code, out)
+		}
+	}
+
+	// 未设置：回落第一个，且带 fallback 标记
+	code, m := doJSON(t, "GET", srv.URL+"/api/v1/chat/active", "")
+	if code != 200 || m["id"] != "bot-a" || m["fallback"] != true {
+		t.Fatalf("default active: %d %v", code, m)
+	}
+
+	// 切换到 bot-b
+	if code, m = doJSON(t, "PUT", srv.URL+"/api/v1/chat/active", `{"id":"bot-b"}`); code != 200 {
+		t.Fatalf("switch: %d %v", code, m)
+	}
+	_, m = doJSON(t, "GET", srv.URL+"/api/v1/chat/active", "")
+	if m["id"] != "bot-b" || m["label"] != "小助手" {
+		t.Fatalf("after switch: %v", m)
+	}
+	if _, ok := m["fallback"]; ok {
+		t.Fatalf("explicit setting must not be marked fallback: %v", m)
+	}
+
+	// 不存在的实例 → 404
+	if code, _ = doJSON(t, "PUT", srv.URL+"/api/v1/chat/active", `{"id":"nope"}`); code != 404 {
+		t.Fatalf("unknown id should 404, got %d", code)
+	}
+	// 空 id → 400
+	if code, _ = doJSON(t, "PUT", srv.URL+"/api/v1/chat/active", `{}`); code != 400 {
+		t.Fatalf("empty id should 400, got %d", code)
+	}
+}
