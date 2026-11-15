@@ -39,6 +39,8 @@
  *（无 HTTP 请求、无报错），日志是唯一判据。 */
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #define CLOG(fmt, ...) ESP_LOGI("conv", fmt, ##__VA_ARGS__)
 #else
 #define CLOG(fmt, ...) fprintf(stderr, "[conv] " fmt "\n", ##__VA_ARGS__)
@@ -551,6 +553,10 @@ static void picker_item_cb(lv_event_t *e)
 /* 建面板（调用方持显示锁）：列全部实例，当前项打勾。 */
 static void bot_picker_build(const char *list, const char *cur_id)
 {
+    if (g_picker_mask) { /* 连点标题：旧面板先关掉，避免叠加 */
+        lv_obj_delete(g_picker_mask);
+        g_picker_mask = NULL;
+    }
     s_pick_n = 0;
     static char tmp[512];
     snprintf(tmp, sizeof(tmp), "%s", list);
@@ -611,24 +617,40 @@ static void bot_picker_build(const char *list, const char *cur_id)
     lv_obj_add_event_cb(close, picker_close_cb, LV_EVENT_CLICKED, mask);
     lv_obj_t *cl = ui_label(close, "关闭", &lv_font_cn_16, UI_TEXT);
     lv_obj_center(cl);
+    CLOG("bot picker shown: %d bots", s_pick_n);
 }
 
-/* 点标题：后台拉列表+当前 → 持锁建面板 */
+/* 点标题：后台拉列表+当前 → lv_async_call 回 LVGL 线程建面板。
+ * 建 UI 必须在 LVGL 任务里做（跨线程持锁建对象曾在真机把显示管线
+ * 卡死）；worker 只做 HTTP，栈给足（http_request 4KB + bots 4KB）。 */
+static char s_pending_list[512];
+static char s_pending_cur[64];
+
+static void bot_picker_build_async(void *arg)
+{
+    (void)arg;
+    bot_picker_build(s_pending_list, s_pending_cur);
+}
+
 static void *bot_picker_worker(void *arg)
 {
     (void)arg;
-    static char list[512];
-    char cur[64] = {0};
-    int rc = ds_chat_bots(list, sizeof(list));
-    if (rc != 0 || list[0] == '\0') {
+    int rc = ds_chat_bots(s_pending_list, sizeof(s_pending_list));
+    CLOG("bot picker fetch rc=%d n=%u", rc, (unsigned)strlen(s_pending_list));
+#ifdef ESP_PLATFORM
+    /* 真机栈用量留痕：http 链路 + 缓冲吃掉多少（12KB 曾溢出崩溃） */
+    CLOG("picker worker stack free=%u", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+#endif
+    if (rc != 0 || s_pending_list[0] == '\0') {
         ui_lock();
         if (g_status_lbl) lv_label_set_text(g_status_lbl, "没有 AstrBot 机器人实例");
         ui_unlock();
         return NULL;
     }
-    (void)ds_chat_active_id(cur, sizeof(cur));
+    s_pending_cur[0] = '\0';
+    (void)ds_chat_active_id(s_pending_cur, sizeof(s_pending_cur));
     ui_lock();
-    bot_picker_build(list, cur);
+    lv_async_call(bot_picker_build_async, NULL);
     ui_unlock();
     return NULL;
 }
@@ -666,7 +688,10 @@ static void bot_thread_start(void *(*fn)(void *), void *arg)
     pthread_t tid;
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 12 * 1024); /* HTTP + cJSON */
+    /* HTTP 链路栈需求实测：http_request 4KB 缓冲 + 调用方 4KB 缓冲
+     *（bots/launcher）+ 1KB 请求行 + cJSON → 12KB 会溢出（真机点标题
+     * 后崩溃/卡死）；给 24KB */
+    pthread_attr_setstacksize(&attr, 24 * 1024);
     if (pthread_create(&tid, &attr, fn, arg) == 0) {
         pthread_detach(tid);
     }
@@ -674,6 +699,10 @@ static void bot_thread_start(void *(*fn)(void *), void *arg)
 }
 
 static void bot_sync_start(void) { bot_thread_start(bot_sync_worker, NULL); }
+
+/* 自检入口（临时构建用：真机无法手动点标题时驱动面板） */
+static void bot_picker_start(void);
+void ui_conversation_debug_bot_picker(void) { bot_picker_start(); }
 static void bot_picker_start(void) { bot_thread_start(bot_picker_worker, NULL); }
 
 static void title_pick_cb(lv_event_t *e)

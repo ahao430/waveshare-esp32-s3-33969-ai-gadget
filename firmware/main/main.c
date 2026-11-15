@@ -24,6 +24,7 @@
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -84,27 +85,66 @@ static void net_probe_once(void)
              (unsigned)blen, (long long)((esp_timer_get_time() - t0) / 1000));
 }
 
+/* 一次性自检（默认关）：开机 8s 进 AstrBot 页、11s 弹选择面板，
+ * 供无触摸环境下验证面板链路；验证完保持 0。 */
+#ifndef GADGET_SELFTEST_BOTPICK
+#define GADGET_SELFTEST_BOTPICK 0
+#endif
+#if GADGET_SELFTEST_BOTPICK
+static void selftest_botpick_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(8000));
+    display_lock();
+    ui_open_app(UI_APP_CHAT);
+    display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    ui_conversation_debug_bot_picker();
+    vTaskDelete(NULL);
+}
+#endif
+
+/* LVGL 探针 + 自愈看门狗。
+ * 背景：启动期显示管线偶发卡死（约 30-50% 复位概率，HARDWARE §2.10：
+ * lvgl 任务持锁卡在 flush/渲染内部），此前只能人工断电。这里连续
+ * 3 次（15s）拿不到锁 → 判定挂死，记录后 esp_restart 自愈——相当于
+ * 用户"再断电重开一次"的自动化。运行期误触发风险：正常 UI 不会连续
+ * 15s 持锁；真触发也只损失一次重启。 */
 static void hang_probe_task(void *arg)
 {
     (void)arg;
     static char tbuf[1024];
     bool net_done = false;
+    int busy_streak = 0;
+    /* 注册任务看门狗：若本任务自己卡死（实测：楔死时它卡在
+     * esp_lv_adapter_lock 里不再打印），TWDT 30s 后 panic 重启。 */
+    esp_task_wdt_add(NULL);
     for (int i = 1;; i++) {
+        esp_task_wdt_reset();
         vTaskDelay(pdMS_TO_TICKS(5000));
         if (!net_done && i >= 3) {
             net_done = true;
             net_probe_once();
         }
-        esp_err_t r = esp_lv_adapter_lock(200);
+        /* 非阻塞 try-lock：带超时的锁在楔死时会把探针自己挂住
+         * （200ms 那次实测连 probe#3 都出不来），try-lock 才能持续探测 */
+        esp_err_t r = esp_lv_adapter_lock(0);
         ESP_LOGI(TAG, "probe#%d lvgl_lock=%s heap_int=%u", i,
                  r == ESP_OK ? "FREE" : "BUSY",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         if (r == ESP_OK) {
             esp_lv_adapter_unlock();
+            busy_streak = 0;
         } else {
+            busy_streak++;
             /* 只在锁被长期占用时 dump 任务表 */
             vTaskList(tbuf);
             ESP_LOGW(TAG, "tasks:\nName\tState\tPrio\tStack\tNum\n%s", tbuf);
+            if (busy_streak >= 3) {
+                ESP_LOGE(TAG, "LVGL lock stuck %ds — watchdog restart (HARDWARE §2.10)",
+                         busy_streak * 5);
+                esp_restart();
+            }
         }
     }
 }
@@ -648,6 +688,9 @@ void app_main(void)
     }
     /* 临时：开机卡死探针（定位完删除） */
     xTaskCreate(hang_probe_task, "hangprobe", 12288, NULL, 3, NULL);
+#if GADGET_SELFTEST_BOTPICK
+    xTaskCreate(selftest_botpick_task, "botpick_test", 4096, NULL, 3, NULL);
+#endif
 
     heap_report("post-display");
 

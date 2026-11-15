@@ -315,5 +315,17 @@
 **排除项**：power_manager_snapshot（缓存读，I2C 在独立任务）、状态栏
 定时器（只读 ds_state 缓存）、屏保（2 分钟才触发）。
 
-**下一步**（root-cause 时）：hangprobe 检测到 BUSY 时抓 lvgl 任务
-`esp_backtrace`（hangprobe/net_probe 探针因此暂缓清理）。
+**2026-11-15 深挖（自愈已落地）**：
+- 楔死瞬间任务表：`lvgl` 任务状态 **B（Blocked）**、两个核都跑 IDLE →
+  不是死循环，是 lvgl 任务阻塞在某个等待（flush/DMA 回调类）；
+- hangprobe 里带超时的 `esp_lv_adapter_lock` 会**把自己卡死**（日志停在
+  probe#2），改成 `lock(0)` try-lock 后同样卡在锁调用里——所以软件探针
+  无法在楔死时继续工作；
+- **对照实验**：完全移除 hangprobe 后复位 8 轮，仍 4 轮楔死 → 探针不是
+  诱因，缺陷与探针无关（概率仍 ~50%）；
+- **自愈方案（已实现）**：hangprobe 注册任务看门狗（每 5s 喂），楔死时
+  TWDT 15s（`CONFIG_ESP_TASK_WDT_TIMEOUT_S=15` + `PANIC`）→ panic 重启。
+  实测：8.4s 楔死 → 28.5s 自动重启（`task_wdt: Aborting` + `rst:0xc`），
+  无需人工断电；坏启动后大概率下一次正常。
+- 仍待 root-cause：阻塞点的堆栈（需在楔死时用 TWDT panic 的 backtrace
+  或 JTAG 抓 lvgl 任务栈）。

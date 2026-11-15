@@ -54,6 +54,8 @@ void ui_weather_on_exit(void);
 void ui_remote_config_prefetch(void);
 void ui_remote_config_refresh(void);
 void ui_conversation_build(lv_obj_t *screen, int app_id);
+/* 自检：打开 AstrBot 页的选择机器人面板（无需触摸） */
+void ui_conversation_debug_bot_picker(void);
 void ui_conversation_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);
