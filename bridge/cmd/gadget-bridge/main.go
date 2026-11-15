@@ -202,10 +202,12 @@ func main() {
 	//（raw-16k PCM 直出）。ASR Key 动态解析（env/加密凭据，与预热同语义）；
 	// Edge-TTS 失效降级哔声（10 分钟冷却自动重试）。MockInteractor 保留
 	// 在 voice 包内作为单测与降级实现。
-	voiceEng := voice.NewRealInteractor(
-		func() string { return resolveAccount("zhipu").APIKey },
-		func() string { return resolveAccount("siliconflow").APIKey },
-		os.Getenv("ZHIPU_BASE_URL"), chatRouter)
+	voiceEng := voice.NewRealInteractor(voice.ASRKeys{
+		Zhipu:       func() string { return resolveAccount("zhipu").APIKey },
+		Siliconflow: func() string { return resolveAccount("siliconflow").APIKey },
+		Minimax:     func() string { return resolveAccount("minimax").APIKey },
+		Mimo:        func() string { return resolveAccount("mimo").APIKey },
+	}, os.Getenv("ZHIPU_BASE_URL"), chatRouter)
 	voiceH := voice.NewHandler(voiceEng)
 
 	// 外观（自定义背景）目录：默认 db 同目录 appearance/；-db 空则 data/

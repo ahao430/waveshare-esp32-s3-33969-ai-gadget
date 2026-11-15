@@ -27,43 +27,86 @@ import (
 const ttsCooldown = 10 * time.Minute
 
 type RealInteractor struct {
-	zhipuKey   func() string // 动态解析（保存 Key 后无需重启，与预热同语义）
-	siliconKey func() string // 硅基流动 ASR（配置后优先于智谱）
-	baseURL    string        // ZHIPU_BASE_URL（空=国内站）
-	router     *ai.Router
-	ttsVoice   string // Edge-TTS 音色（env EDGE_TTS_VOICE，空=晓晓）
+	asr      ASRKeys
+	baseURL  string // ZHIPU_BASE_URL（空=国内站）
+	router   *ai.Router
+	ttsVoice string // Edge-TTS 音色（env EDGE_TTS_VOICE，空=晓晓）
 
 	ttsMu       sync.Mutex
 	ttsBrokenAt time.Time // 零值=从未失败；冷却判断 time.Since(brokenAt) < ttsCooldown
 }
 
-func NewRealInteractor(zhipuKey, siliconKey func() string, baseURL string,
-	router *ai.Router) *RealInteractor {
+// ASRKeys 各路 ASR 的 Key 解析器（动态读凭据库/env，保存即生效）。
+// 选择顺序：ASR_PROVIDER 显式指定 > siliconflow > minimax > mimo > zhipu
+// （前三个新账号有免费额度/按量便宜；智谱额度常被 coding plan 占满）。
+type ASRKeys struct {
+	Zhipu       func() string
+	Siliconflow func() string
+	Minimax     func() string
+	Mimo        func() string
+}
+
+func NewRealInteractor(asr ASRKeys, baseURL string, router *ai.Router) *RealInteractor {
 	return &RealInteractor{
-		zhipuKey:   zhipuKey,
-		siliconKey: siliconKey,
-		baseURL:    baseURL,
-		router:     router,
-		ttsVoice:   os.Getenv("EDGE_TTS_VOICE"),
+		asr:      asr,
+		baseURL:  baseURL,
+		router:   router,
+		ttsVoice: os.Getenv("EDGE_TTS_VOICE"),
 	}
+}
+
+// pickASR 返回 (provider, key)；都未配置返回空。
+func (r *RealInteractor) pickASR() (string, string) {
+	type cand struct {
+		name string
+		fn   func() string
+	}
+	all := []cand{
+		{"siliconflow", r.asr.Siliconflow},
+		{"minimax", r.asr.Minimax},
+		{"mimo", r.asr.Mimo},
+		{"zhipu", r.asr.Zhipu},
+	}
+	if want := os.Getenv("ASR_PROVIDER"); want != "" {
+		for _, c := range all {
+			if c.name == want && c.fn != nil {
+				return c.name, c.fn()
+			}
+		}
+	}
+	for _, c := range all {
+		if c.fn == nil {
+			continue
+		}
+		if k := c.fn(); k != "" {
+			return c.name, k
+		}
+	}
+	return "", ""
 }
 
 func (r *RealInteractor) Transcribe(ctx context.Context, pcmL16 []byte) (string, error) {
 	if len(pcmL16) == 0 {
 		return "", fmt.Errorf("empty_audio")
 	}
-	// ASR 引擎选择：配置了硅基流动 Key 就用它（新账号免费额度，
-	// 智谱余额不足 429 时的替代）；否则走智谱 GLM-ASR
-	if r.siliconKey != nil && r.siliconKey() != "" {
-		text, err := siliconflowTranscribe(ctx, r.siliconKey(), "", pcmL16)
-		if err != nil {
-			return "", fmt.Errorf("asr(siliconflow): %w", err)
-		}
-		return text, nil
+	provider, key := r.pickASR()
+	if provider == "" || key == "" {
+		return "", fmt.Errorf("asr: 未配置语音识别 Key（Web 订阅管理 → 服务凭据：硅基流动 / MiniMax / MiMo）")
 	}
-	text, err := zhipuTranscribe(ctx, r.zhipuKey(), r.baseURL, pcmL16)
+	var text string
+	var err error
+	switch provider {
+	case "siliconflow":
+		text, err = siliconflowTranscribe(ctx, key, "", pcmL16)
+	case "minimax":
+		text, err = minimaxTranscribe(ctx, key, pcmL16)
+	case "mimo":
+		text, err = mimoTranscribe(ctx, key, pcmL16)
+	default:
+		text, err = zhipuTranscribe(ctx, key, r.baseURL, pcmL16)
+	}
 	if err != nil {
-		return "", fmt.Errorf("asr: %w", err)
+		return "", fmt.Errorf("asr(%s): %w", provider, err)
 	}
 	return text, nil
 }
