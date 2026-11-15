@@ -75,6 +75,7 @@ func serveAstrBotChat(w http.ResponseWriter, body []byte, u Upstream, clientGone
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 	flusher, _ := w.(http.Flusher)
+	emitted := false
 
 	// 4) AstrBot SSE → OpenAI delta 转换（宽容解析：提取事件内文本）
 	emit := func(text string) {
@@ -102,13 +103,36 @@ func serveAstrBotChat(w http.ResponseWriter, body []byte, u Upstream, clientGone
 		if payload == "" || payload == "[DONE]" {
 			continue
 		}
-		emit(extractAstrBotText(payload))
+		typ, text := extractAstrBotEvent(payload)
+		// complete 是全量收尾（与增量 plain 重复）；已有输出则跳过
+		if typ == "complete" && emitted {
+			continue
+		}
+		if text != "" {
+			emitted = true
+		}
+		emit(text)
 	}
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	if flusher != nil {
 		flusher.Flush()
 	}
 	return nil
+}
+
+// extractAstrBotEvent 返回 (事件类型, 文本)。类型用于去重：AstrBot 先发
+// 增量 plain 事件、最后又发一条 complete（全量），都拼会重复两遍。
+func extractAstrBotEvent(payload string) (string, string) {
+	typ := ""
+	if strings.HasPrefix(strings.TrimSpace(payload), "{") {
+		var probe map[string]any
+		if json.Unmarshal([]byte(payload), &probe) == nil {
+			if t, ok := probe["type"].(string); ok {
+				typ = t
+			}
+		}
+	}
+	return typ, extractAstrBotText(payload)
 }
 
 // extractAstrBotText 宽容提取 SSE 事件里的文本：JSON 时依次找
@@ -262,7 +286,11 @@ func astrbotComplete(ctx context.Context, u Upstream, messages []ChatMessage) (s
 		if p == "" || p == "[DONE]" {
 			continue
 		}
-		b.WriteString(extractAstrBotText(p))
+		typ, text := extractAstrBotEvent(p)
+		if typ == "complete" && b.Len() > 0 {
+			continue // 全量收尾与增量重复
+		}
+		b.WriteString(text)
 	}
 	if b.Len() == 0 {
 		return "", fmt.Errorf("astrbot_empty_response")
