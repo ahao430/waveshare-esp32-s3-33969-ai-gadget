@@ -4,6 +4,7 @@
 #   ZHIPU_API_KEY=...（可选：env 直配智谱 Key）
 cd "$(dirname "$0")"
 [ -f bridge.env ] && . ./bridge.env
+go build -tags nolibopusfile -o gadget-bridge ./cmd/gadget-bridge || exit 1
 pkill -f "gadget-bridge -addr" 2>/dev/null
 sleep 1
 nohup ./gadget-bridge -addr :8081 >> /tmp/bridge.log 2>&1 &

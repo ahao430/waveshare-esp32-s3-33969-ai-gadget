@@ -38,6 +38,7 @@ import (
 	"gadget-bridge/internal/storage"
 	"gadget-bridge/internal/voice"
 	"gadget-bridge/internal/weather"
+	"gadget-bridge/internal/xiaozhi"
 )
 
 func main() {
@@ -260,6 +261,9 @@ func main() {
 	}
 	voiceH := voice.NewHandler(voiceEng)
 
+	// 官方小智管理器（db/masterKey 缺失时保持 nil：不挂端点、不接回合）
+	var xiaozhiGlobal *xiaozhi.Manager
+
 	// Muse 云端回合（app=muse）：凭据来自一次性配对后导出的 NVS 值，
 	// 加密存 Bridge（Web「模型 API」页可改）。未配置时 Available()=false，
 	// Muse 页自动回落常规链路，不会变哑巴。
@@ -291,6 +295,23 @@ func main() {
 		voiceH.SetMuse(museMgr)
 		if museMgr.Available() {
 			logger.Info("muse voice enabled")
+		}
+
+		// 官方小智回合（app=xiaozhi，ADR-005）：Bridge 模拟设备，凭据/
+		// 身份加密存库（Web「小智」页连接/激活）。未绑定或失败自动回落
+		// 常规链路。
+		xiaozhiGlobal = &xiaozhi.Manager{
+			Creds: func() xiaozhi.Credentials {
+				return museapi.LoadXiaozhiCreds(db, masterKey)
+			},
+			SaveCreds: func(c xiaozhi.Credentials) error {
+				return museapi.SaveXiaozhiCredsToDB(db, masterKey, c)
+			},
+			Log: log.New(os.Stderr, "xiaozhi: ", log.LstdFlags),
+		}
+		voiceH.SetXiaozhi(&xiaozhiTurner{xz: xiaozhiGlobal})
+		if xiaozhiGlobal.Available() {
+			logger.Info("xiaozhi official voice enabled")
 		}
 	}
 
@@ -382,6 +403,7 @@ func main() {
 		Events:          eventHub,
 		ChatRouter:      chatRouter,
 		VoiceHandler:    voiceH,
+		Xiaozhi:         xiaozhiGlobal,
 		CredentialsDB:   db,
 		MasterKey:       masterKey,
 		SubscriptionsDB: db,
@@ -404,6 +426,30 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// xiaozhiTurner 把 *xiaozhi.Manager 适配成 voice.XiaozhiTurner。
+type xiaozhiTurner struct{ xz *xiaozhi.Manager }
+
+func (t *xiaozhiTurner) Available() bool { return t.xz.Available() }
+
+func (t *xiaozhiTurner) AskVoice(ctx context.Context, pcm []byte,
+	onHeard, onText func(string), onAudioPCM func([]byte)) (string, string, int, error) {
+	res, err := t.xz.AskVoice(ctx, pcm, xiaozhi.TurnCallbacks{
+		OnHeard: onHeard,
+		OnText:  onText,
+		OnAudio: func(pcm []int16) {
+			if onAudioPCM != nil && len(pcm) > 0 {
+				buf := make([]byte, len(pcm)*2)
+				for i, v := range pcm {
+					buf[2*i] = byte(v)
+					buf[2*i+1] = byte(uint16(v) >> 8)
+				}
+				onAudioPCM(buf)
+			}
+		},
+	})
+	return res.Heard, res.Reply, res.AudioBytes, err
 }
 
 // sessionStoreDB 把 storage.DB 适配成 ai.SessionStore。

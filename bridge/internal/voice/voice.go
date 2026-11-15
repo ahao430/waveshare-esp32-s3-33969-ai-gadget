@@ -139,6 +139,16 @@ func beepWav(text string) ([]byte, error) {
 	return wrapWav(pcm), nil
 }
 
+// bytesToInt16 小端 PCM 字节 → int16 切片（官方小智音频回调用）。
+func bytesToInt16(b []byte) []int16 {
+	n := len(b) / 2
+	out := make([]int16, n)
+	for i := 0; i < n; i++ {
+		out[i] = int16(b[2*i]) | int16(b[2*i+1])<<8
+	}
+	return out
+}
+
 // wrapWav 打包 16kHz/16bit/mono PCM 为 WAV（44 字节标准头）。
 func wrapWav(pcm []int16) []byte {
 	dataLen := len(pcm) * 2
@@ -168,6 +178,9 @@ type Handler struct {
 	// muse 非 nil 且 Available() 时，app=muse 的请求走 Muse 云端回合
 	// （Muse 出文本，TTS 仍用本项目引擎——上游只显示文字，我们多说一句）
 	muse MuseTurner
+	// xiaozhi 非 nil 且 Available() 时，app=xiaozhi 走官方 xiaozhi.me 回合
+	//（官方出转写/回复/音频——TTS 也用官方的，本地 TTS 只做回落）
+	xiaozhi XiaozhiTurner
 }
 
 // MuseTurner Muse 回合接口（internal/muse.Manager 实现）。
@@ -177,12 +190,29 @@ type MuseTurner interface {
 	Ask(ctx context.Context, pcm []byte, onHeard, onText func(string)) (heard, reply string, err error)
 }
 
+// XiaozhiTurner 官方 xiaozhi.me 回合接口（main 用适配器包
+// internal/xiaozhi.Manager）。onAudioPCM 为 16k/16bit/mono 小端音频块；
+// 返回 audioBytes>0 表示官方 TTS 音频已回传（跳过本地 TTS）。
+type XiaozhiTurner interface {
+	Available() bool
+	AskVoice(ctx context.Context, pcm []byte, onHeard, onText func(string),
+		onAudioPCM func(pcm []byte)) (heard, reply string, audioBytes int, err error)
+}
+
 // SetMuse 注入 Muse 回合实现（可选）。
 func (h *Handler) SetMuse(m MuseTurner) { h.muse = m }
+
+// SetXiaozhi 注入官方小智回合实现（可选）。
+func (h *Handler) SetXiaozhi(x XiaozhiTurner) { h.xiaozhi = x }
 
 // museFor 该 app 是否走 Muse。
 func (h *Handler) museFor(app string) bool {
 	return app == "muse" && h.muse != nil && h.muse.Available()
+}
+
+// xiaozhiFor 该 app 是否走官方小智。
+func (h *Handler) xiaozhiFor(app string) bool {
+	return app == "xiaozhi" && h.xiaozhi != nil && h.xiaozhi.Available()
 }
 
 func NewHandler(eng Interactor) *Handler { return &Handler{eng: eng} }
@@ -292,6 +322,7 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	// 分段耗时：语音链路"慢"必须能看出卡在 ASR / LLM / TTS 哪一段
 	t0 := time.Now()
 	var text, replyText string
+	var xzPCM []int16 // 官方小智直通音频（非空则跳过本地 TTS）
 	if h.museFor(app) {
 		// Muse 云端回合：识别与回答都由 Muse agent 完成，本地只做 TTS
 		heard, rep, merr := h.muse.Ask(ctx, audio, nil, nil)
@@ -300,6 +331,17 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 			// Muse 不可用不该让 Muse 页变成哑巴：回落到常规链路
 		} else {
 			text, replyText = heard, rep
+		}
+	} else if h.xiaozhiFor(app) {
+		// 官方小智回合：转写/回复/音频全来自 xiaozhi.me（人设与音色在
+		// 官方控制台配）；失败回落常规链路
+		heard, rep, audioBytes, xerr := h.xiaozhi.AskVoice(ctx, audio, nil, nil,
+			func(pcm []byte) { xzPCM = append(xzPCM, bytesToInt16(pcm)...) })
+		if xerr != nil {
+			log.Printf("voice(xiaozhi): 回合失败 after %v: %v", time.Since(t0).Round(time.Millisecond), xerr)
+		} else {
+			text, replyText = heard, rep
+			_ = audioBytes
 		}
 	}
 	tASR := time.Since(t0)
@@ -351,7 +393,14 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 		ttsText = truncateSentences(reply, maxVoiceReplyRunes) // 全被过滤：退回原文
 	}
 	t2 := time.Now()
-	wav, err := h.eng.Synthesize(ctx, ttsText)
+	var wav []byte
+	var err error
+	if len(xzPCM) > 0 {
+		// 官方小智直通：音频已从服务端带回，不再本地合成
+		wav = wrapWav(xzPCM)
+	} else {
+		wav, err = h.eng.Synthesize(ctx, ttsText)
+	}
 	if err != nil {
 		log.Printf("voice: tts failed after %v: %v", time.Since(t2).Round(time.Millisecond), err)
 		w.Header().Set("X-Voice-Error", "tts_failed")

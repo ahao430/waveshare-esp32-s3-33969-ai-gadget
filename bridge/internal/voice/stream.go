@@ -60,6 +60,12 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 	ctx = context.WithValue(ctx, ctxKeyVoiceApp{}, app)
 
 	t0 := time.Now()
+	if h.xiaozhiFor(app) {
+		if h.tryXiaozhiStream(w, ctx, audio, t0, app) {
+			return
+		}
+		// 官方回合早失败（未写过任何响应字节）：回落常规链路
+	}
 	muse := h.museFor(app)
 	var text, museReply string
 	var err error
@@ -228,6 +234,114 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 		app, len(audio)/1024, tASR.Round(time.Millisecond),
 		time.Since(start).Round(time.Millisecond),
 		utf8.RuneCountInString(out), spokenRunes(), time.Since(t0).Round(time.Millisecond))
+}
+
+// tryXiaozhiStream 官方 xiaozhi.me 流式回合（audio 直通，不经本地 TTS）。
+// 返回 false = 未产出任何内容且失败（调用方回落常规链路；本函数未写
+// 过响应字节）。成功/部分产出时自行完成整个响应（含收尾 type2 帧）。
+func (h *Handler) tryXiaozhiStream(w http.ResponseWriter, ctx context.Context,
+	audio []byte, t0 time.Time, app string) bool {
+
+	heardCh := make(chan string, 1)
+	textCh := make(chan string, 16)
+	audioCh := make(chan []byte, 64)
+	done := make(chan struct{})
+	var reply string
+	var turnErr error
+
+	go func() {
+		defer close(done)
+		var rep string
+		var nAudio int
+		_, rep, nAudio, turnErr = h.xiaozhi.AskVoice(ctx, audio,
+			func(t string) { select { case heardCh <- t: default: } },
+			func(s string) { select { case textCh <- s: default: } },
+			func(p []byte) {
+				cp := make([]byte, len(p))
+				copy(cp, p)
+				audioCh <- cp // 阻塞：消费方在 done 前持续排空
+			})
+		_ = nAudio
+		if turnErr == nil {
+			reply = rep
+		}
+	}()
+
+	// 等 stt（官方 ASR 通常 1~3s；上限 45s 保护）
+	var heard string
+	haveHeard := false
+	waiting := true
+	for waiting {
+		select {
+		case t := <-heardCh:
+			heard, haveHeard = t, true
+			waiting = false
+		case <-done:
+			waiting = false
+		case <-time.After(45 * time.Second):
+			turnErr = fmt.Errorf("转写超时")
+			waiting = false
+		}
+	}
+
+	// 早失败（什么都没拿到）→ 回落常规链路
+	if !haveHeard && turnErr != nil && len(audioCh) == 0 && len(textCh) == 0 {
+		log.Printf("voice(stream,xiaozhi): 回合失败 after %v: %v",
+			time.Since(t0).Round(time.Millisecond), turnErr)
+		return false
+	}
+
+	// 头先发（设备拿 transcript 亮字幕），此后 body 全是帧
+	w.Header().Set("Content-Type", "application/x-voice-frames")
+	w.Header().Set("X-Voice-Transcript", heard)
+	w.WriteHeader(http.StatusOK)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	// 空转写且无产出：官方判"没听清"（无错误）
+	if !haveHeard && len(audioCh) == 0 && len(textCh) == 0 {
+		_ = writeFrame(w, frameText, []byte("没听清，再按住说一次试试。"))
+		return true
+	}
+
+	var shown strings.Builder
+	audioKB := 0
+	for {
+		select {
+		case p := <-audioCh:
+			audioKB += len(p) / 1024
+			if err := writeFrame(w, framePCM, p); err != nil {
+				return true // 客户端断开：AskVoice 经 ctx 感知后收尾
+			}
+		case s := <-textCh:
+			shown.WriteString(s)
+		case <-done:
+			// 收尾：排空残留（非阻塞），发最终字幕
+			for {
+				select {
+				case p := <-audioCh:
+					audioKB += len(p) / 1024
+					_ = writeFrame(w, framePCM, p)
+				case s := <-textCh:
+					shown.WriteString(s)
+				default:
+					out := strings.TrimSpace(shown.String())
+					if out == "" {
+						out = strings.TrimSpace(reply)
+					}
+					if out == "" {
+						out = "（没有可播报的内容）"
+					}
+					_ = writeFrame(w, frameText, []byte(truncateSentences(out, 380)))
+					log.Printf("voice(stream,xiaozhi): app=%s audio=%dKB 上屏=%d字 total=%v",
+						app, audioKB, utf8.RuneCountInString(out),
+						time.Since(t0).Round(time.Millisecond))
+					return true
+				}
+			}
+		}
+	}
 }
 
 // stripWavHeader 去掉 RIFF/WAVE 头，只留 PCM（各 TTS 引擎输出 44B 头）。

@@ -62,6 +62,9 @@ const (
 	// "新对话"= 轮换 username+session_id（AstrBot 服务端失忆）。必须持久
 	// 化——曾只存内存，Bridge 重启退回旧代 → 服务端旧记忆复活。
 	SettingKeyAstrbotSessions = "astrbot_sessions"
+	// xiaozhi：官方服务模拟设备身份 {device_id, client_id, ota_url,
+	// enc_creds}（整体凭据加密；ADR-005）
+	SettingKeyXiaozhi = "xiaozhi"
 )
 
 // SaveChatActiveBot 保存当前机器人实例 id（空串=清除，回落第一个）。
@@ -173,4 +176,85 @@ func (d *DB) SaveAstrbotSessionGens(global uint64, perBot map[string]uint64) err
 		return err
 	}
 	return d.SaveSetting(SettingKeyAstrbotSessions, string(raw))
+}
+
+// XiaozhiCreds 小智官方服务模拟设备身份（密钥字段整体加密，见下）。
+type XiaozhiCreds struct {
+	DeviceID string `json:"device_id"`
+	ClientID string `json:"client_id"`
+	OTAURL   string `json:"ota_url"`
+	WsURL    string `json:"ws_url"`
+	WsToken  string `json:"ws_token"`
+	Bound    bool   `json:"bound"`
+}
+
+// SaveXiaozhiCreds 保存小智身份：外层 JSON 存非密字段，完整凭据（含
+// ws_token）AES-256-GCM 加密进 enc_creds（无 master key 时拒绝保存——
+// token 属密钥，绝不明文落库）。
+func (d *DB) SaveXiaozhiCreds(c XiaozhiCreds, masterKey []byte) error {
+	if masterKey == nil {
+		return security.ErrNoMasterKey
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	enc, err := security.Encrypt(string(raw), masterKey)
+	if err != nil {
+		return fmt.Errorf("storage: encrypt xiaozhi creds: %w", err)
+	}
+	outer, _ := json.Marshal(map[string]string{
+		"device_id": c.DeviceID,
+		"client_id": c.ClientID,
+		"ota_url":   c.OTAURL,
+		"enc_creds": enc,
+	})
+	return d.SaveSetting(SettingKeyXiaozhi, string(outer))
+}
+
+// GetXiaozhiCreds 读取小智身份；解密失败按未配置处理（Ready=false）。
+func (d *DB) GetXiaozhiCreds(masterKey []byte) XiaozhiCreds {
+	var out XiaozhiCreds
+	raw, err := d.GetSetting(SettingKeyXiaozhi)
+	if err != nil || raw == "" {
+		return out
+	}
+	var outer struct {
+		DeviceID string `json:"device_id"`
+		ClientID string `json:"client_id"`
+		OTAURL   string `json:"ota_url"`
+		EncCreds string `json:"enc_creds"`
+	}
+	if json.Unmarshal([]byte(raw), &outer) != nil {
+		return out
+	}
+	out.DeviceID, out.ClientID, out.OTAURL = outer.DeviceID, outer.ClientID, outer.OTAURL
+	if outer.EncCreds == "" || masterKey == nil {
+		return out
+	}
+	if dec, derr := security.Decrypt(outer.EncCreds, masterKey); derr == nil {
+		var full XiaozhiCreds
+		if json.Unmarshal([]byte(dec), &full) == nil {
+			// 解密成功：以完整凭据为准，外层明文字段覆盖（可单独改 ota_url）
+			full.DeviceID = firstNonEmptyStr(outer.DeviceID, full.DeviceID)
+			full.ClientID = firstNonEmptyStr(outer.ClientID, full.ClientID)
+			full.OTAURL = firstNonEmptyStr(outer.OTAURL, full.OTAURL)
+			return full
+		}
+	}
+	return out
+}
+
+// DeleteXiaozhiCreds 清除小智配置（幂等）。
+func (d *DB) DeleteXiaozhiCreds() error {
+	return d.DeleteSetting(SettingKeyXiaozhi)
+}
+
+func firstNonEmptyStr(vs ...string) string {
+	for _, v := range vs {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

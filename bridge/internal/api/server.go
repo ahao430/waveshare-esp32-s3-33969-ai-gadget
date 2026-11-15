@@ -21,6 +21,7 @@ import (
 	"gadget-bridge/internal/storage"
 	"gadget-bridge/internal/voice"
 	"gadget-bridge/internal/weather"
+	"gadget-bridge/internal/xiaozhi"
 )
 
 // Deps 是装配 Server 所需依赖。
@@ -40,6 +41,8 @@ type Deps struct {
 	ChatRouter *ai.Router
 	// VoiceHandler 为 nil 时不挂语音端点（PLAN §5.3 语音链路）。
 	VoiceHandler *voice.Handler
+	// Xiaozhi 为 nil 时不挂小智官方服务端点（ADR-005）。
+	Xiaozhi *xiaozhi.Manager
 	// Credentials：nil 或 MasterKey nil 时不挂凭据路由（fail-safe）。
 	CredentialsDB *storage.DB
 	MasterKey     []byte
@@ -136,6 +139,9 @@ func NewHandler(d Deps) http.Handler {
 		serveKeys(mux, d, logger)
 		serveWeather(mux, d, logger)
 		serveLauncher(mux, d, logger)
+		if d.Xiaozhi != nil {
+			serveXiaozhi(mux, d, logger)
+		}
 	}
 
 	// 外观：自定义背景上传/下载（Web → Bridge → 设备拉取）。

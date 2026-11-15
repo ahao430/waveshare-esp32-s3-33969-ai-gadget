@@ -4,7 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "=== Bridge (Go) ==="
-(cd bridge && go vet ./... && go build ./... && go test ./...)
+# -tags nolibopusfile：hraban/opus 只连 libopus（免 opusfile 依赖）；
+# 需系统 libopus（macOS brew / CI apt 见 .github/workflows/check.yml）
+(cd bridge && go vet -tags nolibopusfile ./... && \
+  go build -tags nolibopusfile ./... && \
+  go test -tags nolibopusfile ./...)
 
 echo "=== Web (Vue3+TS) ==="
 (cd web && [ -d node_modules ] || npm install --silent)

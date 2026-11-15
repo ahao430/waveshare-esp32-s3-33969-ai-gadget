@@ -6,6 +6,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hajimehoshi/go-mp3 v0.3.4
+	github.com/hraban/opus v0.0.0-20260708213942-bde8e4304501
 	modernc.org/sqlite v1.38.0
 )
 
