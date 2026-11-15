@@ -870,6 +870,14 @@ static ds_voice_result_t bridge_voice_interact(const char *app, const int16_t *p
                                                char *transcript, int transcript_len,
                                                char *reply, int reply_len)
 {
+    /* 本地拦截（用户 2026-11-15：识别不到内容就别发云端）：
+     * <0.3s 的录音基本是误触——连 ASR 都不打，直接回提示。 */
+    if (frames < 4800) {
+        snprintf(transcript, (size_t)transcript_len, "……");
+        snprintf(reply, (size_t)reply_len, "按住时间太短啦，再试一次。");
+        DSLOG("voice skip: frames=%d too short", frames);
+        return DS_VOICE_OK;
+    }
     if (frames <= 0) {
         snprintf(reply, (size_t)reply_len, "(未录到音频)");
         return DS_VOICE_ERROR;

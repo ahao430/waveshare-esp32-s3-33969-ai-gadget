@@ -80,3 +80,18 @@ func TestTtsSpeakTextSkipsReasoningAndParens(t *testing.T) {
 		t.Fatalf("normal sentence with brand dropped")
 	}
 }
+
+func TestSpeechValid(t *testing.T) {
+	valid := []string{"今天天气怎么样", "hello", "3点开会", "嗯嗯好的"}
+	invalid := []string{"", "   ", "。", "…", "，？！"}
+	for _, s := range valid {
+		if !speechValid(s) {
+			t.Errorf("speechValid(%q) should be true", s)
+		}
+	}
+	for _, s := range invalid {
+		if speechValid(s) {
+			t.Errorf("speechValid(%q) should be false", s)
+		}
+	}
+}

@@ -226,6 +226,19 @@ func (h *Handler) ServeInteract(w http.ResponseWriter, r *http.Request) {
 	}
 	tASR := time.Since(t0)
 
+	// 没听清拦截：ASR 无有效内容就不再打 LLM/TTS（省时省钱），
+	// 直接回提示文本 + 空 WAV（设备端播放空音频即秒结束，字幕照常）
+	if !speechValid(text) {
+		log.Printf("voice: empty transcript after %v, skip llm/tts",
+			tASR.Round(time.Millisecond))
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set("X-Voice-Transcript", text)
+		w.Header().Set("X-Voice-Reply", "没听清，再按住说一次试试。")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(wrapWavBytes(nil))
+		return
+	}
+
 	t1 := time.Now()
 	reply, err := h.eng.Respond(ctx, text)
 	if err != nil {

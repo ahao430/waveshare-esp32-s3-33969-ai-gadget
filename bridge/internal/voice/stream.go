@@ -78,6 +78,14 @@ func (h *Handler) ServeInteractStream(w http.ResponseWriter, r *http.Request, au
 		f.Flush()
 	}
 
+	// 没听清拦截：不发 LLM/TTS，一帧提示文本即收工
+	if !speechValid(text) {
+		log.Printf("voice(stream): empty transcript after %v, skip llm/tts",
+			tASR.Round(time.Millisecond))
+		_ = writeFrame(w, frameText, []byte("没听清，再按住说一次试试。"))
+		return
+	}
+
 	start := time.Now()
 	// 三条流水：pending=正在凑的半句；shown=上屏文本（含括号描写、
 	// 不含英文推理）；spoken=已朗读文本（去括号去 markdown 去推理句）。

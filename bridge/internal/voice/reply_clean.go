@@ -106,6 +106,17 @@ func isHanOrCJKPunct(r rune) bool {
 // 2. 句内英文占比过高且无中文 = 模型推理/元叙述，整句不朗读
 // 3. markdown 符号不朗读
 
+// speechValid：ASR 结果里有没有实际内容（字母/汉字/数字）。
+// 只有空白/标点（"。"、"嗯…"被拦成空也常见）视为没听清。
+func speechValid(text string) bool {
+	for _, r := range strings.TrimSpace(text) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // stripParenNotes 去掉成对括号及其内容（全角/半角，一层）。
 // 落单的右括号保留（正文里偶尔出现）。
 func stripParenNotes(s string) string {
