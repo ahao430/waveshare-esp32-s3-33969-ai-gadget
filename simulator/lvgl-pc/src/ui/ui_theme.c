@@ -4,10 +4,14 @@
 
 #ifdef ESP_PLATFORM
 /* 显示锁实现（声明见 ui.h）：音频 worker/播放任务触碰 LVGL 前持有。
- * bsp_display_lock(0) 为无限等待的递归互斥量（真机坑#1），重入安全。 */
-#include "bsp/esp-bsp.h"
-void ui_lock(void)   { bsp_display_lock(0); }
-void ui_unlock(void) { bsp_display_unlock(); }
+ * 必须用 esp_lv_adapter_lock(-1)：本版 BSP 的 bsp_display_lock(0) 实际是
+ * 「0 tick 非阻塞 try-lock」（头文件写无限等待，与实现不符）——失败被忽略
+ * 就变成并发改 LVGL，命中断言 "Invalidate area is not allowed during
+ * rendering"，而 LV_ASSERT_HANDLER 默认 while(1) → 静默死机。
+ * 递归互斥量，LVGL 线程内重入安全。 */
+#include "esp_lv_adapter.h"
+void ui_lock(void)   { (void)esp_lv_adapter_lock(-1); }
+void ui_unlock(void) { esp_lv_adapter_unlock(); }
 #endif
 
 /* ---- 主题（用户 2026-11-14：主题色可换；0 号 = 定稿图基准） ---- */

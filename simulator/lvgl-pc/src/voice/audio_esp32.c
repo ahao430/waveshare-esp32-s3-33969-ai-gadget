@@ -38,6 +38,7 @@ static void capture_task(void *arg)
 {
     (void)arg;
     static int16_t chunk[PCM_CHUNK_FRAMES];
+    unsigned long frames = 0;
     while (atomic_load(&g_cap_run)) {
         int rc = esp_codec_dev_read(g_mic, chunk, sizeof(chunk));
         if (rc != 0) {
@@ -46,8 +47,12 @@ static void capture_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
+        frames += PCM_CHUNK_FRAMES;
         vs_feed_pcm(chunk, PCM_CHUNK_FRAMES);
     }
+    /* 采集量 0 = I2S 没出声（"按住说话没反应"的常见根因），必须留痕 */
+    ESP_LOGI(TAG, "capture stop: %lu frames (%lu ms)",
+             frames, frames * 1000UL / 16000UL);
     g_cap_task = NULL;
     vTaskDelete(NULL);
 }
@@ -126,7 +131,10 @@ static void play_task(void *arg)
 
 static int esp32_start_capture(void)
 {
-    if (!atomic_load(&g_inited)) return -1;
+    if (!atomic_load(&g_inited)) {
+        ESP_LOGW(TAG, "start_capture: audio not inited");
+        return -1;
+    }
     if (g_cap_task) return 0; /* 上一轮任务未退（理论不到） */
     atomic_store(&g_cap_run, true);
     if (xTaskCreate(capture_task, "vs_cap", 4096, NULL, 5, &g_cap_task) != pdPASS) {

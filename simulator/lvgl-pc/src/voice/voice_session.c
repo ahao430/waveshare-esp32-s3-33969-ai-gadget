@@ -19,6 +19,15 @@
 #include <string.h>
 #include <time.h>
 
+/* PTT 排障日志：静默 no-op 是"按住说话没反应"最难查的一类（无请求、
+ * 无报错）。状态迁移与每个 begin/end 早退原因都留痕。 */
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define VLOG(fmt, ...) ESP_LOGI("voice", fmt, ##__VA_ARGS__)
+#else
+#define VLOG(fmt, ...) fprintf(stderr, "[voice] " fmt "\n", ##__VA_ARGS__)
+#endif
+
 /* ---- 内部状态 ---- */
 
 static const vs_audio_ops_t *g_ops;
@@ -56,6 +65,8 @@ static void fire_state(vs_state_t st, const char *detail)
 static void set_state(vs_state_t transition_to, const char *detail)
 {
     if (g_state == transition_to) return;
+    VLOG("state %d -> %d (%s)", (int)g_state, (int)transition_to,
+         detail ? detail : "");
     g_state = transition_to;
     g_state_enter_ms = g_now_ms();
     fire_state(transition_to, detail);
@@ -129,9 +140,16 @@ const char *vs_owner(void)
 
 void vs_ptt_begin(void)
 {
-    if (!g_owner[0]) return;        /* 未持租约：no-op */
-    if (g_state != VS_IDLE) return; /* 非 Idle：no-op */
+    if (!g_owner[0]) {
+        VLOG("ptt_begin ignored: no lease");
+        return;
+    }
+    if (g_state != VS_IDLE) {
+        VLOG("ptt_begin ignored: state=%d", (int)g_state);
+        return;
+    }
     if (g_ops && g_ops->start_capture && g_ops->start_capture() != 0) {
+        VLOG("ptt_begin: start_capture failed");
         set_state(VS_ERROR, "capture_start_failed");
         return;
     }
@@ -140,7 +158,10 @@ void vs_ptt_begin(void)
 
 void vs_ptt_end(void)
 {
-    if (g_state != VS_LISTENING) return;
+    if (g_state != VS_LISTENING) {
+        VLOG("ptt_end ignored: state=%d", (int)g_state);
+        return;
+    }
     if (g_ops && g_ops->stop_capture) g_ops->stop_capture();
     set_state(VS_THINKING, NULL);
 }

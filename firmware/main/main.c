@@ -16,6 +16,7 @@
 #include "bsp/touch.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "esp_lv_adapter.h"
 #include "hal/gpio_ll.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
@@ -48,6 +49,42 @@
 #endif
 
 static const char *TAG = "gadget";
+
+/* ---- 显示锁：必须用 -1（无限等待） ----
+ * bsp_display_lock() 文档写「timeout_ms=0 无限等待」，但实现直接转
+ * esp_lv_adapter_lock(timeout_ms)，而 adapter 把 0 当 0 tick（非阻塞
+ * try-lock），失败只返回 false。返回值一被忽略，后果就是：main 在
+ * LVGL 后台任务渲染中并发改 widget → 命中 LVGL 断言
+ * "Invalidate area is not allowed during rendering"，而
+ * LV_ASSERT_HANDLER 默认 while(1) → 主任务静默死锁、屏上只剩半帧
+ *（上白下绿）、IDLE0 每 30s 报 task_wdt（真机实测 2026-11-15）。
+ * 统一经下面两个包装器 + -1 = portMAX_DELAY。 */
+static inline void display_lock(void) { (void)esp_lv_adapter_lock(-1); }
+static inline void display_unlock(void) { esp_lv_adapter_unlock(); }
+
+/* ---- 开机卡死临时探针（定位完删除）----
+ * 每 5s：①以 200ms 试锁 LVGL 判断显示锁是否被永久占用；
+ * ②打印任务表（B=阻塞 R=就绪 S=挂起）定位谁在等谁。
+ * 依赖 CONFIG_FREERTOS_USE_TRACE_FACILITY + STATS_FORMATTING_FUNCTIONS。 */
+static void hang_probe_task(void *arg)
+{
+    (void)arg;
+    static char tbuf[1024];
+    for (int i = 1;; i++) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        esp_err_t r = esp_lv_adapter_lock(200);
+        ESP_LOGI(TAG, "probe#%d lvgl_lock=%s heap_int=%u", i,
+                 r == ESP_OK ? "FREE" : "BUSY",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        if (r == ESP_OK) {
+            esp_lv_adapter_unlock();
+        } else {
+            /* 只在锁被长期占用时 dump 任务表 */
+            vTaskList(tbuf);
+            ESP_LOGW(TAG, "tasks:\nName\tState\tPrio\tStack\tNum\n%s", tbuf);
+        }
+    }
+}
 
 /* 事件位 */
 #define EV_KEY3_BIT BIT0  /* KEY3 按下沿（去抖后；key_task 判短/长按） */
@@ -408,38 +445,38 @@ static void key_task(void *arg)
             s_key3_state = 1;
             s_key3_down_us = now;
             if (g_saver_on) { /* 屏保态按键立即唤醒（不进本次按压分发） */
-                bsp_display_lock(0);
+                display_lock();
                 saver_exit();
-                bsp_display_unlock();
+                display_unlock();
             }
         }
         if (bits & EV_BOOT_BIT) {
-            bsp_display_lock(0);
+            display_lock();
             if (g_saver_on) {
                 saver_exit();
             } else {
                 ui_key_dispatch(UI_KEY_BOOT); /* 默认=返回（Web 可配） */
             }
-            bsp_display_unlock();
+            display_unlock();
         }
         if (bits & EV_KEY3_REL_BIT) {
             if (s_key3_state == 1) { /* 短按：松开即分发 */
                 s_key3_state = 0;
-                bsp_display_lock(0);
+                display_lock();
                 ui_key_dispatch(UI_KEY_KEY3);
-                bsp_display_unlock();
+                display_unlock();
             } else if (s_key3_state == 2) { /* 长按释放：PTT 收口 */
                 s_key3_state = 0;
-                bsp_display_lock(0);
+                display_lock();
                 ui_key_dispatch_long_release(UI_KEY_KEY3);
-                bsp_display_unlock();
+                display_unlock();
             }
         }
         if (s_key3_state == 1 && now - s_key3_down_us >= KEY3_LONG_MS * 1000LL) {
             s_key3_state = 2; /* 长按达成（屏保已由按下沿唤醒） */
-            bsp_display_lock(0);
+            display_lock();
             ui_key_dispatch_long(UI_KEY_KEY3);
-            bsp_display_unlock();
+            display_unlock();
         }
     }
 }
@@ -549,7 +586,9 @@ void app_main(void)
         ESP_LOGE(TAG, "display_start_custom failed");
         return;
     }
-    bsp_display_backlight_on();
+    /* 临时：开机卡死探针（定位完删除） */
+    xTaskCreate(hang_probe_task, "hangprobe", 6144, NULL, 3, NULL);
+
     heap_report("post-display");
 
     if (strlen(BRIDGE_HOST) > 0) {
@@ -557,12 +596,19 @@ void app_main(void)
         ESP_LOGI(TAG, "data source -> bridge(%s)", BRIDGE_HOST);
     }
 
-    bsp_display_lock(0);
+    display_lock();
     ui_init();
     saver_build();
     lv_timer_create(lvgl_heartbeat_cb, 15000, NULL);
-    bsp_display_unlock();
+    display_unlock();
     heap_report("post-ui");
+
+    /* 背光延后到首帧构建完：真机实测（2026-11-15）在 ui_init 之前调
+     * bsp_display_backlight_on() 会卡死在 esp_lcd_panel_io_tx_param 等
+     * SPI 总线——此时适配器首帧刷屏的 DMA 传输在途，主任务 tx_param
+     * 拿不到总线（LVGL 锁反而是空闲的，说明不是 GUI 线程问题）。
+     * 延后既避免死锁，也避免开机闪一屏未初始化的花屏。 */
+    bsp_display_backlight_on();
 
     wifi_start();
     ESP_LOGI(TAG, "gadget up: shared UI + screensaver; wifi last");

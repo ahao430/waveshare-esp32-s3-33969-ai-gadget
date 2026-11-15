@@ -33,6 +33,15 @@
 #include "ui_keys.h"
 #include "ui_theme.h"
 
+/* PTT 事件留痕：按下/抬起/丢失任何一个没到，表现都是"按住说话没反应"
+ *（无 HTTP 请求、无报错），日志是唯一判据。 */
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#define CLOG(fmt, ...) ESP_LOGI("conv", fmt, ##__VA_ARGS__)
+#else
+#define CLOG(fmt, ...) fprintf(stderr, "[conv] " fmt "\n", ##__VA_ARGS__)
+#endif
+
 #define CONV_MSGS 12
 #define CONV_TEXT 384
 #define WAVE_BARS_MAX 32
@@ -266,6 +275,8 @@ static void continuous_toggle_cb(lv_event_t *e)
 static void ptt_pressed_cb(lv_event_t *e)
 {
     (void)e;
+    CLOG("ptt PRESSED voice_enabled=%d state=%d", (int)g_voice_enabled,
+         (int)vs_state());
     if (g_voice_enabled) vs_ptt_begin();
 }
 
@@ -297,12 +308,36 @@ static void key3_long_ptt_cb(void)
 static void ptt_released_cb(lv_event_t *e)
 {
     (void)e;
+    CLOG("ptt RELEASED state=%d", (int)vs_state());
+    if (g_voice_enabled) vs_ptt_end();
+}
+
+/* PRESS_LOST：手指按住后被滚动/其他对象抢走焦点时 LVGL 不会补 RELEASED。
+ * 原来只认 RELEASED → 录音永远收不了口（状态卡 Listening、无请求），
+ * 表现就是"按住说话没反应"。丢失按抬处理：提交已录到的音频。 */
+static void ptt_press_lost_cb(lv_event_t *e)
+{
+    (void)e;
+    CLOG("ptt PRESS_LOST state=%d", (int)vs_state());
     if (g_voice_enabled) vs_ptt_end();
 }
 
 static void poll_timer_cb(lv_timer_t *t)
 {
     (void)t;
+
+    /* 录音看门狗：抬起沿丢失（PRESS_LOST 之外的路径）时不能让状态机
+     * 永久停在 Listening——超过 20s 强制提交已录音频。 */
+    static vs_state_t last_st;
+    static uint32_t listen_t0;
+    vs_state_t st = vs_state();
+    if (st == VS_LISTENING && last_st != VS_LISTENING) listen_t0 = lv_tick_get();
+    last_st = st;
+    if (st == VS_LISTENING && lv_tick_elaps(listen_t0) > 20000) {
+        CLOG("ptt watchdog: force submit (20s)");
+        vs_ptt_end();
+    }
+
     vs_tick();
 
     pthread_mutex_lock(&g_voice_mu);
@@ -515,6 +550,8 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     if (g_voice_enabled) {
         lv_obj_add_event_cb(g_ptt_btn, ptt_pressed_cb, LV_EVENT_PRESSED, NULL);
         lv_obj_add_event_cb(g_ptt_btn, ptt_released_cb, LV_EVENT_RELEASED, NULL);
+        lv_obj_add_event_cb(g_ptt_btn, ptt_press_lost_cb, LV_EVENT_PRESS_LOST,
+                            NULL);
     }
     lv_obj_t *mic = ui_label(g_ptt_btn, LV_SYMBOL_AUDIO, &lv_font_montserrat_28,
                              g_voice_enabled ? UI_TEXT : UI_TEXT_DIM);

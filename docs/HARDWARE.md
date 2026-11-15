@@ -170,8 +170,12 @@
   推荐 `-O2 + 240MHz + DRAW_UNIT_CNT=2 + LV_OS_FREERTOS + 15ms +
   CLIB malloc/string/sprintf + SPIRAM_XIP_FROM_PSRAM + 32KB I-cache +
   64KB D-cache + FREERTOS_HZ=1000`——渲染速度差 3~5 倍，是桌面滑动
-  卡死/官方固件更流畅的根本原因。已全量对齐（注意：internal RAM 会
-  因此收紧，稳态 ~22KB，显示缓冲仍须在启动期分配）。
+  卡死/官方固件更流畅的根本原因。已对齐 **-O2 / 240MHz / 15ms 刷新 /
+  CLIB / FREERTOS_HZ=1000**（这四项是 3~5x 提速的主要来源）。
+  **未采用**：`SPIRAM_XIP_FROM_PSRAM`+大 cache（撤：PSRAM 取指与显示
+  DMA 争用，撤后 internal 84→132KB）、`DRAW_UNIT_CNT=2`（撤：见下方
+  "线程绘制 + 任务通知" 坑，改 1 换确定性）。internal RAM 因此收紧，
+  显示缓冲仍须在启动期分配。
 - **禁止手指直接拖动 tileview**（2026-11-15，压测定位）：手指连续拖拽
   时 tileview 每帧全屏重绘（背景 canvas 图 + 4 图标合成），占空比 100%
   → 显示管线压垮卡死；同样的 60 次程序化翻页（每 800ms，动画 200ms）
@@ -179,6 +183,35 @@
   现行：`LV_OBJ_FLAG_SCROLLABLE` 关闭 + 自研快滑手势（30ms 轮询指针，
   dx≥50px、2:1 主导、≤500ms）→ `set_tile_by_index(ANIM_ON)` 整页切换，
   重绘成本有界（每滑一次 ≈200ms 动画）。
+- **`bsp_display_lock(0)` 不是无限等待**（2026-11-15，开机白/绿半屏死机
+  定位）：BSP 头文件写"0 will block indefinitely"，实现却是转
+  `esp_lv_adapter_lock(0)` = **0 tick 的 try-lock**，失败只返回 false。
+  返回值一被忽略，main 就会在 adapter 渲染中并发改 widget → 命中
+  `LV_ASSERT_MSG(!disp->rendering_in_progress, "Invalidate area is not
+  allowed during rendering")`；而 `LV_ASSERT_HANDLER` 默认是
+  `while(1);`（`CONFIG_LV_USE_LOG` 关闭时**一个字都不打印**）→ 主任务
+  永久空转、IDLE0 每 30s 报 task_wdt、屏上只剩半帧（上白下绿）。
+  串口现场：`task_wdt: CPU 0: main` + backtrace
+  `lv_inv_area(lv_refr.c:282) ← lv_obj_invalidate_area ← lv_obj_set_pos
+  ← lv_screen_load_anim ← lv_screen_load ← ui_init(main.c:561)`。
+  修法：一律 `esp_lv_adapter_lock(-1)`（`ui_lock/ui_unlock` 与 main 的
+  `display_lock()` 包装器），并开 `CONFIG_LV_USE_LOG`（ERROR 级）让
+  LVGL 断言先打印再挂。
+- **背光必须延后到首帧构建完**（2026-11-15）：`ui_init()` 之前调
+  `bsp_display_backlight_on()` → `esp_lcd_panel_io_tx_param(0x51)`
+  会和 adapter 首帧刷屏的 DMA 抢同一路 QSPI/SPI 总线，main 永久阻塞在
+  该调用（实测：main=Blocked、lvgl=Blocked、**显示锁空闲**、无 WDT）。
+  修法：`ui_init()` + `saver_build()` 之后再开背光（顺带避免开机闪一屏
+  未初始化的花屏）。真机复测：post-ui 3824ms → 背光 3825ms → Wi-Fi
+  5154ms，heap_int 稳定 ~80KB，lvgl 心跳正常。
+- **线程绘制 + 任务通知同步会和 adapter 抢同一个通知**（2026-11-15）：
+  `CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2` + `CONFIG_LV_USE_FREERTOS_TASK_NOTIFY=y`
+  时，draw unit 的条件变量用 FreeRTOS task notification，而
+  esp_lv_adapter 的 LVGL 任务自己也用 `ulTaskNotifyTake` 做循环等待
+  → 通知被吞/丢失唤醒，首帧渲染可能死等（lvgl 持锁 Blocked、探针试锁
+  BUSY）。现行先取确定性：`LV_DRAW_SW_DRAW_UNIT_CNT=1` +
+  `# CONFIG_LV_USE_FREERTOS_TASK_NOTIFY is not set`；要恢复双绘制单元
+  需先单独压测这条路径。
 
 ## 3. BSP 与上游版本
 

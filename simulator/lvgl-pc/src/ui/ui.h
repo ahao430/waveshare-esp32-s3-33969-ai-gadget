@@ -5,8 +5,12 @@
 #include "lvgl.h"
 
 /* 显示锁抽象：非 LVGL 线程（音频 worker/播放任务）触碰 LVGL 对象时
- * 必须持有（真机坑#1：bsp_display_lock(0)=无限等待的递归互斥量，
- * 有限超时 take 会触发 FreeRTOS 断言——只许 lock(0)+成对 unlock）。
+ * 必须持有。实现用 esp_lv_adapter_lock(-1)（无限等待的递归互斥量）。
+ * 注意：bsp_display_lock(0) 在本版 BSP/adapter 里是 0-tick 非阻塞
+ * try-lock（头文件写"0=无限等待"，实现不符），失败被忽略就会并发踩
+ * LVGL → 命中 LV_ASSERT_MSG("Invalidate area is not allowed during
+ * rendering") → LV_ASSERT_HANDLER 默认 while(1) 静默死机（真机实测：
+ * 屏幕半帧花屏 + IDLE0 task_wdt）。只许 -1 + 成对 unlock。
  * 模拟器单线程 no-op。 */
 #ifdef ESP_PLATFORM
 void ui_lock(void);

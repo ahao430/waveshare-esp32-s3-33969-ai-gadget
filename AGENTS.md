@@ -53,8 +53,12 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 - 桌面/对话页布局与配色见 docs/UI_DESIGN.md
 
 ### 真机特有坑（均已实测，HARDWARE.md §2.7 有完整记录）
-1. **`bsp_display_lock(0)` = 无限等待**（非非阻塞！）。有限超时 take 超时
-   会触发 FreeRTOS 递归互斥量断言崩溃——跨任务 UI 操作一律 `lock(0)` + 成对 unlock
+1. **`bsp_display_lock(0)` 实际是 0-tick try-lock**（头文件写"无限等待"，
+   实现转 `esp_lv_adapter_lock(0)`，与文档不符）。失败被忽略就会并发踩
+   LVGL → 断言 `Invalidate area is not allowed during rendering` →
+   `while(1)` 静默死机（屏幕半帧、IDLE0 WDT）。**一律用
+   `esp_lv_adapter_lock(-1)`**（`ui_lock/ui_unlock` 已封装）+ 成对 unlock；
+   背光要等 `ui_init()` 之后才开（否则与首帧 DMA 抢 QSPI 总线）
 2. **全屏高频重绘会堵死显示管线**（白屏/LVGL 挂起，断电才能恢复）——
    设备 UI 只做局部失效 + 帧率节流；全屏刷新仅限页面切换
 3. `esp_timer` 周期单位是 **µs**（按 ms 传会快 1000 倍）
