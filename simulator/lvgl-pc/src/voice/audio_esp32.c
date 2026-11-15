@@ -212,26 +212,19 @@ void audio_esp32_set_volume(int pct)
 
 /* ---- vs_audio_ops_t ---- */
 
+/* 采集任务常驻（init 时启动一次）：播放期间也必须持续读 mic——
+ * 2026-11-16 连续对话实测，播完回复后的下一轮聆听全是静音
+ * （maxamp=0~4，说话完全没进来）：按轮启停时 SPEAKING 期间无人读
+ * ES7210，RX DMA 溢出后 esp_codec_dev_read 一直回零。常驻读取 +
+ * vs_feed_pcm 只在 LISTENING 转发（非聆听期读到即丢弃，无拷贝）。 */
 static int esp32_start_capture(void)
 {
-    if (!atomic_load(&g_inited)) {
-        ESP_LOGW(TAG, "start_capture: audio not inited");
-        return -1;
-    }
-    if (g_cap_task) return 0; /* 上一轮任务未退（理论不到） */
-    atomic_store(&g_cap_run, true);
-    if (xTaskCreate(capture_task, "vs_cap", 4096, NULL, 5, &g_cap_task) != pdPASS) {
-        atomic_store(&g_cap_run, false);
-        return -1;
-    }
-    return 0;
+    return atomic_load(&g_inited) ? 0 : -1;
 }
 
 static void esp32_stop_capture(void)
 {
-    atomic_store(&g_cap_run, false);
-    /* 任务自行退出（下一次 esp_codec_dev_read 返回后）；
-     * 尾部帧由 vs_feed_pcm 的状态检查丢弃，不 join（≤20ms 残留） */
+    /* no-op：任务常驻，帧按状态丢弃 */
 }
 
 static int esp32_play(const int16_t *pcm, int frames)
@@ -297,6 +290,11 @@ int audio_esp32_init(void)
     esp_codec_dev_set_in_gain(g_mic, 18.0);
 
     atomic_store(&g_inited, true);
-    ESP_LOGI(TAG, "audio ready: 16k/16bit/mono, spk vol 70, mic gain 18dB");
+    atomic_store(&g_cap_run, true);
+    if (xTaskCreate(capture_task, "vs_cap", 4096, NULL, 5, &g_cap_task) != pdPASS) {
+        ESP_LOGE(TAG, "capture task create failed");
+        return -1;
+    }
+    ESP_LOGI(TAG, "audio ready: 16k/16bit/mono, spk vol 70, mic gain 18dB (capture resident)");
     return 0;
 }
