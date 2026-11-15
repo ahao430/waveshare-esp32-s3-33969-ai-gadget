@@ -74,7 +74,9 @@ void ui_statusbar_init(void)
     if (g_bar) return;
 
     g_bar = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_bar, 480, 24);
+    /* 真机目视反馈"状态栏小"：24→34px，图标 14→20、百分比 12→16
+     *（百分比一直有，12px 在小屏看不清） */
+    lv_obj_set_size(g_bar, 480, 34);
     lv_obj_align(g_bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(g_bar, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(g_bar, 0, 0);
@@ -82,19 +84,19 @@ void ui_statusbar_init(void)
     lv_obj_clear_flag(g_bar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_clear_flag(g_bar, LV_OBJ_FLAG_CLICKABLE); /* 点击穿透到下层屏幕 */
 
-    g_lbl_pct = ui_label(g_bar, "--%", &lv_font_montserrat_12, UI_TEXT_DIM);
+    g_lbl_pct = ui_label(g_bar, "--%", &lv_font_montserrat_16, UI_TEXT_DIM);
     lv_obj_align(g_lbl_pct, LV_ALIGN_RIGHT_MID, 0, 0);
 
-    g_lbl_bolt = ui_label(g_bar, LV_SYMBOL_CHARGE, &lv_font_montserrat_12, UI_OK);
-    lv_obj_align(g_lbl_bolt, LV_ALIGN_RIGHT_MID, -36, 0);
+    g_lbl_bolt = ui_label(g_bar, LV_SYMBOL_CHARGE, &lv_font_montserrat_16, UI_OK);
+    lv_obj_align(g_lbl_bolt, LV_ALIGN_RIGHT_MID, -46, 0);
     lv_obj_add_flag(g_lbl_bolt, LV_OBJ_FLAG_HIDDEN);
 
-    g_lbl_batt = ui_label(g_bar, LV_SYMBOL_BATTERY_FULL, &lv_font_montserrat_14,
+    g_lbl_batt = ui_label(g_bar, LV_SYMBOL_BATTERY_FULL, &lv_font_montserrat_20,
                           UI_TEXT_DIM);
-    lv_obj_align(g_lbl_batt, LV_ALIGN_RIGHT_MID, -58, 0);
+    lv_obj_align(g_lbl_batt, LV_ALIGN_RIGHT_MID, -74, 0);
 
-    g_lbl_wifi = ui_label(g_bar, LV_SYMBOL_WIFI, &lv_font_montserrat_14, UI_TEXT_DIM);
-    lv_obj_align(g_lbl_wifi, LV_ALIGN_RIGHT_MID, -86, 0);
+    g_lbl_wifi = ui_label(g_bar, LV_SYMBOL_WIFI, &lv_font_montserrat_20, UI_TEXT_DIM);
+    lv_obj_align(g_lbl_wifi, LV_ALIGN_RIGHT_MID, -112, 0);
 
     g_timer = lv_timer_create(statusbar_timer_cb, 5000, NULL);
     (void)g_timer;

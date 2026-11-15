@@ -18,7 +18,7 @@
 #include "ui_theme.h"
 
 #ifdef ESP_PLATFORM
-#include "icon_embed.h" /* 真机图标：PNG 嵌入固件（gen_icon_embed.sh） */
+#include "icon_embed.h" /* 真机图标：嵌入固件（gen_icon_embed.sh 预解码 ARGB） */
 #endif
 
 static lv_obj_t *g_launcher;
@@ -172,6 +172,35 @@ static void bg_attach(lv_obj_t *parent)
 /* ---------------- 磁贴 ---------------- */
 
 #define TILE_ICON 64  /* 图标区边长（头像/彩色符号块） */
+
+#ifdef ESP_PLATFORM
+/* 图标错峰挂载：首帧 9 张 88×88 ARGB 同帧 blend + canvas 背景会超出
+ * 显示管线瞬时能力——首刷必卡死且 TWDT 静默（坑#2 变体，2026-11-15
+ * 真机三组对照定位：探针版时序错开即正常）。构建时只出背景，
+ * 首帧后 700ms 起 60ms/张渐进 set_src。 */
+#define LAZY_ICONS_MAX 12
+static struct { lv_obj_t *img; const void *src; } s_lazy[LAZY_ICONS_MAX];
+static int s_lazy_n;
+
+static void lazy_icon_cb(lv_timer_t *t)
+{
+    static int i;
+    if (i >= s_lazy_n) {
+        lv_timer_del(t);
+        return;
+    }
+    lv_obj_t *img = s_lazy[i].img;
+    lv_image_set_src(img, s_lazy[i].src);
+    lv_obj_update_layout(img);
+    int32_t src_w = lv_obj_get_width(img);
+    if (src_w <= 0) src_w = 88;
+    lv_obj_set_size(img, 108, 108);
+    lv_image_set_scale(img, (256 * 108) / src_w);
+    lv_obj_center(img);
+    i++;
+    lv_timer_set_period(t, 60);
+}
+#endif
 
 static void tile_add(lv_obj_t *grid, const app_def_t *def, int cell)
 {
@@ -356,6 +385,17 @@ void ui_launcher_build(void)
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_SCROLLABLE);
                 lv_obj_clear_flag(holder, LV_OBJ_FLAG_CLICKABLE);
                 lv_obj_t *img = lv_image_create(holder);
+#ifdef ESP_PLATFORM
+                /* 真机：延迟错峰挂载（见 lazy_icon_cb 注释） */
+                if (s_lazy_n < LAZY_ICONS_MAX) {
+                    s_lazy[s_lazy_n].img = img;
+                    s_lazy[s_lazy_n].src = icon_src;
+                    s_lazy_n++;
+                    if (s_lazy_n == 1) {
+                        lv_timer_create(lazy_icon_cb, 700, NULL);
+                    }
+                }
+#else
                 lv_image_set_src(img, icon_src);
                 /* 按源图实际宽度自适应缩放（88 头像/更大自备图标均可） */
                 lv_obj_update_layout(img);
@@ -364,6 +404,7 @@ void ui_launcher_build(void)
                 lv_obj_set_size(img, ICON, ICON);
                 lv_image_set_scale(img, (256 * ICON) / src_w);
                 lv_obj_center(img);
+#endif
             } else {
                 lv_obj_t *holder = lv_obj_create(tile_btn);
                 lv_obj_set_size(holder, ICON, ICON);
