@@ -288,7 +288,7 @@ static lv_display_t *display_start_custom(void)
     ESP_ERROR_CHECK(esp_lv_adapter_init(&lv_cfg));
 
     const bsp_display_config_t disp_config = {
-        .max_transfer_sz = 480 * 20 * 2, /* SPI 分块上限（内部 DMA 预算内） */
+        .max_transfer_sz = 480 * 10 * 2, /* SPI 分块上限（内部 DMA 预算内） */
     };
     esp_lcd_panel_handle_t panel = NULL;
     esp_lcd_panel_io_handle_t io = NULL;
@@ -306,12 +306,14 @@ static lv_display_t *display_start_custom(void)
             .rotation = ESP_LV_ADAPTER_ROTATE_0,
             .hor_res = 480,
             .ver_res = 480,
-            .buffer_height = 20,
-            /* 绘制缓冲留在 PSRAM（内部 RAM 太紧：搬内部会挤掉 16KB
-             * 语音线程栈 → pthread ENOMEM，且实测引发栈损坏崩溃）。
-             * 代价是 SPI 每块要在内部 RAM 分配 bounce buffer，靠下面
-             * 三条腾内部 RAM 的改动兜住。 */
-            .use_psram = true,
+            .buffer_height = 10,
+            /* 绘制缓冲放内部 RAM（DMA 直连，SPI 发送零拷贝）。放 PSRAM
+             * 时每块都要在内部 RAM 临时分配 9.6~19.2KB bounce buffer，
+             * 聊天页打开后内存被切碎 → 分配失败 → 花屏 + flush 卡死
+             * （2026-11-15 真机反复复现）。10 行双缓冲 = 19.2KB，
+             * 开机预分配，运行期不再申请大块。语音线程同步改为静态栈
+             * 常驻任务（ui_conversation.c voice_start）。 */
+            .use_psram = false,
             .enable_ppa_accel = false,
             .require_double_buffer = true,
         },

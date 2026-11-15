@@ -158,9 +158,8 @@ static int conv_thread_start(void *(*fn)(void *), void *arg, size_t stack)
 #endif
 }
 
-static void *voice_worker(void *arg)
+static void voice_work_once(void)
 {
-    (void)arg;
     char transcript[192] = {0}, reply[CONV_TEXT] = {0};
     CLOG("voice worker start: app=%s frames=%d", conv_app_key(g_app_id),
          g_capture ? g_capture_frames : 0);
@@ -171,6 +170,9 @@ static void *voice_worker(void *arg)
                       reply, sizeof(reply));
     CLOG("voice worker done: transcript=%u reply=%u", (unsigned)strlen(transcript),
          (unsigned)strlen(reply));
+#ifdef ESP_PLATFORM
+    CLOG("voice worker stack free=%u", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+#endif
 
     /* 写入历史（transcript 作为用户气泡 + reply 作为助手气泡） */
     int id = g_app_id;
@@ -194,8 +196,51 @@ static void *voice_worker(void *arg)
     strcpy(g_reply, reply);
     g_voice_done = true;
     pthread_mutex_unlock(&g_voice_mu);
+}
+
+static void *voice_worker(void *arg)
+{
+    (void)arg;
+    voice_work_once();
     return NULL;
 }
+
+/* 真机语音任务：常驻 + 静态栈（.bss），运行期不再向内部堆申请 12KB。
+ * 背景（2026-11-15 真机反复踩）：聊天页打开后内部 RAM 被解码/网络切碎，
+ * pthread 16KB→12KB 栈都拿不到（rc=12 ENOMEM），状态永远卡"思考中"；
+ * 同时 SPI 的 19.2KB DMA bounce 也分配失败 → 花屏。静态栈 + 绘制缓冲
+ * 开机预分配是唯一稳的组合。 */
+#ifdef ESP_PLATFORM
+#define VOICE_TASK_STACK 14336
+static StaticTask_t s_voice_tcb;
+static StackType_t s_voice_stack[VOICE_TASK_STACK / sizeof(StackType_t)];
+static TaskHandle_t s_voice_task;
+static volatile bool s_voice_busy;
+
+static void voice_task_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        s_voice_busy = true;
+        voice_work_once();
+        s_voice_busy = false;
+    }
+}
+
+static int voice_start(void)
+{
+    if (!s_voice_task) {
+        s_voice_task = xTaskCreateStatic(voice_task_main, "voice",
+                                         VOICE_TASK_STACK / sizeof(StackType_t),
+                                         NULL, 5, s_voice_stack, &s_voice_tcb);
+        if (!s_voice_task) return -1;
+    }
+    if (s_voice_busy) return -2; /* 上一回合还在跑：忽略重复触发 */
+    xTaskNotifyGive(s_voice_task);
+    return 0;
+}
+#endif
 
 static void ptt_apply_state(vs_state_t st); /* 前向声明：on_vs_state 里要用 */
 
@@ -213,8 +258,11 @@ static void on_vs_state(vs_state_t st, const char *detail, void *user)
 
     if (st == VS_LISTENING) g_capture_frames = 0;
     if (st == VS_THINKING) {
-        /* HTTP 链 + cJSON + 会话处理；栈在 PSRAM（见 conv_thread_start） */
-        int prc = conv_thread_start(voice_worker, NULL, 16 * 1024);
+#ifdef ESP_PLATFORM
+        int prc = voice_start(); /* 常驻静态栈任务，运行期零分配 */
+#else
+        int prc = conv_thread_start(voice_worker, NULL, 12 * 1024);
+#endif
         CLOG("voice worker spawn rc=%d frames=%d", prc, g_capture_frames);
     }
 }
@@ -709,9 +757,8 @@ static void *bot_sync_worker(void *arg)
 static void bot_thread_start(void *(*fn)(void *), void *arg)
 {
     /* 栈需求实测：http_request 4KB + 调用方 4KB（bots）+ 1KB 请求行
-     * + cJSON，12KB 会溢出 → 24KB；真机走 PSRAM 栈（内部 RAM 留给
-     * SPI DMA 绘制缓冲，见 conv_thread_start） */
-    (void)conv_thread_start(fn, arg, 24 * 1024);
+     * + cJSON；http 读缓冲已改堆分配后 16KB 足够（原 24KB） */
+    (void)conv_thread_start(fn, arg, 16 * 1024);
 }
 
 static void bot_sync_start(void) { bot_thread_start(bot_sync_worker, NULL); }

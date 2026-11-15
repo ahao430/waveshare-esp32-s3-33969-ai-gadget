@@ -269,11 +269,17 @@ static int http_request(const char *method, const char *url, const char *json_bo
         return -5;
     }
 
-    /* 读到连接关闭或缓冲满（Connection: close 保证服务端收尾） */
+    /* 读到连接关闭或缓冲满（Connection: close 保证服务端收尾）。
+     * 4KB 读缓冲走堆：ESP32 线程栈预算紧（语音 worker 16KB、面板
+     * 线程 24KB 曾在这条路径上 ENOMEM/溢出），不要让单请求再吃栈。 */
     size_t total = 0;
-    char buf[4096];
+    char *buf = malloc(4096);
+    if (!buf) {
+        close(fd);
+        return -9;
+    }
     ssize_t n;
-    while (total < out_len - 1 && (n = read(fd, buf, sizeof(buf))) > 0) {
+    while (total < out_len - 1 && (n = read(fd, buf, 4096)) > 0) {
         /* 只拷调用方缓冲装得下的部分：原来是"整块装不下就丢弃"，
          * 首包 > out_len 时 total=0 → 误判 -6（响应非 HTTP） */
         size_t take = (size_t)n;
@@ -282,6 +288,7 @@ static int http_request(const char *method, const char *url, const char *json_bo
         total += take;
         if (take < (size_t)n) break;
     }
+    free(buf);
     close(fd);
     out[total] = '\0';
 
