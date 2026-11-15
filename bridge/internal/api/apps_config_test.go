@@ -121,10 +121,20 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 	}))
 	t.Cleanup(bot.Close)
 
-	// 空 → 有（带配置文件 + 模型覆盖）
-	code, out := doJSON(t, "POST", srv.URL+"/api/v1/bots",
-		`{"label":"客厅机器人","base_url":"`+bot.URL+`","token":"abk-test",
-		  "config_id":"conf-maid","provider":"openai","model":"gpt-4o"}`)
+	// 1) 公用连接：地址 + Token（实例共用）
+	code, out := doJSON(t, "PUT", srv.URL+"/api/v1/astrbot/config",
+		`{"base_url":"`+bot.URL+`","token":"abk-test"}`)
+	if code != 200 {
+		t.Fatalf("save conn: %d %v", code, out)
+	}
+	code, out = doJSON(t, "GET", srv.URL+"/api/v1/astrbot/config", "")
+	if code != 200 || out["has_token"] != true || out["base_url"] != bot.URL {
+		t.Fatalf("conn view: %d %v", code, out)
+	}
+
+	// 2) 实例只带 名称 + 配置文件（+ 可选 provider/model 覆盖）
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots",
+		`{"label":"客厅机器人","config_id":"conf-maid","provider":"openai","model":"gpt-4o"}`)
 	if code != 200 {
 		t.Fatalf("create bot: %d %v", code, out)
 	}
@@ -142,15 +152,15 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 		t.Fatalf("want 1 bot, got %v", out)
 	}
 	b0 := bots[0].(map[string]any)
-	if b0["label"] != "客厅机器人" || b0["has_token"] != true {
+	if b0["label"] != "客厅机器人" || b0["config_id"] != "conf-maid" {
 		t.Fatalf("bot view wrong: %v", b0)
 	}
 	if _, leaked := b0["token"]; leaked {
 		t.Fatal("token 不得回显")
 	}
 
-	// 配置文件列表代理（Key 正确 → 两个配置）
-	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/configs", `{"id":"`+id+`"}`)
+	// 3) 公用连接拉配置文件列表
+	code, out = doJSON(t, "GET", srv.URL+"/api/v1/astrbot/configs", "")
 	if code != 200 || out["ok"] != true {
 		t.Fatalf("configs: %d %v", code, out)
 	}
@@ -158,7 +168,7 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 		t.Fatalf("want 2 configs, got %v", out["configs"])
 	}
 
-	// probe（用已保存 id；假服务验证凭据链路 + config/provider/model 传递）
+	// 4) 实例 probe：公用连接 + 该实例 config/provider/model
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe", `{"id":"`+id+`"}`)
 	if code != 200 || out["ok"] != true || !strings.Contains(out["reply"].(string), "pong") {
 		t.Fatalf("probe: %d %v", code, out)
@@ -169,36 +179,37 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 		t.Fatalf("chat payload missing overrides: %v", lastChatBody)
 	}
 
-	// 编辑（不带 token 字段=保留原 Token；probe 仍应鉴权通过）
+	// 5) 编辑（名称/配置）后 probe 仍通
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots",
-		`{"id":"`+id+`","label":"客厅机器人改名","base_url":"`+bot.URL+`","config_id":"conf-maid"}`)
+		`{"id":"`+id+`","label":"客厅机器人改名","config_id":"conf-maid"}`)
 	if code != 200 {
 		t.Fatalf("edit: %d %v", code, out)
 	}
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe", `{"id":"`+id+`"}`)
 	if code != 200 || out["ok"] != true {
-		t.Fatalf("probe after edit (token kept): %d %v", code, out)
+		t.Fatalf("probe after edit: %d %v", code, out)
 	}
 
-	// 错误 token 的 probe → ok=false
-	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe",
+	// 6) 错误 token 的公用连接 → probe 失败
+	_, _ = doJSON(t, "PUT", srv.URL+"/api/v1/astrbot/config",
 		`{"base_url":"`+bot.URL+`","token":"abk-wrong"}`)
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/probe", `{"id":"`+id+`"}`)
 	if code != 200 || out["ok"] != false {
-		t.Fatalf("probe should fail: %d %v", code, out)
+		t.Fatalf("probe should fail with wrong token: %d %v", code, out)
 	}
 
-	// 配置列表 403 → 明确提示 config scope
+	// 7) 配置列表 403 → 明确提示 config scope
 	bot2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", 403)
 	}))
 	t.Cleanup(bot2.Close)
-	_, out = doJSON(t, "POST", srv.URL+"/api/v1/bots/configs",
-		`{"base_url":"`+bot2.URL+`"}`)
+	_, _ = doJSON(t, "PUT", srv.URL+"/api/v1/astrbot/config", `{"base_url":"`+bot2.URL+`"}`)
+	_, out = doJSON(t, "GET", srv.URL+"/api/v1/astrbot/configs", "")
 	if out["ok"] != false || !strings.Contains(out["error"].(string), "config") {
 		t.Fatalf("403 hint wrong: %v", out)
 	}
 
-	// 删除幂等
+	// 8) 删除幂等
 	code, _ = doJSON(t, "DELETE", srv.URL+"/api/v1/bots/"+id, "")
 	if code != 200 {
 		t.Fatalf("delete: %d", code)
@@ -209,7 +220,6 @@ func TestBotsCRUDAndProbe(t *testing.T) {
 	}
 }
 
-// 旧版 astrbot 订阅 → 打开即迁移到 bots。
 func TestAstrBotSubscriptionMigratesToBots(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "gadget.db")
 	mk := newTestMasterKey(t)
