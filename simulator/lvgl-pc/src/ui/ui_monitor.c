@@ -143,7 +143,7 @@ static void build_list(lv_obj_t *scr, const gadget_state_t *s, int app_id)
         lv_obj_t *name = ui_label(card, srv->name, &lv_font_cn_16, UI_TEXT);
         lv_obj_align(name, LV_ALIGN_TOP_LEFT, 54, 6);
 
-        char up[10], dn[10];
+        char up[16], dn[16];
         net_fmt(up, sizeof(up), srv->net_up_kbps);
         net_fmt(dn, sizeof(dn), srv->net_down_kbps);
         if (srv->online) {
@@ -199,11 +199,11 @@ static void detail_tile_build(lv_obj_t *tile, const gadget_server_t *srv)
     pill_add(card, srv->online);
 
     if (srv->online) {
-        char vb[4][32]; /* "xxx.xK↓ xxx.xK↑"：↑↓ 为 3 字节 UTF-8，上限 ~26 字节 */
+        char vb[4][48]; /* "xxx.xK↓ xxx.xK↑"：↑↓ 为 3 字节 UTF-8，上限 ~26 字节 */
         snprintf(vb[0], sizeof(vb[0]), "%d%%", srv->cpu_pct);
         snprintf(vb[1], sizeof(vb[1]), "%d%%", srv->mem_pct);
         snprintf(vb[2], sizeof(vb[2]), "%d%%", srv->disk_pct);
-        char us[10], ds[10];
+        char us[16], ds[16];
         net_fmt(us, sizeof(us), srv->net_up_kbps);
         net_fmt(ds, sizeof(ds), srv->net_down_kbps);
         snprintf(vb[3], sizeof(vb[3]), "%s↓ %s↑", ds, us);

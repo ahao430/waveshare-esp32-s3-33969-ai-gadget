@@ -160,6 +160,14 @@
 - **桌面磁贴打开判定用按下/抬起位移**（≤10px 且 ≤600ms，且需
   `lv_indev_get_press_moved()==false`）：LV_EVENT_CLICKED 在 tileview
   横滑后仍会误发（滑动时误开 App，用户实测三轮回馈）。
+- **性能配置必须对齐官方 adapter README**（2026-11-15，重大发现）：
+  本项目固件此前是 `-Og + 160MHz + 单绘制单元 + 33ms 刷新 + LV_OS_NONE`，
+  而官方 `examples/esp-idf/02_lvgl_demo_v9` 与 esp_lvgl_adapter README
+  推荐 `-O2 + 240MHz + DRAW_UNIT_CNT=2 + LV_OS_FREERTOS + 15ms +
+  CLIB malloc/string/sprintf + SPIRAM_XIP_FROM_PSRAM + 32KB I-cache +
+  64KB D-cache + FREERTOS_HZ=1000`——渲染速度差 3~5 倍，是桌面滑动
+  卡死/官方固件更流畅的根本原因。已全量对齐（注意：internal RAM 会
+  因此收紧，稳态 ~22KB，显示缓冲仍须在启动期分配）。
 - **禁止手指直接拖动 tileview**（2026-11-15，压测定位）：手指连续拖拽
   时 tileview 每帧全屏重绘（背景 canvas 图 + 4 图标合成），占空比 100%
   → 显示管线压垮卡死；同样的 60 次程序化翻页（每 800ms，动画 200ms）
