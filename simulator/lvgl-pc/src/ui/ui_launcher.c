@@ -17,6 +17,10 @@
 #include "ui_gesture.h"
 #include "ui_theme.h"
 
+/* LVGL 9.x 把 lv_image_decoder_dsc_t 放在私有头（9.2/9.4 字段一致，
+ * 均含 decoded 指针）；自定义背景一次性解码需要它 */
+#include "src/draw/lv_image_decoder_private.h"
+
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -195,6 +199,65 @@ static void bg_render(uint16_t *px)
     }
 }
 
+/* 自定义背景：加载时一次性解码成 480×480 RGB565 画布缓冲。
+ * 不能直接把 PNG 文件交给 lv_image（"A:path"）：480×480 解码结果
+ * 460KB 超过 LVGL 图片缓存（256KB）→ 每次重绘都重新解码 PNG，
+ * 滑动/转场时直接把显示管线拖死（真机判据：背景越大越卡）。
+ * 解码缓冲常驻（launcher 屏幕常驻，不释放；重建极罕见可接受一次泄漏）。 */
+static void *g_custom_bg_buf;
+
+static bool custom_bg_canvas(lv_obj_t *parent)
+{
+    lv_image_decoder_dsc_t dsc;
+    if (lv_image_decoder_open(&dsc, "A:" CUSTOM_BG_PATH, NULL) != LV_RESULT_OK) {
+        return false;
+    }
+    const lv_draw_buf_t *db = dsc.decoded;
+    if (!db || !db->data) {
+        lv_image_decoder_close(&dsc);
+        return false;
+    }
+    if (g_custom_bg_buf == NULL) {
+        g_custom_bg_buf = malloc(BG_W * BG_H * 2);
+    }
+    if (g_custom_bg_buf == NULL) {
+        lv_image_decoder_close(&dsc);
+        return false;
+    }
+
+    uint16_t *dst = (uint16_t *)g_custom_bg_buf;
+    uint32_t sw = db->header.w, sh = db->header.h;
+    uint32_t stride = db->header.stride;
+    const uint8_t *src = (const uint8_t *)db->data;
+
+    for (int y = 0; y < BG_H; y++) {
+        uint32_t sy = sh ? (uint32_t)y * sh / BG_H : 0;
+        if (sy >= sh) sy = sh ? sh - 1 : 0;
+        for (int x = 0; x < BG_W; x++) {
+            uint32_t sx = sw ? (uint32_t)x * sw / BG_W : 0;
+            if (sx >= sw) sx = sw ? sw - 1 : 0;
+            uint16_t v = 0;
+            if (db->header.cf == LV_COLOR_FORMAT_RGB565) {
+                v = *(const uint16_t *)(src + sy * stride + sx * 2);
+            } else if (db->header.cf == LV_COLOR_FORMAT_RGB888) {
+                const uint8_t *p = src + sy * stride + sx * 3;
+                v = rgb565_pack(p[0], p[1], p[2]);
+            } else { /* ARGB8888（LE：B,G,R,A）*/
+                const uint8_t *p = src + sy * stride + sx * 4;
+                v = rgb565_pack(p[2], p[1], p[0]);
+            }
+            dst[y * BG_W + x] = v;
+        }
+    }
+    lv_image_decoder_close(&dsc);
+
+    lv_obj_t *cv = lv_canvas_create(parent);
+    lv_canvas_set_buffer(cv, g_custom_bg_buf, BG_W, BG_H, LV_COLOR_FORMAT_RGB565);
+    lv_obj_center(cv);
+    lv_obj_clear_flag(cv, LV_OBJ_FLAG_CLICKABLE);
+    return true;
+}
+
 static void bg_attach(lv_obj_t *parent)
 {
     /* 自定义背景优先（Web 上传到 Bridge，ds_appearance_fetch 缓存到本地）；
@@ -204,11 +267,7 @@ static void bg_attach(lv_obj_t *parent)
         FILE *f = fopen(CUSTOM_BG_PATH, "rb");
         if (f) {
             fclose(f);
-            lv_obj_t *img = lv_image_create(parent);
-            lv_image_set_src(img, "A:" CUSTOM_BG_PATH);
-            lv_obj_center(img);
-            lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
-            return;
+            if (custom_bg_canvas(parent)) return;
         }
     }
 

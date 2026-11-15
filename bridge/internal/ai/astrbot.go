@@ -127,7 +127,13 @@ func extractAstrBotText(payload string) string {
 	// AstrBot 的报错文本（如"未找到可用对话模型"）被吞成空响应
 	if typ, _ := probe["type"].(string); true {
 		switch typ {
-		case "", "plain", "complete", "message", "text", "finish":
+		// 明确非文本事件：跳过
+		case "session_id", "user_message_saved", "message_saved",
+			"run_started", "agent_stats", "end", "tool_call", "tool_result":
+		default:
+			// 其余事件（plain/complete/message/text/未知新增类型）只要
+			// data 是非空字符串就当作正文——AstrBot 事件类型会随版本
+			// 增删，白名单会漏（曾把报错吞成空响应）
 			if v, ok := probe["data"].(string); ok && v != "" {
 				return v
 			}
@@ -274,17 +280,24 @@ func ProbeAstrBot(ctx context.Context, id, baseURL, token, configID, provider, m
 	if err != nil {
 		return "", err
 	}
+	// AstrBot 自身报错也走"正常回复"通道（plain 事件）——先按完整文本
+	// 判失败（截断会把"余额不足/未配置模型"等关键原因切掉），再截断成功回复
+	for _, bad := range []string{"LLM 请求失败", "LLM 响应错误", "未找到任何可用",
+		"All chat models failed", "RateLimitError", "余额不足",
+		"Unauthorized", "invalid_api_key"} {
+		if strings.Contains(reply, bad) {
+			r := []rune(reply)
+			if len(r) > 160 {
+				r = r[:160]
+			}
+			return "", fmt.Errorf("%s", string(r))
+		}
+	}
 	r := []rune(reply)
 	if len(r) > 60 {
 		r = r[:60]
 	}
-	text := string(r)
-	// AstrBot 自身报错也走"正常回复"通道（plain 事件）——连通性测试
-	// 应判失败并透传原因（如未配置模型提供商），否则测试显示"成功"
-	if strings.Contains(text, "LLM 请求失败") || strings.Contains(text, "未找到任何可用") {
-		return "", fmt.Errorf("%s", text)
-	}
-	return text, nil
+	return string(r), nil
 }
 
 // AstrBotConfig AstrBot 配置文件摘要（人设/模型套餐）。
@@ -321,16 +334,26 @@ func FetchAstrBotConfigs(ctx context.Context, baseURL, token string) ([]AstrBotC
 	if err != nil {
 		return nil, fmt.Errorf("read_failed")
 	}
+	// 实测 AstrBot 响应：{"status":"ok","data":{"info_list":[{"id","name","path"}]}}
 	var wrapped struct {
 		Configs []AstrBotConfig `json:"configs"`
-		Data    []AstrBotConfig `json:"data"`
+		Data    struct {
+			InfoList []AstrBotConfig `json:"info_list"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &wrapped); err != nil || (wrapped.Configs == nil && wrapped.Data == nil) {
+	if err := json.Unmarshal(body, &wrapped); err != nil {
 		return nil, fmt.Errorf("unsupported_response")
 	}
 	out := wrapped.Configs
 	if out == nil {
-		out = wrapped.Data
+		out = wrapped.Data.InfoList
+	}
+	// 空列表是合法状态（未创建配置文件）；结构不认识才报错
+	if out == nil && !strings.Contains(string(body), "info_list") {
+		return nil, fmt.Errorf("unsupported_response")
+	}
+	if out == nil {
+		out = []AstrBotConfig{}
 	}
 	return out, nil
 }

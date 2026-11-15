@@ -74,8 +74,22 @@ func NewClient(baseURL, token string) *Client {
 
 func (c *Client) Name() string { return "komari(" + c.baseURL + ")" }
 
-// Fetch 拉取节点列表（社区观察路径 /api/nodes）。
+// Fetch 拉取节点列表与实时状态。
+// 首选 Komari JSON-RPC（/api/rpc2，实测 1.1.x/2.x 均可用）：
+//
+//	common:getNodes              → 静态信息（名称等）
+//	common:getNodesLatestStatus  → CPU/内存/磁盘/网络/在线/运行时长
+//
+// 失败回退社区观察的 GET /api/nodes（只有静态信息，指标为 nil）。
 func (c *Client) Fetch(ctx context.Context) (*Snapshot, error) {
+	if snap, err := c.fetchRPC(ctx); err == nil {
+		return snap, nil
+	}
+	return c.fetchREST(ctx)
+}
+
+// Fetch 回退路径：GET /api/nodes。
+func (c *Client) fetchREST(ctx context.Context) (*Snapshot, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/nodes", nil)
 	if err != nil {
 		return nil, err
@@ -195,4 +209,128 @@ func firstPtr[T any](vs ...*T) *T {
 		}
 	}
 	return nil
+}
+
+// ---- JSON-RPC（/api/rpc2）----
+
+type rpcEnvelope struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int             `json:"id"`
+	Result  json.RawMessage `json:"result"`
+	Error   *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func (c *Client) rpc(ctx context.Context, id int, method string, params any) (json.RawMessage, error) {
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": id, "method": method, "params": params,
+	})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/rpc2", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("rpc_http_%d", resp.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, err
+	}
+	var env rpcEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, err
+	}
+	if env.Error != nil {
+		return nil, fmt.Errorf("rpc_error: %s", env.Error.Message)
+	}
+	if len(env.Result) == 0 {
+		return nil, ErrUnsupportedResponse
+	}
+	return env.Result, nil
+}
+
+type rpcNodeInfo struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+}
+
+type rpcStatus struct {
+	CPU       *float64 `json:"cpu"` // 0~100
+	Ram       *float64 `json:"ram"`
+	RamTotal  *float64 `json:"ram_total"`
+	Disk      *float64 `json:"disk"`
+	DiskTotal *float64 `json:"disk_total"`
+	NetIn     *int64   `json:"net_in"`  // 入站（下载）字节/秒
+	NetOut    *int64   `json:"net_out"` // 出站（上传）
+	Online    *bool    `json:"online"`
+	Uptime    *int64   `json:"uptime"`
+}
+
+func pctOf(used, total *float64) *float64 {
+	if used == nil || total == nil || *total <= 0 {
+		return nil
+	}
+	v := *used / *total * 100
+	return &v
+}
+
+// fetchRPC 组装静态信息 + 实时状态（按 uuid 合并）。
+func (c *Client) fetchRPC(ctx context.Context) (*Snapshot, error) {
+	nodesRaw, err := c.rpc(ctx, 1, "common:getNodes", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+	statusRaw, err := c.rpc(ctx, 2, "common:getNodesLatestStatus", map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes map[string]rpcNodeInfo
+	if err := json.Unmarshal(nodesRaw, &nodes); err != nil {
+		return nil, fmt.Errorf("rpc nodes: %w", err)
+	}
+	var statuses map[string]rpcStatus
+	if err := json.Unmarshal(statusRaw, &statuses); err != nil {
+		return nil, fmt.Errorf("rpc status: %w", err)
+	}
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("%w: empty nodes", ErrUnsupportedResponse)
+	}
+
+	now := time.Now()
+	out := make([]Server, 0, len(nodes))
+	for uuid, n := range nodes {
+		srv := Server{UUID: uuid, Name: n.Name, Online: false, LastReport: now}
+		if n.Name == "" {
+			srv.Name = uuid
+		}
+		if st, ok := statuses[uuid]; ok {
+			srv.CPUPct = st.CPU
+			srv.MemPct = pctOf(st.Ram, st.RamTotal)
+			srv.DiskPct = pctOf(st.Disk, st.DiskTotal)
+			srv.NetDownBps = st.NetIn
+			srv.NetUpBps = st.NetOut
+			srv.UptimeS = st.Uptime
+			if st.Online != nil {
+				srv.Online = *st.Online
+			}
+		}
+		out = append(out, srv)
+	}
+	return &Snapshot{FetchedAt: now, Source: c.Name(), Servers: out}, nil
 }
