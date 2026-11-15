@@ -123,25 +123,9 @@ static lv_obj_t *g_title_lbl;   /* AstrBot 页：标题兼"切换机器人"入�
 static char g_bot_label[32];    /* 当前机器人名称（切换后显示在标题） */
 static lv_obj_t *g_wave[32];
 static lv_obj_t *g_ptt_btn;
-static lv_obj_t *g_cont_lbl;
 static lv_timer_t *g_poll_timer;
 static int g_app_id = -1;
 static bool g_voice_enabled;
-static bool g_continuous; /* 连续对话（KEY3 短按/左上角按钮切换） */
-static bool g_cont_auto;      /* 当前 LISTENING 轮由连续模式自动开启 */
-static bool g_cont_heard;     /* 本轮已检测到人声（VAD） */
-static int g_cont_maxamp;     /* 本轮最大幅度（诊断/调阈值） */
-static uint32_t g_cont_loud_tick; /* 最后一次有声时刻（VAD 静音判据） */
-
-/* 连续对话参数（80ms poll 驱动；g_wave_amp 0..100）。
- * 首版绝对阈值 10 真机全轮未触发（麦克风电平低）——改自适应：
- * 有声 = amp ≥ 底噪+5 且 ≥4；底噪 EMA 只在判无声时更新。 */
-#define CONT_RESPEAK_GAP_MS 800  /* 回复播完 → 自动开听的间隔 */
-#define CONT_SILENCE_END_MS 1200 /* 有声后静音此时长 → 自动提交 */
-#define CONT_SILENCE_ROLL_MS 5000 /* 纯静音：滚动清缓冲等开口（不打服务端） */
-#define CONT_FLOOR_MARGIN    5    /* 高出底噪多少算有声 */
-#define CONT_AMP_MIN         4    /* 绝对下限（滤数字底噪抖动） */
-static int g_cont_floor;          /* 本轮底噪 EMA */
 
 /* voice_session 状态（从 ui_voice 移植） */
 static bool g_vs_inited;
@@ -366,14 +350,6 @@ static void on_vs_pcm(const int16_t *pcm, int frames, void *user)
     g_wave_amp = (int)(rms * 300);
     if (g_wave_amp > 100) g_wave_amp = 100;
     g_wave_data = true;
-    /* 连续对话 VAD（自适应底噪 + 诊断幅度） */
-    if (g_wave_amp > g_cont_maxamp) g_cont_maxamp = g_wave_amp;
-    if (g_wave_amp >= g_cont_floor + CONT_FLOOR_MARGIN && g_wave_amp >= CONT_AMP_MIN) {
-        g_cont_heard = true;
-        g_cont_loud_tick = lv_tick_get();
-    } else {
-        g_cont_floor = (g_cont_floor * 7 + g_wave_amp) / 8;
-    }
 }
 
 static const vs_listener_t g_listener = {
@@ -445,41 +421,6 @@ static void ptt_apply_state(vs_state_t st)
 
 /* ---------------- PTT / poll ---------------- */
 
-static void continuous_toggle_cb(lv_event_t *e);
-
-static void continuous_toggle_cb_void(void)
-{
-    continuous_toggle_cb(NULL);
-}
-
-/* 自动轮没听到说话：放弃本轮（vs_cancel，不提交）并暂停连续模式 */
-static void cont_pause_no_speech(void)
-{
-    g_continuous = false;
-    g_cont_auto = false;
-    if (vs_state() == VS_LISTENING) vs_cancel();
-    if (g_cont_lbl) lv_obj_set_style_text_color(g_cont_lbl, UI_TEXT_DIM, 0);
-    if (g_status_lbl) lv_label_set_text(g_status_lbl, "连续对话已暂停（没听到说话）");
-}
-
-static void continuous_toggle_cb(lv_event_t *e)
-{
-    (void)e;
-    g_continuous = !g_continuous;
-    if (!g_continuous && g_cont_auto && vs_state() == VS_LISTENING) {
-        vs_cancel(); /* 关闭时正在自动听：放弃本轮（不提交不产文本） */
-    }
-    g_cont_auto = false;
-    lv_obj_set_style_text_color(g_cont_lbl,
-                                g_continuous ? UI_OK : UI_TEXT_DIM, 0);
-    if (g_status_lbl) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%s（连续对话%s）", state_text(VS_IDLE),
-                 g_continuous ? "开" : "关");
-        lv_label_set_text(g_status_lbl, buf);
-    }
-}
-
 static void vol_btn_cb(lv_event_t *e)
 {
     (void)e;
@@ -491,7 +432,6 @@ static void ptt_pressed_cb(lv_event_t *e)
     (void)e;
     CLOG("ptt PRESSED voice_enabled=%d state=%d", (int)g_voice_enabled,
          (int)vs_state());
-    g_cont_auto = false; /* 手动轮接管：VAD 不做自动提交 */
     if (g_voice_enabled) vs_ptt_begin();
     ptt_apply_state(VS_LISTENING);
 }
@@ -545,58 +485,13 @@ static void poll_timer_cb(lv_timer_t *t)
     /* 录音看门狗：抬起沿丢失（PRESS_LOST 之外的路径）时不能让状态机
      * 永久停在 Listening——超过 20s 强制提交已录音频。 */
     static vs_state_t last_st;
-    static uint32_t listen_t0, idle_since, cont_listen_t0;
+    static uint32_t listen_t0;
     vs_state_t st = vs_state();
     if (st == VS_LISTENING && last_st != VS_LISTENING) listen_t0 = lv_tick_get();
-    if (st == VS_IDLE && last_st != VS_IDLE) idle_since = lv_tick_get();
     last_st = st;
     if (st == VS_LISTENING && lv_tick_elaps(listen_t0) > 20000) {
-        if (g_cont_auto && !g_cont_heard) {
-            /* 自动轮 20s 没听到说话：放弃并暂停连续（绝不把静音发服务端
-             * ——首版强提导致官方 ASR 对底噪幻觉出同一句，回复无限循环） */
-            CLOG("continuous: 20s no speech (maxamp=%d floor=%d) — pause",
-                 g_cont_maxamp, g_cont_floor);
-            cont_pause_no_speech();
-        } else {
-            CLOG("ptt watchdog: force submit (20s)");
-            vs_ptt_end();
-        }
-    }
-
-    /* 连续对话（免提）驱动：
-     *   IDLE（含回复播完）稍候自动开听；自动轮"说完停 1.2s"自动提交；
-     *   纯静音不提交（滚动清缓冲等开口）；缓冲将满强制提交。
-     *   手动按住轮（g_cont_auto=0）完全不受 VAD 干预。 */
-    if (g_continuous && g_voice_enabled) {
-        if (st == VS_IDLE && lv_tick_elaps(idle_since) > CONT_RESPEAK_GAP_MS) {
-            g_cont_auto = true;
-            g_cont_heard = false;
-            g_cont_floor = 0;
-            g_cont_maxamp = 0;
-            cont_listen_t0 = lv_tick_get();
-            CLOG("continuous: auto listen begin");
-            vs_ptt_begin();
-        } else if (st == VS_LISTENING && g_cont_auto) {
-            if (g_cont_heard &&
-                lv_tick_elaps(g_cont_loud_tick) > CONT_SILENCE_END_MS) {
-                CLOG("continuous: silence %.0fms after speech (maxamp=%d) submit",
-                     (double)lv_tick_elaps(g_cont_loud_tick), g_cont_maxamp);
-                vs_ptt_end();
-            } else if (!g_cont_heard &&
-                       lv_tick_elaps(cont_listen_t0) > CONT_SILENCE_ROLL_MS) {
-                /* 一直没人开口：清掉静音继续等（不发服务端）；
-                 * maxamp 留痕用于校准阈值 */
-                CLOG("continuous: roll silence (maxamp=%d floor=%d)",
-                     g_cont_maxamp, g_cont_floor);
-                g_capture_frames = 0;
-                g_cont_maxamp = 0;
-                cont_listen_t0 = lv_tick_get();
-            } else if (g_capture_frames >= G_CAPTURE_SAMPLES - 1600) {
-                CLOG("continuous: capture near full, force submit (maxamp=%d)",
-                     g_cont_maxamp);
-                vs_ptt_end();
-            }
-        }
+        CLOG("ptt watchdog: force submit (20s)");
+        vs_ptt_end();
     }
 
     vs_tick();
@@ -977,8 +872,9 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
 {
     g_app_id = app_id;
     g_voice_enabled = g_meta[app_id].voice;
-    ui_key_set_key3_handler(continuous_toggle_cb_void); /* KEY3 短按：连续对话 */
-    ui_key_set_key3_long_handler(key3_long_ptt_cb);     /* KEY3 长按：语音说话 */
+    /* KEY3 短按：无动作（连续对话已移除，2026-11-16 用户拍板）；
+     * 长按=语音说话（Web keys 配置 ptt） */
+    ui_key_set_key3_long_handler(key3_long_ptt_cb);
     ui_key_set_key3_long_release_handler(key3_ptt_end_cb); /* 真机松开：收口提交 */
 
     if (!g_vs_inited) {
@@ -1037,17 +933,6 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     }
 
     ui_gesture_back_add(scr); /* 上滑退出（无返回按钮，ADR-008 范式） */
-
-    /* 连续对话开关（设备端 KEY3 短按同语义；模拟器按钮呈现） */
-    lv_obj_t *cont = lv_button_create(scr);
-    lv_obj_set_size(cont, 56, 44);
-    lv_obj_align(cont, LV_ALIGN_TOP_LEFT, 0, 28);
-    ui_style_card(cont);
-    lv_obj_set_style_radius(cont, 14, 0);
-    lv_obj_add_event_cb(cont, continuous_toggle_cb, LV_EVENT_CLICKED, NULL);
-    g_cont_lbl = ui_label(cont, LV_SYMBOL_LOOP, &lv_font_montserrat_16,
-                          g_continuous ? UI_OK : UI_TEXT_DIM);
-    lv_obj_center(g_cont_lbl);
 
     /* 历史不直接展示：顶部"历史"按钮 → 全屏滚动查看
      * （y28：避开全局状态栏 overlay，PLAN §13.3） */
@@ -1155,7 +1040,6 @@ void ui_conversation_on_exit(void)
         g_poll_timer = NULL;
     }
     vs_release();
-    g_cont_auto = false;
     g_status_lbl = NULL;
     g_reply_lbl = NULL;
     g_title_lbl = NULL; /* 后台 worker 可能晚到（切机器人/语音），置空防悬垂 */
