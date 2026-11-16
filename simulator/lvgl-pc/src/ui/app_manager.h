@@ -9,6 +9,12 @@
 
 #include "lvgl.h"
 
+/* App 后台语义标志（ADR-012 P2）。flags=0 = "退出即停"（默认）。
+ * 只作声明/评审依据，不改变 app_manager 的单前台模型。 */
+#define APP_FLAG_BG_TIMER   (1u << 0) /* 退出后定时器仍运行（番茄钟） */
+#define APP_FLAG_STATUSBAR  (1u << 1) /* 持有状态栏后台指示（P1） */
+#define APP_FLAG_KEEP_STATE (1u << 2) /* 重进时恢复内部状态而非重建 */
+
 typedef struct {
     int id;                 /* ui_app_id 枚举 */
     const char *key;        /* 稳定标识（Web 后台排布配置用，如 "chat"） */
@@ -19,6 +25,7 @@ typedef struct {
     bool enabled;           /* false = 规划中 App，桌面置灰、可进占位页 */
     void (*build)(lv_obj_t *screen, int app_id); /* 在新屏幕上构建页面内容 */
     void (*on_exit)(void);            /* 可 NULL：退出时释放 App 私有资源（定时器等） */
+    uint32_t flags;                   /* APP_FLAG_* 组合（ADR-012） */
 } app_def_t;
 
 /* Launcher 装配后调用一次，登记所有 App（顺序即桌面网格顺序） */
@@ -43,6 +50,17 @@ void app_manager_back(void);
 
 /* 便捷：给按钮挂"点击即返回"回调 */
 void app_manager_back_on_click(lv_obj_t *button);
+
+/* App 级定时器登记（ADR-012 P2）：只在 App 前台期间创建的**重复**
+ * timer 使用；app_manager 切走 App 时自动删除未释放的登记 timer。
+ * 一次性 timer / 后台常驻 timer（番茄钟）不要用本接口。
+ * 返回 NULL = 不在 App 内或登记表已满（12 个）。 */
+lv_timer_t *app_manager_timer_create(lv_timer_cb_t cb, uint32_t period,
+                                     void *user_data);
+
+/* 删除并注销一个 App 级 timer（on_exit 里主动清理时用；不要对已自动
+ * 删除的一次性 timer 调用）。 */
+void app_manager_timer_delete(lv_timer_t *t);
 
 bool app_manager_in_app(void);
 int app_manager_current_id(void); /* 不在 App 中返回 -1 */

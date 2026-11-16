@@ -434,9 +434,16 @@ static lv_obj_t *g_saver_batt;
 static lv_obj_t *g_saver_dot;
 static volatile bool g_saver_on;
 static int64_t g_key_activity_us; /* KEY3 非触摸，LVGL inactivity 不感知 */
-static int g_user_brightness = 100;
 #define SAVER_IDLE_MS (2 * 60 * 1000)
 #define SAVER_BRIGHTNESS 15
+
+/* 用户亮度 = ds_state()->brightness（状态栏快捷面板/设置页滑条在改）；
+ * 屏保/关机恢复读它，不再写死 100。 */
+static int user_brightness(void)
+{
+    int b = ds_state()->brightness;
+    return (b >= 10 && b <= 100) ? b : 100;
+}
 
 static void saver_enter(void)
 {
@@ -453,8 +460,8 @@ static void saver_exit(void)
     if (!g_saver_on) return;
     g_saver_on = false;
     lv_obj_add_flag(g_saver, LV_OBJ_FLAG_HIDDEN);
-    bsp_display_brightness_set(g_user_brightness);
-    ESP_LOGI(TAG, "screensaver OFF (brightness %d%%)", g_user_brightness);
+    bsp_display_brightness_set(user_brightness());
+    ESP_LOGI(TAG, "screensaver OFF (brightness %d%%)", user_brightness());
 }
 
 static void heap_report(const char *where)
@@ -623,7 +630,7 @@ static void pwr_graceful_shutdown(void)
     /* 还在跑（软关失败/USB 在位被重新上电）：恢复亮度继续运行 */
     ESP_LOGW(TAG, "still alive after power-off cmd (USB attached?) - resume");
     display_lock();
-    bsp_display_brightness_set(g_user_brightness);
+    bsp_display_brightness_set(user_brightness());
     display_unlock();
 }
 

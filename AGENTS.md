@@ -16,6 +16,9 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 |----------|------|------|
 | 设备 UI（Launcher/App 页面） | `simulator/lvgl-pc/src/ui/` | **模拟器与真机共用源**；新增 .c 要手改 ui CMakeLists（两处） |
 | UI 公共件（页点/手势） | `simulator/lvgl-pc/src/ui/ui_gesture.*` | 页点定位用 `ui_page_of_scroll`（实测宽+四舍五入，勿硬编码 480） |
+| 全局状态栏 / App 后台指示 | `simulator/lvgl-pc/src/ui/ui_statusbar.*` | overlay 常驻 `lv_layer_top`；点右侧图标簇=快捷面板（音量+亮度，真机即时生效）；改动 `ds_config_persist()` 防抖回写 Bridge（亮度/音量跨重启持久化，开机 remote config 回放）；App 后台状态药丸用 `ui_statusbar_set_app_status()`（P1，ADR-012），不新增任务/栈 |
+| UI worker 线程 | `simulator/lvgl-pc/src/ui/ui_worker.*` | 统一 `ui_worker_start()`：16KB 栈 ENOMEM 自动回落 12KB；新页面别再直接 pthread_create |
+| UI 提示音 | `simulator/lvgl-pc/src/ui/ui_sound.*` | `ui_sound_click/alert()` 双平台封装；真机=audio_esp32 正弦合成短任务，模拟器=仅日志；LVGL 线程可直接调 |
 | 数据源抽象 | `simulator/lvgl-pc/src/data_source.*` | mock / bridge 两实现；新字段三处同步（.h/两 .c） |
 | TF 卡文件 | `simulator/lvgl-pc/src/data/data_source_files.c`、`sd_paths.h`、`ui/ui_files.c` | 单文件双平台（固件 /sdcard，模拟器 `GADGET_SD_DIR` 默认 `sdcard/`）；阻塞 IO 只能在 16KB worker 线程 |
 | Bridge API | `bridge/internal/api/` | 标准库 net/http，Go 1.22+ 路由模式 `GET /api/v1/...` |
@@ -25,7 +28,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
 | 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连；Bridge 地址簿+预置） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
-| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh |
+| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700，20px） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh |
 | 大号数字 | `scripts/gen_cn_font.sh` 末尾生成 `font_digits_84.c`（Montserrat 84px 子集） | 番茄钟倒计时用；逐位固定宽度渲染防抖 |
 | 桌面图标 | `simulator/lvgl-pc/assets/icons/`（88×88） | 缺位自动回退符号；名字与 launcher catalog key 对齐；`gen_icon_embed.sh` 的 SKIP 里的图标不嵌入固件（省 flash） |
 
@@ -114,6 +117,13 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
     `ESP_ERR_WIFI_STATE`（正在连接）时才断开中止、**等 DISCONNECTED 事件
     落定**再扫。曾用固定 150ms：从已连接态 deauth 要 300ms+，扫描被驱动
     静默吞掉（返回 OK 但 0 结果）——真机"配网页列表永远空"。
+13. **16KB pthread 栈在真机可能 ENOMEM（2026-11-16）**：内部 RAM
+    碎片化后 largest free block 只有 ~13.8KB，`pthread_create` 申请
+    16KB 栈返回 **rc=12**，worker 静默不启动——订阅页取数 worker 因此
+    永远不跑，页面一直空（天气/文件 worker 同款风险）。统一用
+    `ui_worker_start(fn, arg, size)`：ENOMEM 时自动回落 12KB 重试
+    （实测订阅 HTTP 链只用了 ~3.7KB 栈，余 8.5KB）。新页面的重复
+    worker 不要直接 `pthread_create`。
 
 ### 当前能力边界（对外说明别说过头）
 
@@ -161,14 +171,19 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 | 订阅 / 天气 | 停自动刷新 timer，保留 TF 缓存 |
 | 文件 | 关闭句柄，worker 结果按页面代际丢弃 |
 | 设置 | 保存配置，释放页面 |
-| 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer） |
+| 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer）；阶段归零三连滴提示音（后台也响，`ui_sound_alert`） |
 
 - App 级后台任务（如番茄钟）的 timer 不能随屏幕销毁；回调必须用
   `g_root==NULL` 守卫跳过所有 LVGL 调用（屏幕已被 app_manager 删除）。
+- App manifest 用 `APP_FLAG_BG_TIMER/STATUSBAR/KEEP_STATE` 声明后台
+  语义（番茄钟 = `BG_TIMER|STATUSBAR`）；`appmem` 日志带 `flags=0x..`。
+- **重复** UI timer 用 `app_manager_timer_create()` 创建，切走 App 时
+  由 app_manager 统一删除（`on_exit` 只断引用）；一次性 timer 会被
+  LVGL 自动删除，**不要登记**；后台常驻 timer（番茄钟）也不要登记。
 - 新增 App 默认"退出即停"；要做后台任务先补本表 + ADR。
 - **内存观测**：固件 `app_manager` 在 open/back 打 `appmem` 日志
-  （heap/min/PSRAM free/内部 RAM 最大连续块），评估新 App 成本看实测
-  delta，不靠估算；模拟器无 ESP heap，不打印。
+  （flags/heap/min/PSRAM free/内部 RAM 最大连续块），评估新 App 成本
+  看实测 delta，不靠估算；模拟器无 ESP heap，不打印。
 - TF 应用数据写 `data/`（如 `data/pomodoro.json`），缓存写 `cache/`；
   都要 worker 线程做 IO（踩坑 #11），统计类文件用 temp+rename 原子替换。
 

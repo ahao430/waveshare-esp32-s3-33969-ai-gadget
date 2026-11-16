@@ -27,6 +27,15 @@ void audio_esp32_tts_write(const char *data, size_t len);
 /* 快速音量（状态栏弹窗/开机套用 Web 配置）；0~100 */
 void audio_esp32_set_volume(int pct);
 
+/* UI 提示音（番茄钟按键/倒计时结束，ui_sound 转发）：正弦合成直写
+ * codec，起短任务播放（非阻塞，LVGL 线程可直接调）。TTS 播放中会
+ * 排队等其收尾（最多 10s），不并发写 codec。 */
+enum {
+    AUDIO_BEEP_CLICK = 0, /* 按键反馈：单声短滴 70ms */
+    AUDIO_BEEP_ALERT = 1, /* 倒计时结束：三连滴（C6 160ms×3） */
+};
+void audio_esp32_ui_beep(int kind);
+
 /* 流式语音（?stream=1 帧协议）：没有 WAV 头，攒够 0.5s 就开播，
  * 后续 PCM 边收边播；stream_end 后播放任务在缓冲耗尽时收尾。 */
 void audio_esp32_tts_begin_stream(void);

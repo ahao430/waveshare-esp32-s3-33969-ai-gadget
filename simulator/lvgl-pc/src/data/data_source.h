@@ -131,15 +131,27 @@ ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int fra
                                     char *transcript, int transcript_len,
                                     char *reply, int reply_len);
 
-/* 设备设置更新（模拟器内存态；真机= PUT 设备 config API，Phase 2/6） */
+/* 设备设置更新（内存态；真机亮度/音量另经 ds_config_persist 回写 Bridge
+ * 跨重启持久化）。brightness/volume/timeout_s 传 0/-1 表示该项不改。 */
 void ds_config_update(int brightness, int volume, int timeout_s);
 void ds_config_set_refresh_interval(int seconds); /* 订阅自动刷新间隔 */
 int ds_config_refresh_interval(void);
 
-/* 设备运行配置下发（Bridge /api/v1/device/config，启动时拉取）：
- * 0=成功写 *sub_refresh_interval_s / -1=失败（保留本地默认）。
- * mock 恒 900。 */
-int ds_device_config_fetch(int *sub_refresh_interval_s);
+/* UI 改动亮度/音量/息屏超时后调用：bridge 模式防抖 1.5s 合并 PUT
+ * /api/v1/device/config（一轮拖动只回写一次）；mock 模式 no-op。
+ * 只在 UI（LVGL）线程调用；网络在内部 worker，不阻塞调用方。 */
+void ds_config_persist(void);
+
+/* 设备运行配置下发（Bridge /api/v1/device/config，启动/联网时拉取）：
+ * 0=成功 / -1=失败。无论成败 out 都被置为缺省（sub=0、bright/vol=-1
+ * =未下发，保持本地值），实现只覆盖拿到的字段；亮度/音量拉到后需
+ * 应用到硬件（ui_statusbar_apply_hw）。 */
+typedef struct {
+    int sub_refresh_interval_s; /* 0=未下发 */
+    int brightness;             /* -1=未下发 */
+    int volume;                 /* -1=未下发 */
+} ds_device_config_t;
+int ds_device_config_fetch(ds_device_config_t *out);
 void ds_config_set_theme(int idx);
 
 /* 清空云端对话记忆（AstrBot username+session 轮换；bot_id 空=全部实例）。

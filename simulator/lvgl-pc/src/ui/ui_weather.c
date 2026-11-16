@@ -12,6 +12,11 @@
 #include "ui.h"
 #include "ui_gesture.h"
 #include "ui_theme.h"
+#include "ui_worker.h"
+
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 
 /* 分类配色（desc 徽标 + 大温度） */
 static uint32_t cat_color(const char *cat)
@@ -44,15 +49,18 @@ static void *wx_worker(void *arg)
 
 static void wx_fetch_start(void)
 {
-    pthread_t tid;
     /* ESP32 worker 栈预算：HTTP 链（host/path/req/chunk≈5KB）+ cJSON
-     * 递归 + 帧开销，给 16KB（栈上大缓冲已全部改为堆分配） */
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 16 * 1024);
-    pthread_create(&tid, &attr, wx_worker, NULL);
-    pthread_attr_destroy(&attr);
-    pthread_detach(tid);
+     * 递归 + 帧开销，给 16KB（栈上大缓冲已全部改为堆分配）。
+     * 内部 RAM 碎片化时 16KB 会 ENOMEM → ui_worker_start 自动回落 12KB
+     * （2026-11-16 实测：订阅 worker 同一问题导致页面永远空）。 */
+    int rc = ui_worker_start(wx_worker, NULL, 16 * 1024);
+#ifdef ESP_PLATFORM
+    if (rc != 0) {
+        ESP_LOGW("wx", "worker start failed rc=%d", rc);
+    }
+#else
+    (void)rc;
+#endif
 }
 
 /* ---- UI 引用 ---- */

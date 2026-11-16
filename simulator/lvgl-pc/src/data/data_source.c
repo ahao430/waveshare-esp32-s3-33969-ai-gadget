@@ -29,7 +29,7 @@ static gadget_state_t g_state = {
     .charging           = true,
     .battery_voltage_mv = 4120,
 
-    .brightness        = 80,
+    .brightness        = 100, /* 与 BSP 亮度初始化对齐；状态栏开机套用一次 */
     .volume            = 55,
     .display_timeout_s = 60,
     .sub_refresh_interval_s = 900,
@@ -284,9 +284,15 @@ int ds_keys_fetch(char *pwr_short, char *boot_short,
     return g_impl->fetch_keys(pwr_short, boot_short, key3_short, key3_long, cap);
 }
 
-int ds_device_config_fetch(int *sub_refresh_interval_s)
+int ds_device_config_fetch(ds_device_config_t *out)
 {
     if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!out) return -1;
+    /* 统一置缺省（未下发）：实现只覆盖拿到的字段，失败时字段保持
+     * 缺省——调用方无需自己初始化。 */
+    out->sub_refresh_interval_s = 0;
+    out->brightness = -1;
+    out->volume = -1;
     if (!g_impl->device_config_fetch) return -1;
-    return g_impl->device_config_fetch(sub_refresh_interval_s);
+    return g_impl->device_config_fetch(out);
 }

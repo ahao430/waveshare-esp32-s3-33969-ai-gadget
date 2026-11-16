@@ -18,6 +18,7 @@
 #include "ui.h"
 #include "ui_gesture.h"
 #include "ui_theme.h"
+#include "ui_worker.h"
 
 #define FILES_MAX 40
 
@@ -86,15 +87,8 @@ static void files_reopen(void)
 
 static void files_thread(void *(*fn)(void *), void *arg)
 {
-    pthread_t tid;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 16 * 1024); /* HTTP 链 + cJSON，同 wx_worker */
-    if (pthread_create(&tid, &attr, fn, arg) == 0) {
-        pthread_attr_destroy(&attr);
-        pthread_detach(tid);
-    } else {
-        pthread_attr_destroy(&attr);
+    /* HTTP 链 + cJSON；16KB 请求 + 12KB 回落（内部 RAM 碎片化防护） */
+    if (ui_worker_start(fn, arg, 16 * 1024) != 0) {
         g_busy = false;
     }
 }

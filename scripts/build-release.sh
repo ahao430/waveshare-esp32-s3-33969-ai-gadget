@@ -22,7 +22,9 @@ echo "== 3/3 linux cross build (optional) =="
 # hraban/opus 是 cgo：linux 交叉需 musl-gcc（brew install filosottile/musl-cross/musl-cross，
 # 装 x86_64 与 aarch64 变体）。没有就跳过——在目标机上 go build 即可（DEPLOY.md §2）。
 CROSS_BUILT=0
-for tgt in "linux/amd64 x86_64-linux-musl" "linux/arm64 aarch64-linux-musl"; do
+# 三字段：goos goarch cc 前缀（旧写法把 "linux/amd64" 当单字段，cc=$3
+# 在 set -u 下必炸——2026-11-16 打包时踩到）
+for tgt in "linux amd64 x86_64-linux-musl" "linux arm64 aarch64-linux-musl"; do
     set -- $tgt; goos=$1; goarch=$2; cc=$3
     if command -v "${cc}-gcc" >/dev/null 2>&1; then
         echo "  building $goos/$goarch ($cc)…"

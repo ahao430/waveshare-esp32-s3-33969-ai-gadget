@@ -1,7 +1,7 @@
 /* ui_pomodoro — 番茄钟 App（2026-11-16 用户需求，v2 按评审意见增强）。
  *
  * 番茄工作法：25 分钟专注 → 5 分钟短休息；每完成 4 轮专注进入
- * 15 分钟长休息；自动循环。纯色扁平、96px 大号倒计时。
+ * 15 分钟长休息；自动循环。纯色扁平、84px 大号倒计时。
  *
  * 后台计时（ADR-011）：计时器是独立 lv_timer，不随页面销毁；退出 App
  * 时只清 UI 引用，倒计时继续跑（切回页面立即显示正确剩余）。阶段完成
@@ -26,6 +26,8 @@
 #include "fonts/ui_font_cn.h"
 #include "ui.h"
 #include "ui_gesture.h"
+#include "ui_sound.h"
+#include "ui_statusbar.h"
 #include "ui_theme.h"
 
 #define FOCUS_SEC (25 * 60)
@@ -43,6 +45,9 @@ enum { PH_FOCUS = 0, PH_SHORT = 1, PH_LONG = 2 };
 #define INK_FOCUS 0x7E2419
 #define INK_SHORT 0x14533F
 #define INK_LONG  0x144A5E
+/* 环外文字用奶油色：与白色圆环/数字分层，避免"全白看不清" */
+#define PHASE_TEXT 0xFFF1D6
+#define PHASE_SUB  0xFFE3C2
 
 static int g_phase = PH_FOCUS;
 static int g_remaining = FOCUS_SEC; /* 剩余秒数（页面退出/重建不丢） */
@@ -93,9 +98,11 @@ static uint32_t phase_ink(void)
 
 static const char *phase_title(void)
 {
-    if (g_phase == PH_SHORT) return "短休息 · 5 分钟";
-    if (g_phase == PH_LONG) return "长休息 · 15 分钟";
-    return "专注时间 · 25 分钟";
+    /* 时长由大数字表达，标题只留阶段；旧文案 "专注时间 · 25 分钟"
+     * 在旧布局 340px 环顶部会压到白色圆环（用户 2026-11-16 反馈） */
+    if (g_phase == PH_SHORT) return "短休息";
+    if (g_phase == PH_LONG) return "长休息";
+    return "专注时间";
 }
 
 static void today_str(char out[11])
@@ -302,9 +309,33 @@ static void set_digit(int i, char c)
     }
 }
 
+/* 状态栏药丸用亮色版本（阶段底色在深色状态栏上对比度不够） */
+static uint32_t phase_accent(void)
+{
+    if (g_phase == PH_SHORT) return 0x7FE3C0;
+    if (g_phase == PH_LONG) return 0x8FD8F0;
+    return 0xFF8A7A;
+}
+
+/* P1：后台计时在全局状态栏露一个入口；前台由页面大计时器显示。
+ * 只在既有 1s 节流的 update_ui 里调用，不新增 timer/任务/栈。 */
+static void sync_statusbar(void)
+{
+    if (g_root || !g_running) {
+        ui_statusbar_set_app_status(NULL, 0);
+        return;
+    }
+    int mm = g_remaining / 60;
+    int ss = g_remaining % 60;
+    char buf[24];
+    snprintf(buf, sizeof(buf), LV_SYMBOL_BELL " %02d:%02d", mm, ss);
+    ui_statusbar_set_app_status(buf, phase_accent());
+}
+
 static void update_ui(bool phase_changed)
 {
-    /* 后台计时：页面已退出，只记录渲染进度，不碰任何 LVGL 对象 */
+    sync_statusbar();
+    /* 后台计时：页面已退出，只记录渲染进度，不碰任何页面控件 */
     if (!g_root) {
         g_shown_sec = g_remaining;
         return;
@@ -342,6 +373,7 @@ static void update_ui(bool phase_changed)
 static void next_phase(bool completed)
 {
     if (completed) {
+        ui_sound_alert(); /* 倒计时归零：三连滴（后台计时同样要响） */
         if (g_phase == PH_FOCUS) {
             stats_add_focus();
             g_streak++;
@@ -380,6 +412,7 @@ static void tick_cb(lv_timer_t *t)
 static void start_pause_cb(lv_event_t *e)
 {
     (void)e;
+    ui_sound_click();
     if (g_running) {
         g_remaining = remaining_now();
         g_running = false;
@@ -394,6 +427,7 @@ static void start_pause_cb(lv_event_t *e)
 static void reset_cb(lv_event_t *e)
 {
     (void)e;
+    ui_sound_click();
     g_running = false;
     g_remaining = phase_total();
     update_ui(false);
@@ -402,21 +436,24 @@ static void reset_cb(lv_event_t *e)
 static void skip_cb(lv_event_t *e)
 {
     (void)e;
+    ui_sound_click();
     next_phase(false);
 }
 
-/* 白色半透明幽灵按钮（重置/跳过） */
+/* 环外底部按钮（重置/跳过）：110×44 太小会难点，改成 104×44 的
+ * 深色半透明药丸 + 奶油描边/文字，在阶段底色上清晰可辨。 */
 static lv_obj_t *ghost_btn(lv_obj_t *scr, const char *txt, lv_coord_t x)
 {
     lv_obj_t *b = lv_button_create(scr);
-    lv_obj_set_size(b, 80, 40);
-    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, x, -16);
-    lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
+    lv_obj_set_size(b, 104, 44);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, x, -28);
+    lv_obj_set_style_bg_color(b, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_30, 0);
     lv_obj_set_style_border_width(b, 1, 0);
-    lv_obj_set_style_border_color(b, lv_color_white(), 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(PHASE_TEXT), 0);
     lv_obj_set_style_border_opa(b, LV_OPA_50, 0);
-    lv_obj_set_style_radius(b, 20, 0);
-    ui_label(b, txt, &font_pomo_16, UI_TEXT);
+    lv_obj_set_style_radius(b, 22, 0);
+    ui_label(b, txt, &font_pomo_20, lv_color_hex(PHASE_TEXT));
     return b;
 }
 
@@ -446,10 +483,12 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     ui_gesture_back_add(scr);
 
-    /* 大圆环进度：从 12 点方向顺时针，满圈开始随剩余时间收短 */
+    /* 大圆环进度：从 12 点方向顺时针，满圈开始随剩余时间收短。
+     * 320px（原 340）给环外上方两行文字留空间；圆心下移 4px，
+     * 上方阶段/统计与环顶留 2px。 */
     g_arc = lv_arc_create(scr);
-    lv_obj_set_size(g_arc, 340, 340);
-    lv_obj_center(g_arc);
+    lv_obj_set_size(g_arc, 320, 320);
+    lv_obj_align(g_arc, LV_ALIGN_CENTER, 0, 4);
     lv_obj_clear_flag(g_arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(g_arc, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_all(g_arc, 0, 0);
@@ -468,28 +507,31 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_arc_set_bg_angles(g_arc, 0, 360);
     lv_arc_set_angles(g_arc, 0, 360);
 
-    /* 环内上方：阶段（加粗 20px，纯白） */
-    g_phase_lbl = ui_label(scr, phase_title(), &font_pomo_20, UI_TEXT);
-    lv_obj_align(g_phase_lbl, LV_ALIGN_TOP_MID, 0, 94);
+    /* 环外上方：阶段 + 统计（奶油色，不与白色圆环/数字抢视觉） */
+    g_phase_lbl = ui_label(scr, phase_title(), &font_pomo_20,
+                           lv_color_hex(PHASE_TEXT));
+    lv_obj_align(g_phase_lbl, LV_ALIGN_TOP_MID, 0, 30);
 
     /* 逐位固定宽度倒计时（每格 60px，冒号 28px）：Montserrat 数字是
-     * 比例字宽，整串刷新会左右抖；分格后位置绝对稳定。84px 字号保证
-     * 数字不压到 340px 圆环（96px 实测压线）。 */
+     * 比例字宽，整串刷新会左右抖；分格后位置绝对稳定。84px 字号
+     * （行高 61px）下移到环心附近，避开圆环顶部窄弦。 */
     static const lv_coord_t DXS[4] = { -104, -44, 44, 104 };
     for (int i = 0; i < 4; i++) {
         g_digits[i] = ui_label(scr, "0", &font_digits_84, UI_TEXT);
         lv_obj_set_width(g_digits[i], 60);
         lv_obj_set_style_text_align(g_digits[i], LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 150);
+        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 188);
     }
     lv_obj_t *colon = ui_label(scr, ":", &font_digits_84, UI_TEXT);
     lv_obj_set_width(colon, 28);
     lv_obj_set_style_text_align(colon, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 150);
+    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 188);
 
-    /* 环内中部：统计（加粗 16px，纯白） */
-    g_stats_lbl = ui_label(scr, "", &font_pomo_16, UI_TEXT);
-    lv_obj_align(g_stats_lbl, LV_ALIGN_TOP_MID, 0, 220);
+    /* 环外上方第二行：统计（加粗 20px，奶油色）；与阶段标题同字号，
+     * 靠色阶区分层级 */
+    g_stats_lbl = ui_label(scr, "", &font_pomo_20, lv_color_hex(PHASE_SUB));
+    lv_obj_set_style_text_opa(g_stats_lbl, LV_OPA_90, 0);
+    lv_obj_align(g_stats_lbl, LV_ALIGN_TOP_MID, 0, 56);
 
     /* 环内下方：大号播放/暂停圆钮（白色实心，图标用阶段深色） */
     g_btn_play = lv_button_create(scr);
@@ -502,10 +544,10 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
                           lv_color_hex(phase_ink()));
     lv_obj_center(g_lbl_play);
 
-    /* 环外底部：重置 / 跳过（圆屏安全区内，见布局注释） */
-    lv_obj_t *b_reset = ghost_btn(scr, "重置", -45);
+    /* 环外底部：重置 / 跳过（104×44，圆屏安全区内） */
+    lv_obj_t *b_reset = ghost_btn(scr, "重置", -56);
     lv_obj_add_event_cb(b_reset, reset_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *b_skip = ghost_btn(scr, "跳过", 45);
+    lv_obj_t *b_skip = ghost_btn(scr, "跳过", 56);
     lv_obj_add_event_cb(b_skip, skip_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_add_event_cb(g_btn_play, start_pause_cb, LV_EVENT_CLICKED, NULL);
 
@@ -567,4 +609,6 @@ void ui_pomodoro_on_exit(void)
     g_btn_play = g_lbl_play = NULL;
     memset(g_digits, 0, sizeof(g_digits));
     g_shown_sec = -1;
+    /* 还在跑 → 状态栏药丸；已暂停 → 隐藏（P1） */
+    sync_statusbar();
 }

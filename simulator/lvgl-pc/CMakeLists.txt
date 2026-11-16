@@ -46,6 +46,7 @@ add_executable(gadget_sim
   src/ui/app_manager.c
   src/ui/ui_theme.c
   src/ui/ui_launcher.c
+  src/ui/ui_worker.c
   src/ui/ui_app_pages.c
   src/ui/ui_weather.c
   src/ui/ui_conversation.c
@@ -57,6 +58,7 @@ add_executable(gadget_sim
   src/ui/ui_statusbar.c
   src/ui/ui_gesture.c
   src/ui/ui_keys.c
+  src/ui/ui_sound.c
   src/voice/voice_session.c
   src/voice/audio_mock.c
   src/ui/fonts/font_cn_12.c
@@ -65,7 +67,6 @@ add_executable(gadget_sim
   src/ui/fonts/font_cn_20.c
   src/ui/fonts/font_digits_84.c
   src/ui/fonts/font_pomo_20.c
-  src/ui/fonts/font_pomo_16.c
 )
 target_include_directories(gadget_sim PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}

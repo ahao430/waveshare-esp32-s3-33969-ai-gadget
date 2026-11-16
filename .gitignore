@@ -68,3 +68,4 @@ firmware/main/wifi_secret.h
 
 # 模拟器 TF 卡演示目录（GADGET_SD_DIR 默认）
 /sdcard/
+simulator/lvgl-pc/sdcard/

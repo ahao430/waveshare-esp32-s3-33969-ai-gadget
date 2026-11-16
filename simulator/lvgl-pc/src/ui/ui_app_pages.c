@@ -18,6 +18,7 @@
 #include "ui_launcher.h"
 #include "ui_statusbar.h"
 #include "ui_theme.h"
+#include "ui_worker.h"
 #include "voice_session.h"
 
 /* ---------------- 公共入口 ---------------- */
@@ -25,6 +26,8 @@
 /* 启动阶段留痕：UI 构建路径上任何一步炸栈/死机都要能定位到步骤 */
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #define UILOG(fmt, ...) ESP_LOGI("ui", fmt, ##__VA_ARGS__)
 #else
 #define UILOG(fmt, ...) ((void)0)
@@ -57,8 +60,33 @@ static struct {
     char layout[192];
     int lay_n;
     bool have_devcfg;
-    int sub_interval; /* 订阅自动刷新间隔（秒，Web 下发） */
+    ds_device_config_t devcfg; /* 订阅间隔 + 亮度/音量（设备回写值回放） */
 } s_rcfg;
+
+/* 联网后预热订阅数据：此前只在打开订阅页时才拉——开机后前几十秒
+ * （Wi-Fi 还没拿到 IP）打开必空，且失败路径无日志。预热在远程配置
+ * 拉完之后（此时网络已验证可用）后台跑一次 ds_refresh：填充
+ * st->subs[] + 写 TF 离线缓存；用户之后任意时刻进订阅页都有数据。 */
+static void *subs_warm_worker(void *arg)
+{
+    (void)arg;
+    UILOG("subs warm: start");
+    ds_refresh();
+#ifdef ESP_PLATFORM
+    UILOG("subs warm: done (n=%d) stack_free=%u", ds_state()->sub_count,
+          (unsigned)uxTaskGetStackHighWaterMark(NULL));
+#else
+    UILOG("subs warm: done (n=%d)", ds_state()->sub_count);
+#endif
+    return NULL;
+}
+
+static void subs_warm_start(void)
+{
+    /* 16KB 请求 + 12KB 回落（真机内部 RAM 碎片化时 16KB 会 ENOMEM） */
+    int rc = ui_worker_start(subs_warm_worker, NULL, 16 * 1024);
+    UILOG("subs warm: worker rc=%d", rc);
+}
 
 void ui_remote_config_prefetch(void)
 {
@@ -68,12 +96,14 @@ void ui_remote_config_prefetch(void)
     (void)ds_appearance_fetch(DS_CUSTOM_BG_PATH);
     s_rcfg.have_keys = ds_keys_fetch(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l,
                                      (int)sizeof(s_rcfg.kp)) == 0;
-    s_rcfg.have_devcfg = ds_device_config_fetch(&s_rcfg.sub_interval) == 0;
+    s_rcfg.have_devcfg = ds_device_config_fetch(&s_rcfg.devcfg) == 0;
 #ifdef ESP_PLATFORM
     s_remote_layout_ready = true;
     s_rcfg.have_layout =
         ds_launcher_fetch(s_rcfg.layout, sizeof(s_rcfg.layout), &s_rcfg.lay_n) == 0 &&
         s_rcfg.lay_n > 0;
+    /* 网络刚被上面几个请求验证过：顺手预热订阅（写 TF 缓存，失败有日志） */
+    subs_warm_start();
 #else
     s_rcfg.have_layout = false; /* 模拟器 ui_init 已就地应用排布 */
 #endif
@@ -96,7 +126,17 @@ void ui_remote_config_refresh(void)
         ui_keys_apply_config(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l);
     }
     if (s_rcfg.have_devcfg) {
-        ds_config_set_refresh_interval(s_rcfg.sub_interval);
+        ds_config_set_refresh_interval(s_rcfg.devcfg.sub_refresh_interval_s);
+        /* 亮度/音量 = 设备回写的持久化值（-1=云端没存过，保持本地默认）。
+         * 此时状态栏开机套用已跑过，应用新值要显式调一次。 */
+        if (s_rcfg.devcfg.brightness >= 10 || s_rcfg.devcfg.volume >= 0) {
+            ds_config_update(s_rcfg.devcfg.brightness >= 10 ? s_rcfg.devcfg.brightness : -1,
+                             s_rcfg.devcfg.volume >= 0 ? s_rcfg.devcfg.volume : -1,
+                             -1);
+            ui_statusbar_apply_hw();
+            UILOG("remote cfg: bright=%d vol=%d", s_rcfg.devcfg.brightness,
+                  s_rcfg.devcfg.volume);
+        }
     }
 
     /* 主页排布：真机开机时 Wi-Fi 未起、拉不到 Web 配置（register_apps
@@ -139,9 +179,14 @@ void ui_init(void)
         if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
             ui_keys_apply_config(kp, kb, k3s, k3l);
         }
-        int sub_int = 0;
-        if (ds_device_config_fetch(&sub_int) == 0) {
-            ds_config_set_refresh_interval(sub_int);
+        ds_device_config_t dc;
+        if (ds_device_config_fetch(&dc) == 0) {
+            ds_config_set_refresh_interval(dc.sub_refresh_interval_s);
+            if (dc.brightness >= 10 || dc.volume >= 0) {
+                ds_config_update(dc.brightness >= 10 ? dc.brightness : -1,
+                                 dc.volume >= 0 ? dc.volume : -1, -1);
+                /* 此处状态栏尚未 init，首次刷新的开机套用会带新值 */
+            }
         }
     }
 #endif
@@ -503,15 +548,17 @@ static void quota_build(lv_obj_t *scr, int app_id)
     lv_obj_add_event_cb(g_q_tv, quota_tile_scroll_cb, LV_EVENT_SCROLL, NULL);
     quota_update_all();
 
-    /* 倒计时 timer（更新全部 tile；on_exit 清理） */
-    g_q_cd_timer = lv_timer_create(quota_countdown_cb, 1000, NULL);
+    /* 倒计时 timer（更新全部 tile；ADR-012 P2：登记后由 app_manager
+     * 在切走时兜底删除，on_exit 只断引用） */
+    g_q_cd_timer = app_manager_timer_create(quota_countdown_cb, 1000, NULL);
 
     /* 自动刷新 timer：间隔由 Web 下发（ds_config_refresh_interval，
      * 默认 900s）；每次进页面重建，改设置后重开即生效 */
     {
         int ivs = ds_config_refresh_interval();
         if (ivs < 60) ivs = 900;
-        g_q_auto_timer = lv_timer_create(quota_auto_refresh_cb, (uint32_t)ivs * 1000u, NULL);
+        g_q_auto_timer = app_manager_timer_create(quota_auto_refresh_cb,
+                                                  (uint32_t)ivs * 1000u, NULL);
     }
 
     /* 回归钩子：GADGET_DEMO_SUB_IDX=<n> 直接定位到第 n 张订阅卡截帧 */
@@ -584,6 +631,10 @@ static void quota_fetch_done(void *arg)
 static void *quota_fetch_worker(void *arg)
 {
     ds_refresh();
+#ifdef ESP_PLATFORM
+    UILOG("quota fetch: done stack_free=%u",
+          (unsigned)uxTaskGetStackHighWaterMark(NULL));
+#endif
     lv_async_call(quota_fetch_done, arg);
     return NULL;
 }
@@ -600,17 +651,13 @@ static void quota_fetch_start(int app_id)
     d->gen = g_q_gen;
     d->before = ds_state()->sub_count;
     d->app_id = app_id;
-    pthread_t tid;
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, 16 * 1024); /* HTTP 链栈预算，同 wx_worker */
-    if (pthread_create(&tid, &attr, quota_fetch_worker, d) != 0) {
+    /* 16KB 请求 + 12KB 回落：真机内部 RAM 碎片化时 16KB 栈 ENOMEM，
+     * 此前静默失败 → worker 不启动 → 订阅页永远空（2026-11-16 实测） */
+    if (ui_worker_start(quota_fetch_worker, d, 16 * 1024) != 0) {
+        UILOG("quota fetch: worker start failed");
         g_q_fetch = false;
         free(d);
-        return;
     }
-    pthread_attr_destroy(&attr);
-    pthread_detach(tid);
 }
 
 static void quota_auto_refresh_cb(lv_timer_t *t)
@@ -622,14 +669,10 @@ static void quota_auto_refresh_cb(lv_timer_t *t)
 static void quota_on_exit(void)
 {
     g_q_gen++; /* 在途 worker 的回调据此丢弃 UI 操作 */
-    if (g_q_cd_timer) {
-        lv_timer_delete(g_q_cd_timer);
-        g_q_cd_timer = NULL;
-    }
-    if (g_q_auto_timer) {
-        lv_timer_delete(g_q_auto_timer);
-        g_q_auto_timer = NULL;
-    }
+    /* 两个 timer 已通过 app_manager_timer_create 登记，切走 App 时由
+     * app_manager 统一删除（ADR-012 P2）；这里只断引用，避免悬垂。 */
+    g_q_cd_timer = NULL;
+    g_q_auto_timer = NULL;
     memset(g_q_dots, 0, sizeof(g_q_dots));
 }
 
@@ -700,15 +743,15 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
     const app_def_t defs[] = {
         /* 头像 App：symbol/color 是头像素材缺位时的磁贴回退（NULL symbol
          * 会被 LVGL 渲染成默认 "Text"——真机/模拟器均踩过） */
-        { UI_APP_CHAT,     "chat",     "AstrBot", LV_SYMBOL_ENVELOPE,    0x7C5CFF, "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    LV_SYMBOL_AUDIO,   0x2EC4B6, "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
-        { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
-        { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },
-        { UI_APP_POMODORO, "pomodoro", "番茄钟",  LV_SYMBOL_PLAY,     0xD94B3F, "A:simulator/lvgl-pc/assets/icons/pomodoro.png",  true,  ui_pomodoro_build,     ui_pomodoro_on_exit },
-        { UI_APP_FILES,    "files",    "文件",    LV_SYMBOL_DIRECTORY, 0xE0A030, "A:simulator/lvgl-pc/assets/icons/files.png",    true,  ui_files_build,        ui_files_on_exit },
-        { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit },
-        { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL },
+        { UI_APP_CHAT,     "chat",     "AstrBot", LV_SYMBOL_ENVELOPE,    0x7C5CFF, "A:simulator/lvgl-pc/assets/avatars/chat.png",    true,  ui_conversation_build, ui_conversation_on_exit, 0 },
+        { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    LV_SYMBOL_AUDIO,   0x2EC4B6, "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit, 0 },
+        { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit, 0 },
+        { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit, 0 },
+        { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit, 0 },
+        { UI_APP_POMODORO, "pomodoro", "番茄钟",  LV_SYMBOL_PLAY,     0xD94B3F, "A:simulator/lvgl-pc/assets/icons/pomodoro.png",  true,  ui_pomodoro_build,     ui_pomodoro_on_exit,   APP_FLAG_BG_TIMER | APP_FLAG_STATUSBAR },
+        { UI_APP_FILES,    "files",    "文件",    LV_SYMBOL_DIRECTORY, 0xE0A030, "A:simulator/lvgl-pc/assets/icons/files.png",    true,  ui_files_build,        ui_files_on_exit, 0 },
+        { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit, 0 },
+        { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL, 0 },
     };
     const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
 

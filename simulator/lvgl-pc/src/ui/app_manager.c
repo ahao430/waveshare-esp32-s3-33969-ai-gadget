@@ -1,6 +1,7 @@
 #include "app_manager.h"
 
 #include <stddef.h>
+#include <stdio.h>
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -11,8 +12,9 @@
  * 指标：总空闲 / 历史最低 / PSRAM 空闲 / 内部 RAM 最大连续块。 */
 static void appmem_log(const char *evt, const app_def_t *def)
 {
-    ESP_LOGI("appmem", "%s %s heap=%u min=%u psram=%u largest_int=%u",
+    ESP_LOGI("appmem", "%s %s flags=0x%x heap=%u min=%u psram=%u largest_int=%u",
              evt, (def && def->key) ? def->key : "?",
+             (unsigned)(def ? def->flags : 0),
              (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_minimum_free_heap_size(),
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
@@ -23,9 +25,17 @@ static void appmem_log(const char *evt, const app_def_t *def)
 #endif
 
 #define APP_MAX 16
+#define APP_TIMER_MAX 12
 
 static app_def_t g_apps[APP_MAX];
 static int g_count;
+
+/* App 级 timer 登记表（ADR-012 P2）：只登记"重复 timer"，切走 App 时
+ * 由 app_manager 统一删除，防止新 App 漏删 timer。后台常驻 timer
+ * （番茄钟）与一次性 timer 不登记。 */
+static lv_timer_t *g_app_timers[APP_TIMER_MAX];
+static int g_app_timer_owner[APP_TIMER_MAX];
+static int g_app_timer_n;
 
 static lv_obj_t *g_home;
 static lv_obj_t *g_current_screen;
@@ -40,7 +50,11 @@ bool app_manager_register(const app_def_t *def)
 
 void app_manager_clear(void)
 {
-    /* 调用方保证当前不在 App 内（g_current_def 指向表内元素） */
+    /* 调用方保证当前不在 App 内（g_current_def 指向表内元素）。
+     * 防御性清理可能残留的登记 timer（正常路径应在 back/open 清掉）。 */
+    while (g_app_timer_n > 0) {
+        lv_timer_delete(g_app_timers[--g_app_timer_n]);
+    }
     g_count = 0;
 }
 
@@ -64,11 +78,66 @@ const app_def_t *app_manager_find(int app_id)
 
 void app_manager_set_home(lv_obj_t *home) { g_home = home; }
 
+/* ---------------- App 级 timer 登记（ADR-012 P2） ---------------- */
+
+static void app_timers_cleanup(int app_id)
+{
+    bool removed = false;
+    for (int i = 0; i < g_app_timer_n;) {
+        if (g_app_timer_owner[i] == app_id) {
+            lv_timer_delete(g_app_timers[i]);
+            removed = true;
+            g_app_timers[i] = g_app_timers[--g_app_timer_n];
+            g_app_timer_owner[i] = g_app_timer_owner[g_app_timer_n];
+        } else {
+            i++;
+        }
+    }
+#ifdef ESP_PLATFORM
+    if (removed) {
+        ESP_LOGW("app", "timer cleanup app=%d left=%d", app_id, g_app_timer_n);
+    }
+#else
+    if (removed) {
+        fprintf(stderr, "[app] timer cleanup app=%d left=%d\n", app_id,
+                g_app_timer_n);
+    }
+#endif
+}
+
+lv_timer_t *app_manager_timer_create(lv_timer_cb_t cb, uint32_t period,
+                                     void *user_data)
+{
+    if (!g_current_def || !cb || g_app_timer_n >= APP_TIMER_MAX) return NULL;
+
+    lv_timer_t *t = lv_timer_create(cb, period, user_data);
+    if (!t) return NULL;
+    g_app_timers[g_app_timer_n] = t;
+    g_app_timer_owner[g_app_timer_n] = g_current_def->id;
+    g_app_timer_n++;
+    return t;
+}
+
+void app_manager_timer_delete(lv_timer_t *t)
+{
+    if (!t) return;
+    for (int i = 0; i < g_app_timer_n; i++) {
+        if (g_app_timers[i] == t) {
+            g_app_timers[i] = g_app_timers[--g_app_timer_n];
+            g_app_timer_owner[i] = g_app_timer_owner[g_app_timer_n];
+            break;
+        }
+    }
+    lv_timer_delete(t);
+}
+
 static void exit_current_app_logic(void)
 {
     /* 只执行 App 级清理；屏幕对象的销毁交给转场 auto_del，
      * 避免动画进行中删除被渲染的屏幕。 */
     if (g_current_def && g_current_def->on_exit) g_current_def->on_exit();
+    /* on_exit 之后兜底：删除仍登记的重复 timer（防止新 App 漏删） */
+    if (g_current_def) app_timers_cleanup(g_current_def->id);
 }
 
 void app_manager_open(int app_id)
@@ -81,6 +150,9 @@ void app_manager_open(int app_id)
 
     bool in_app = (g_current_screen != NULL);
     exit_current_app_logic();
+    /* build 期间就让新 App 成为当前上下文：App 级 timer 登记要能拿到
+     * 正确的 owner id（旧实现 build 完才赋值，登记会落到上一个 App）。 */
+    g_current_def = def;
     appmem_log("open-before", def);
 
     lv_obj_t *scr = lv_obj_create(NULL);
@@ -95,7 +167,6 @@ void app_manager_open(int app_id)
     /* auto_del=true：转场结束后销毁被替换的屏幕（资源释放，PLAN §4.3） */
     lv_screen_load_anim(scr, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, in_app);
     g_current_screen = scr;
-    g_current_def = def;
     appmem_log("open-after", def);
 }
 

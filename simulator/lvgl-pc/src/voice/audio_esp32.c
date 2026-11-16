@@ -8,7 +8,9 @@
  */
 #include "audio_esp32.h"
 
+#include <math.h>
 #include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -208,6 +210,65 @@ void audio_esp32_set_volume(int pct)
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
     esp_codec_dev_set_out_vol(g_spk, pct);
+}
+
+/* ---- UI 提示音（ui_sound 转发：番茄钟按键/倒计时结束） ---- */
+
+#define BEEP_TWO_PI 6.2831853f
+
+static TaskHandle_t g_beep_task;
+
+/* 合成一段正弦分块直写 codec：16k 采样、首尾线性淡入淡出防爆音。
+ * 相位由全局帧号直接算，块间无跳变。amp≈6000（点击）/9000（提醒）。 */
+static void beep_write(int freq, int ms, int amp)
+{
+    static int16_t chunk[PCM_CHUNK_FRAMES]; /* 静态：单实例任务独占 */
+    const int total = 16 * ms;              /* 16k → 每毫秒 16 帧 */
+    for (int pos = 0; pos < total; pos += PCM_CHUNK_FRAMES) {
+        int n = total - pos;
+        if (n > PCM_CHUNK_FRAMES) n = PCM_CHUNK_FRAMES;
+        for (int i = 0; i < n; i++) {
+            int g = pos + i;
+            float env = 1.0f;
+            if (g < 16) env = (float)g / 16.0f;                   /* 1ms 淡入 */
+            if (total - g < 80) env *= (float)(total - g) / 80.0f; /* 5ms 淡出 */
+            chunk[i] = (int16_t)(sinf(BEEP_TWO_PI * (float)freq * (float)g / 16000.0f)
+                                 * (float)amp * env);
+        }
+        if (esp_codec_dev_write(g_spk, chunk, (int)(n * sizeof(int16_t))) != 0) {
+            return; /* 写失败（如正在被 TTS 独占异常）：放弃本声 */
+        }
+    }
+}
+
+static void beep_task(void *arg)
+{
+    int kind = (int)(intptr_t)arg;
+    /* TTS 正在播：排队等它收尾（两路并发写 codec 会交错破音），
+     * 最多等 10s——提醒宁可迟到/丢弃也不打断对话回复。 */
+    for (int wait = 0; g_play_task != NULL && wait < 10000; wait += 50) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (kind == AUDIO_BEEP_ALERT) {
+        for (int i = 0; i < 3; i++) { /* 三连滴：阶段完成一听可辨 */
+            beep_write(1046, 160, 9000); /* C6 */
+            vTaskDelay(pdMS_TO_TICKS(120));
+        }
+    } else {
+        beep_write(1250, 70, 6000); /* 按键短滴 */
+    }
+    g_beep_task = NULL;
+    vTaskDelete(NULL);
+}
+
+void audio_esp32_ui_beep(int kind)
+{
+    if (!atomic_load(&g_inited) || !g_spk) return;
+    if (g_beep_task) return; /* 上一声还在播/在排队：合并 */
+    if (xTaskCreate(beep_task, "ui_beep", 4096, (void *)(intptr_t)kind, 5,
+                    &g_beep_task) != pdPASS) {
+        g_beep_task = NULL;
+    }
 }
 
 /* ---- vs_audio_ops_t ---- */

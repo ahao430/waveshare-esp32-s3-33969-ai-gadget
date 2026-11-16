@@ -424,3 +424,50 @@ TF 卡应成为统一存储；应持续观测 RAM。本期先落地与番茄钟�
 - 阶段切换暂无声音/振动提醒（固件无通用 tone API）；回到番茄钟页面
   可见新阶段和统计变化，后续接通知服务
 - 统计文件极小（<200B），TF 写频率最多每个专注周期一次
+
+------------------------------------------------------------------------
+
+## ADR-012 esp-brookesia 复评：不引入框架，借鉴三个机制（2026-11-16）
+
+**背景**：用户确认「出厂固件 = Brookesia Launcher + 多应用」，提出
+能否复用其 Phone/Launcher/App Registry/生命周期。ADR-007/008 已做过
+一次路线取舍（2026-11-14，最终回到自研）；本次用当前仓库重新实测，
+完整数据见 [BROOKESIA_EVAL.md](BROOKESIA_EVAL.md)。
+
+**复评事实**：
+- `03_esp-brookesia` 示例在 IDF v6.0.3 + BSP 2.0.1 + LVGL 9.4 下
+  编译通过（1937 单元），但内容只有 `brookesia_core`（Phone/Speaker
+  壳）+ 1 个 Squareline demo；出厂 9 个 App 不开源。
+- 示例 bin 2.43MB（4MB 分区余 39%）：brookesia_core 631KB、
+  libstdc++ 203KB、demo 268KB、LVGL 1.04MB。
+- 本仓库固件 3.98MB，4MB 分区仅余 **216KB（5%）**；出厂固件 app
+  镜像 5.39MB、分区 8MB。
+- 迁移面覆盖全部 UI 层（9 App 改 C++ 类、Launcher/状态栏/手势/
+  主题重写、数据层服务化），且圆屏/定稿 UI/性能规避要全部重验。
+
+**决策**：
+1. **维持 ADR-008 的自研固件基线，不引入 esp-brookesia 依赖**。
+   框架复用带来的收益（现成 Launcher/Recents/生命周期）抵不过
+   +0.8~1.1MB flash、C++ 运行时和全 UI 迁移风险。
+2. **借鉴三个机制**（不改框架）：
+   - P1（**已落地 2026-11-16**）：`ui_statusbar_set_app_status()` 单
+     label 药丸；番茄钟后台显示 `🔔 24:31`，前台/暂停隐藏。实测
+     flash +768B、内部 RAM <1KB、无新任务/栈。
+   - P2（**已落地 2026-11-16**）：`app_def_t` 末尾增加
+     `APP_FLAG_BG_TIMER/STATUSBAR/KEEP_STATE`，番茄钟标
+     `BG_TIMER|STATUSBAR`，`appmem` 日志带 `flags=0x3`。
+   - P2（**已落地 2026-11-16**）：`app_manager_timer_create/delete`
+     登记重复 timer，切走 App 时统一清理；订阅页两个 timer 已改用该
+     接口，`on_exit` 只断引用。模拟器验证
+     `[app] timer cleanup app=0 left=0`；一次性/后台常驻 timer 不登记。
+3. **重评触发条件**：产品需要第三方 App 动态安装/应用商店/JSON UI/
+   多运行时。届时评估 upstream v0.8（支持 IDF 6.0–6.2），以独立
+   工程/分支验证，不在本仓库渐进替换。
+
+**后果**：
+- flash 预算：P1 +768B；布局重做 + P2 + 移除未用的
+  `font_pomo_16` + 订阅 worker 修复后，当前余 **221,328B / 5%**。现有
+  9 App 与稳定性成果保留。
+- 出厂固件仍只作恢复镜像与交互范式参考；其 App 实现不可复用。
+- 框架能力（Recents/快照/App Store/服务框架）继续以「设计参考」
+  身份保留在 FACTORY_REVIEW/BROOKESIA_EVAL，不产生代码依赖。

@@ -11,6 +11,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_gesture.c
     ${SIM_SRC_DIR}/ui/ui_keys.c
     ${SIM_SRC_DIR}/ui/ui_launcher.c
+    ${SIM_SRC_DIR}/ui/ui_worker.c
     ${SIM_SRC_DIR}/ui/icons/icon_embed.c
     ${SIM_SRC_DIR}/ui/ui_settings.c
     ${SIM_SRC_DIR}/ui/ui_files.c
@@ -19,6 +20,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_statusbar.c
     ${SIM_SRC_DIR}/ui/ui_theme.c
     ${SIM_SRC_DIR}/ui/ui_weather.c
+    ${SIM_SRC_DIR}/ui/ui_sound.c
     # 中文字体子集（GB2312-L1，gen_cn_font.sh 生成；flash 预算见 PLAN §14）
     ${SIM_SRC_DIR}/ui/fonts/font_cn_12.c
     ${SIM_SRC_DIR}/ui/fonts/font_cn_14.c
@@ -26,7 +28,6 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/fonts/font_cn_20.c
     ${SIM_SRC_DIR}/ui/fonts/font_digits_84.c
     ${SIM_SRC_DIR}/ui/fonts/font_pomo_20.c
-    ${SIM_SRC_DIR}/ui/fonts/font_pomo_16.c
     # 数据源（mock 起步；Wi-Fi 就绪后 ds_init 切 bridge）
     ${SIM_SRC_DIR}/data/data_source.c
     ${SIM_SRC_DIR}/data/data_source_mock.c

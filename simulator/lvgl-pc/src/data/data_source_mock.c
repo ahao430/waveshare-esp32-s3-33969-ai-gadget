@@ -12,10 +12,12 @@ static void mock_init(void)
     (void)mock_state(); /* 触发内部初值（重置时间/更新时间） */
 }
 
-/* 设备运行配置下发：mock 恒 15 分钟（与 PLAN §6.3 默认一致）。 */
-static int mock_device_config_fetch(int *sub_refresh_interval_s)
+/* 设备运行配置下发：mock 恒 15 分钟（与 PLAN §6.3 默认一致），
+ * 亮度/音量不下发（保持本地值——mock 无持久化语义）。 */
+static int mock_device_config_fetch(ds_device_config_t *out)
 {
-    if (sub_refresh_interval_s) *sub_refresh_interval_s = 900;
+    if (!out) return -1;
+    out->sub_refresh_interval_s = 900;
     return 0;
 }
 

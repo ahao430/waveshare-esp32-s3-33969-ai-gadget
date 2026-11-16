@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 生成番茄钟专用加粗中文字体（Noto Sans SC wght=700 → font_pomo_20/14）。
+# 生成番茄钟专用加粗中文字体（Noto Sans SC wght=700 → font_pomo_20）。
 #
 # 为什么单独生成：
 #   - 界面文字要"大、亮、粗"（2026-11-16 用户反馈），现有 font_cn_*
@@ -63,7 +63,7 @@ PY
 
 echo "== 番茄钟字符集：$(printf '%s' "$SYMBOLS" | wc -m | tr -d ' ') 个 CJK/符号"
 mkdir -p "$OUT_DIR"
-for sz in 20 16; do
+for sz in 20; do
   echo "== 生成 ${sz}px 加粗"
   npx --yes lv_font_conv \
     --font "$BOLD_TTF" \
@@ -75,4 +75,4 @@ for sz in 20 16; do
     -o "$OUT_DIR/font_pomo_${sz}.c"
 done
 
-echo "完成：$OUT_DIR/font_pomo_{20,16}.c（请重编模拟器/固件）"
+echo "完成：$OUT_DIR/font_pomo_20.c（请重编模拟器/固件）"

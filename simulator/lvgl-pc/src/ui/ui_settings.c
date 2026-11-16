@@ -15,6 +15,14 @@
 #include "ui_theme.h"
 #include "ui_wifi_panel.h"
 
+#ifdef ESP_PLATFORM
+#include "bsp/esp-bsp.h"
+/* 与 ui_statusbar 同款：LVGL 回调内已在显示锁里，QSPI 亮度事务安全 */
+#define BRIGHT_APPLY(v) bsp_display_brightness_set(v)
+#else
+#define BRIGHT_APPLY(v) ((void)0)
+#endif
+
 /* 子页 id */
 enum settings_page {
     SP_HOME = 0,
@@ -116,8 +124,12 @@ static void slider_changed_cb(lv_event_t *e)
     const char *which = lv_event_get_user_data(e);
     lv_obj_t *slider = lv_event_get_target(e);
     int v = (int)lv_slider_get_value(slider);
-    if (which[0] == 'b') ds_config_update(v, -1, 0);
+    if (which[0] == 'b') {
+        ds_config_update(v, -1, 0);
+        BRIGHT_APPLY(v); /* 此前只改状态不应用——真机滑条是死的，顺手修 */
+    }
     else ds_config_update(0, v, 0);
+    ds_config_persist(); /* 防抖回写 Bridge（亮度/音量跨重启持久化） */
 }
 
 static void timeout_changed_cb(lv_event_t *e)
@@ -125,7 +137,10 @@ static void timeout_changed_cb(lv_event_t *e)
     lv_obj_t *dd = lv_event_get_target(e);
     static const int vals[] = { 15, 30, 60, 120, 300 };
     int idx = (int)lv_dropdown_get_selected(dd);
-    if (idx >= 0 && idx < 5) ds_config_update(0, 0, vals[idx]);
+    if (idx >= 0 && idx < 5) {
+        ds_config_update(0, 0, vals[idx]);
+        ds_config_persist();
+    }
 }
 
 static void refresh_changed_cb(lv_event_t *e)

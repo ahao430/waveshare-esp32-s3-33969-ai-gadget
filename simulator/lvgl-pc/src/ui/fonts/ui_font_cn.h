@@ -20,8 +20,8 @@ LV_FONT_DECLARE(lv_font_cn_20);
 LV_FONT_DECLARE(font_digits_84);
 
 /* 番茄钟界面加粗字体（Noto Sans SC wght=700，只含该页字符串；见
- * scripts/gen_pomo_font.sh。用户反馈"文字要大、亮、粗"） */
+ * scripts/gen_pomo_font.sh。用户反馈"文字要大、亮、粗"）。16px 档在
+ * 2026-11-16 布局重做（统计改 20px）后不再使用，已从固件移除省 flash。 */
 LV_FONT_DECLARE(font_pomo_20);
-LV_FONT_DECLARE(font_pomo_16);
 
 #endif /* UI_FONT_CN_H */

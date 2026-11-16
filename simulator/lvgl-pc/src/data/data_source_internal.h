@@ -44,8 +44,9 @@ typedef struct {
 	 * bot_id 空=全部实例；AstrBot 靠 username+session 记忆，本地清气泡
 	 * ≠ 机器人失忆——此调用让 Bridge 轮换两者（等效"新建会话"）。 */
 	int (*chat_reset)(const char *bot_id);
-	/* 设备运行配置下发（可为 NULL=不支持）：0=写 *sub_interval / -1。 */
-	int (*device_config_fetch)(int *sub_refresh_interval_s);
+	/* 设备运行配置下发（可为 NULL=不支持）：0=填充 out / -1。
+	 * 字段缺省语义见 data_source.h 的 ds_device_config_t。 */
+	int (*device_config_fetch)(ds_device_config_t *out);
 
 } ds_impl_t;
 

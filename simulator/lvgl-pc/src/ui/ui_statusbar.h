@@ -21,7 +21,17 @@ void ui_statusbar_init(void);
 /* 打开快速音量弹窗（对话页音量按钮复用；状态栏图标簇点击同款） */
 void ui_statusbar_volume_popup(void);
 
+/* 把 ds_state() 的音量/亮度应用到硬件（codec + 面板 DCS）。开机补套
+ * 与远程配置应用后各调一次；模拟器 no-op。 */
+void ui_statusbar_apply_hw(void);
+
 /* 立即按 ds_state() 刷新（低电量事件等场景可主动调） */
 void ui_statusbar_refresh(void);
+
+/* App 后台状态槽（P1）：番茄钟后台计时等在状态栏顶部中央显示小药丸。
+ * text=NULL/空 隐藏；color 为文字色（通常传阶段色）。仅在
+ * ui_statusbar_init() 之后生效；不新增任务/线程，由调用方既有 lv_timer
+ * 驱动（番茄钟 tick 已有 1s 节流）。 */
+void ui_statusbar_set_app_status(const char *text, uint32_t color);
 
 #endif /* UI_STATUSBAR_H */

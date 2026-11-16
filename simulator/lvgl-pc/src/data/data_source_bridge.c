@@ -3,11 +3,14 @@
  * 说明：Phase 1 只映射额度窗口；电池/Wi-Fi/服务器数保持 mock 初值
  * （固件上这些来自 power/network 服务）。
  */
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "cJSON.h" /* FetchContent 引入的 DaveGamble/cJSON */
 #include "data_source_internal.h"
@@ -195,18 +198,26 @@ static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
  * 快照窗口映射：5h/weekly → 设备展示字段；credits → 余额副行。 */
 static void fetch_subscriptions(gadget_state_t *st)
 {
+    DSLOG("subs fetch: start url=%s", g_subs_url);
     char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
-    if (!buf) return;
+    if (!buf) {
+        DSLOG("subs fetch: buf alloc failed (%d B)", BRIDGE_BUF_SIZE);
+        return;
+    }
     int status = http_get(g_subs_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS * 4);
     long cache_mt = 0;
     cJSON *root = NULL;
     if (status == 200) {
         root = cJSON_Parse(buf);
         if (root) cache_write("cache/subscriptions.json", buf);
+        else DSLOG("subs fetch: HTTP 200 但 JSON 解析失败");
     }
     if (!root) { /* 断网/解析失败：回读 TF 离线缓存（ADR-010） */
         cache_mt = cache_read("cache/subscriptions.json", buf, BRIDGE_BUF_SIZE);
         if (cache_mt) root = cJSON_Parse(buf);
+        /* 失败路径此前完全静默——真机"订阅页空"无从定位，补日志 */
+        DSLOG("subs fetch: status=%d cache=%s", status,
+              cache_mt ? (root ? "hit" : "hit-parse-fail") : "miss");
     }
     free(buf);
     if (!root) return;
@@ -280,14 +291,16 @@ static void fetch_subscriptions(gadget_state_t *st)
         }
         if (n > 0) st->sub_count = n;
         else st->sub_count = 0; /* 明确空列表 → 设备空态 */
+        DSLOG("subs fetch: n=%d", st->sub_count);
         st->updated_unix = cache_mt ? cache_mt : (long)time(NULL);
     } while (0);
     cJSON_Delete(root);
 }
 
-/* 设备运行配置下发（订阅自动刷新间隔）：GET /api/v1/device/config。
- * 数值进 gadget_state（ds_config_* 同一内存字段）；失败返回 -1。 */
-static int bridge_device_config_fetch(int *sub_refresh_interval_s)
+/* 设备运行配置下发（订阅间隔/亮度/音量）：GET /api/v1/device/config。
+ * 亮度/音量是设备回写的持久化值（可选字段），拿到由调用方应用到
+ * 硬件；未下发保持缺省 -1（不覆盖本地值）。失败返回 -1。 */
+static int bridge_device_config_fetch(ds_device_config_t *out)
 {
     char buf[256];
     if (http_get(g_devcfg_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
@@ -296,11 +309,79 @@ static int bridge_device_config_fetch(int *sub_refresh_interval_s)
     int ret = -1;
     const cJSON *v = cJSON_GetObjectItem(root, "sub_refresh_interval_s");
     if (cJSON_IsNumber(v) && v->valueint >= 60) {
-        if (sub_refresh_interval_s) *sub_refresh_interval_s = v->valueint;
+        out->sub_refresh_interval_s = v->valueint;
         ret = 0;
+    }
+    const cJSON *b = cJSON_GetObjectItem(root, "brightness");
+    if (cJSON_IsNumber(b) && b->valueint >= 10 && b->valueint <= 100) {
+        out->brightness = b->valueint;
+    }
+    const cJSON *u = cJSON_GetObjectItem(root, "volume");
+    if (cJSON_IsNumber(u) && u->valueint >= 0 && u->valueint <= 100) {
+        out->volume = u->valueint;
     }
     cJSON_Delete(root);
     return ret;
+}
+
+/* ---------------- 设置回写（亮度/音量跨重启持久化，2026-11-16） ----------------
+ * UI 改亮度/音量/息屏超时后调 ds_config_persist（声明在 data_source.h）：
+ * 防抖 1.5s 把一轮拖动合并成一次 PUT /api/v1/device/config——Bridge 是
+ * 合并语义（PUT 未带的字段保留原值），设备端整体回写当前内存态。
+ * 网络在独立 worker（16KB，真机 ENOMEM 回落 12KB，同 ui_worker 档），
+ * LVGL 线程直调不阻塞；失败只留日志（持久化是增强项，重启回落默认）。 */
+static volatile unsigned g_persist_gen; /* 变更代号：UI 线程 +1，worker 追 */
+static volatile bool g_persist_busy;
+
+static void *cfg_persist_worker(void *arg)
+{
+    (void)arg;
+    unsigned seen = g_persist_gen;
+    char rbuf[128];
+    for (;;) {
+        usleep(1500 * 1000); /* 防抖窗：静默 1.5s 才回写 */
+        if (g_persist_gen == seen) {
+            const gadget_state_t *s = ds_state();
+            char body[96];
+            snprintf(body, sizeof(body),
+                     "{\"sub_refresh_interval_s\":%d,\"brightness\":%d,\"volume\":%d}",
+                     s->sub_refresh_interval_s, s->brightness, s->volume);
+            int st = http_put_json(g_devcfg_url, body, rbuf, sizeof(rbuf),
+                                   BRIDGE_TIMEOUT_MS);
+            DSLOG("cfg persist: put=%d bright=%d vol=%d", st, s->brightness, s->volume);
+            if (g_persist_gen == seen) break; /* 回写期间无新改动：收工 */
+        }
+        seen = g_persist_gen; /* 又改了：重新进防抖窗 */
+    }
+    g_persist_busy = false;
+    return NULL;
+}
+
+void ds_config_persist(void)
+{
+    if (g_base[0] == '\0') return; /* mock 模式链接了本文件但未启用 */
+    g_persist_gen++;
+    if (g_persist_busy) return;    /* worker 在跑：它会发现新代号 */
+    g_persist_busy = true;
+    pthread_t tid;
+    pthread_attr_t attr;
+    /* macOS PTHREAD_STACK_MIN=16KB：12KB 档只在 ESP（真机回落）可达 */
+    static const size_t k_stacks[] = { 16 * 1024, 12 * 1024 };
+    bool ok = false;
+    for (int i = 0; i < 2 && !ok; i++) {
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, k_stacks[i]);
+        int rc = pthread_create(&tid, &attr, cfg_persist_worker, NULL);
+        pthread_attr_destroy(&attr);
+        if (rc == 0) {
+            pthread_detach(tid);
+            ok = true;
+        }
+    }
+    if (!ok) {
+        g_persist_busy = false; /* 创建失败：下次改动重试 */
+        DSLOG("cfg persist: worker spawn failed");
+    }
 }
 
 static bool bridge_refresh(gadget_state_t *st)
