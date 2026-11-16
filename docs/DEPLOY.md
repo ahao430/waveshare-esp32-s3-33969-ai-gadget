@@ -9,6 +9,17 @@ ESP32-S3 跑不了 Go，且项目安全模型是「API Key 只进 Bridge
 （AES-256-GCM 落库）」，几十个供应商 Key 不能存到设备上。Bridge 是
 零第三方依赖的静态二进制 + SQLite，部署成本极低。
 
+## 0.5 AstrBot 也要自部署（聊天与语音回复的后端）
+
+Bridge 不自带对话模型——它把聊天转发给 **AstrBot**（开源 GPT 风格机器人平台）。
+AstrBot 需另行部署（Docker 或源码，任意常驻机器，可与 Bridge 同机）：
+
+1. 部署 AstrBot 并配置模型供应商（如 DeepSeek/智谱官方 API）。
+2. 在 AstrBot 侧准备 API Token（Web 后台/开放平台设置里生成）。
+3. Bridge Web「AstrBot」页填服务地址 + Token → 保存 →「测试」应回 pong。
+4. 之后在「AstrBot」页建机器人实例（对应 AstrBot 的配置文件/人设），设备端可选实例。
+5. 语音识别 Key（硅基流动/豆包/DeepSeek 等）在「语音设置」页配；语音回复文本同样走 AstrBot。
+
 ## 1. 构建产物
 
 ```bash
@@ -83,8 +94,12 @@ curl http://127.0.0.1:8081/api/v1/device/status   # 验证
 
 1. **Wi-Fi 设置**：扫描 → 选网 → 软键盘输密码 → 连接（失败可改密重试；
    成功写入 NVS，重启记住）。
-2. **Bridge 地址**：填 `http://<服务器IP或域名>:8081`，保存即生效
-   （对话/订阅立刻走新地址，无需重刷）。
+2. **Bridge 地址 = 地址簿**：可保存多个地址、点一下切换（✓=当前）：
+   - 开发调试：本机 `http://192.168.x.x:8081`（加上会随 Bridge 一起启动的 Web 后台）
+   - 正式使用：服务器 `http://<域名或IP>:8081`
+   切换即生效（对话/订阅立刻走新地址，无需重刷）；非当前地址可删除，
+   当前地址不可删。开发机和服务器各部署一套 Bridge 时，用同一个
+   `BRIDGE_MASTER_KEY` 可让配置库互相拷贝通用。
 
 凭据优先级：NVS（配网页保存）> `firmware/main/wifi_secret.h`（编译期
 兜底，刷开发固件时仍可用）。

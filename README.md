@@ -33,50 +33,79 @@ waveshare-esp32-s3-33969-ai-gadget/
 └── PLAN.md            # 项目总规划
 ```
 
-## 使用说明
+## Bridge 是什么（为什么要自部署）
 
-### 1. 启动 Bridge 和 Web 后台（Mac）
+设备本身只负责界面、录音与播放——**所有 AI 能力与密钥都在 Bridge**：
 
-```bash
-cd bridge
-go build -o gadget-bridge ./cmd/gadget-bridge   # 首次或更新后
-./run.sh                                        # :8081（读 bridge.env）
-cd ../web && npm install && npm run dev         # :5173
-```
+| 能力 | 设备端 | Bridge（自部署在你的电脑或服务器） |
+|------|--------|-----------------------------------|
+| 聊天 | 文本上屏 | 转发 AstrBot（人设/模型路由、思考链过滤） |
+| 语音对话 | 录音上传、播放回传音频 | ASR 识别 → LLM 回复 → TTS 合成；小智 App 代连 xiaozhi.me（OTA/WebSocket/Opus）；Muse 加密会话 |
+| TTS 朗读 | 只播放 | 全部合成（Edge-TTS/火山/官方小智直通） |
+| 天气/订阅额度 | 只显示 | 抓 Open-Meteo（缓存保温）+ 拿各家 Key 抓供应商接口 |
+| 配置下发 | 开机拉取应用 | 加密落库并即时生效（机器人/音色/订阅/排布/按键） |
 
-- `bridge.env`（gitignore）里放 `BRIDGE_MASTER_KEY`（64 位 hex）；没有它凭据无法加密落库。
-- 运行日志在 `/tmp/bridge.log`；Web/Bridge 改配置即时生效，不用重启设备。
-- 设备只连 Bridge（`http://<Mac IP>:8081`），不直接连 Web。
+**为什么必须自部署**：
+1. **安全**——API Key / Token 只允许存 Bridge（AES-256-GCM 加密落库），不进固件；
+2. **资源**——ESP32 跑不了 Go，也装不下 TTS/Opus/各家协议（app 分区仅剩 5%）；
+3. **演进**——加 AI 能力只改 Bridge，设备零改动（订阅/小智/会话隔离这些功能上线时设备一次都没重刷）。
 
-### 2. 配置设备 Wi-Fi 与 Bridge 地址（运行期配网）
+**部署在哪**：任意常驻主机——开发调试用本机电脑（Mac 直接 `./run.sh`），
+正式使用部署到服务器/NAS/树莓派（一个进程一个端口，Web 后台也由它托管）。
+部署细节见 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
-设备端「设置 → 网络与连接」：
+**多地址切换（开发/正式共用一台设备）**：设备「设置 → 网络与连接 →
+Bridge 地址」是一个**地址簿**——可保存多个地址、点一下即切换
+（开发时连本机 `http://192.168.x.x:8081`，日常切服务器 `http://<域名>:8081`），
+切换后对话/订阅立即走新地址，无需重刷固件。
 
-- **Wi-Fi 设置**：点开即扫描周围网络 → 选择 SSID → 软键盘输密码 → 连接
-  （失败可改密重试；成功存 NVS，重启记住；已连网络可改密码，可重新扫描）。
-- **Bridge 地址**：填 `http://<Bridge 主机IP或域名>:8081`，保存立即生效
-  （对话/订阅当场切新地址，无需重刷）。
+## 新用户上手（从零开始）
 
-编译期 `firmware/main/wifi_secret.h`（gitignore）只是**首次出厂兜底**：
-设备 NVS 里没配过时才用它（启动日志 `creds=wifi_secret.h` 可辨认）；
-一旦在配网页保存过，NVS 优先、改头文件不再影响设备。仅支持 2.4GHz。
+按顺序走一遍（每步都有对应的详细文档链接）：
 
-把 Bridge 部署到常驻服务器/NAS 后设备即可脱离 Mac 独立使用，
-见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+0. **前置**：给原厂固件做全片备份（不可找回，见
+   [BRINGUP §1.0](docs/BRINGUP.md)）；装好 ESP-IDF v6.0.x、Go、Node（开发机）。
 
-### 3. 刷写固件
+1. **（可选）Muse 授权**：只有想用 Muse App 才需要。Muse 授权必须先用
+   **官方 Muse SDK 固件**配对一次——刷官方 SDK → 手机 Muse App 配对 →
+   `esptool read-flash 0x11000 0xC000 nvs.bin` 导出并记下
+   `access_token`/`refresh_token`/`node_id`/`noise_host`（后面 Bridge 要用）。
+   详见下文《Muse 配对与恢复》。
 
-```bash
-pkill -9 -f esp-idf-monitor      # 否则串口被占用，刷写必失败
-cd firmware
-idf.py build
-idf.py -p /dev/cu.usbmodem1101 flash
-```
+2. **部署 Bridge**（二选一）：
+   - **正式**：一台常驻服务器/NAS —— 目标机构建 `go build -tags nolibopusfile`，
+     拷 `bridge.env`（`BRIDGE_MASTER_KEY`）与 `data/gadget.db`，`-webdir` 托管前端
+     （自动探测），systemd 常驻。完整步骤见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+   - **开发**：本机电脑（Mac/Linux 均可）：
+     ```bash
+     cd bridge && go build -tags nolibopusfile -o gadget-bridge ./cmd/gadget-bridge
+     ./run.sh                      # :8081（读 bridge.env）
+     cd ../web && npm install && npm run dev   # 开发热更新用 :5173；:8081 也托管构建产物
+     ```
+   - **AstrBot 也要自部署**：聊天/语音回复的后端就是 AstrBot（任意能跑
+     Docker 的机器，也可与 Bridge 同机）。部署后在 Web「AstrBot」页填
+     服务地址与 Token，设备端即可选机器人实例。
 
-首次刷写前必须有原厂全片备份（见 [BRINGUP.md §1.0](docs/BRINGUP.md)）。
-ESP-IDF 环境见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+3. **刷固件**：
+   ```bash
+   pkill -9 -f esp-idf-monitor      # 否则串口被占用，刷写必失败
+   cd firmware && idf.py build
+   idf.py -p /dev/cu.usbmodem1101 flash
+   ```
+   `firmware/main/wifi_secret.h` 只是出厂兜底，**推荐不填**，用第 4 步运行期配网。
 
-### 4. 设备日常使用
+4. **设备配网**：设备「设置 → 网络与连接」——Wi-Fi 设置（扫描→选网→软键盘输密码，
+   存 NVS 重启记住）+ Bridge 地址（填第 2 步部署的地址；多地址可保存切换）。
+
+5. **打开后台完成配置**：手机扫设备「设置 → 网络与连接 → 管理后台」二维码，
+   或直接开 `http://<Bridge 主机>:8081` —— 按页面依次配置：
+   AstrBot 实例（/bots）、语音 Key 与音色（/voice，可试听）、订阅实例与自动刷新（/subscriptions）、
+   小智官方服务（/xiaozhi）、Muse 凭据（/muse，粘贴第 1 步导出的四项）、外观排布（/appearance）。
+
+6. **多环境**：在设备「Bridge 地址」地址簿里同时保存本机与服务器地址，
+   开发调试切本机、正式使用切服务器，一键生效。
+
+### 日常使用
 
 - 首页左右滑翻页，底部小圆点跟随；一屏 4 个 App，排布可在 Web「外观」里改。
 - **AstrBot 对话**：点页面标题弹「选择机器人」，选中的实例决定文字与语音回复；
@@ -85,74 +114,60 @@ ESP-IDF 环境见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
   转写 Key 与每个 App 的音色在 Web「语音设置」，每个音色旁可「▶ 试听」。
 - **订阅中心**：设备订阅页显示 Web「订阅中心」配置的订阅实例
   （类型 + 名称 + API Key，选类型自动填官方端点；↑↓ 调顺序；页面底部可设
-  设备订阅自动刷新间隔 5~60 分钟）。
-  coding plan 卡显示剩余百分比环+重置倒计时+周额度（智谱含套餐到期，
-  可预热）；按量计费卡（DeepSeek）显示余额。
+  设备订阅自动刷新间隔 1~60 分钟）。coding plan 卡显示剩余百分比环+重置
+  倒计时+周额度（智谱含套餐到期，可预热）；按量计费卡（DeepSeek）显示余额。
 - **小智**：在 Web「小智」页点「连接官方服务」，把 6 位激活码输入
-  xiaozhi.me 控制台绑定后，设备小智 App 的转写、人设与音色全走官方
-  （人设/音色在官方控制台配）。未绑定或官方服务失败时自动回落本机
-  语音链路（语音设置页的音色此时生效）。
-- 设置页里有后台/配网二维码，扫码可在局域网打开 Web 后台。
+  xiaozhi.me 控制台绑定后，设备小智 App 的转写、人设与音色全走官方。
+  未绑定或官方服务失败时自动回落本机语音链路。
 
-### 5. 能拔 USB 线吗？
+### 能拔 USB 线吗？
 
 - **设备**：USB 只负责供电/串口日志，联网走 Wi-Fi。板子接了电池（或换充电器
   供电）就能拔线独立运行；**没接电池拔线即断电**。
-- **AI 功能**：回复要经过 Mac 上的 Bridge。Mac 关机/睡眠、Bridge 没起、或不在
-  同一 Wi-Fi，设备能开机但对话会失败。
+- **AI 功能**：回复要经过 Bridge。Bridge 部署在常驻服务器时设备完全独立；
+  若还在本机 Mac 上跑，Mac 关机/睡眠、Bridge 没起或不在同一 Wi-Fi 则对话失败
+  （设备配网页可切到别的 Bridge 地址）。
 - 刷机、看串口日志时必须接 USB。
 
-### 6. 局域网打开后台
-
-两种形态：
+### 打开后台
 
 - **部署形态（推荐）**：Bridge 直接托管 Web 后台（一个进程一个端口），
-  手机访问 `http://<Bridge 主机>:8081`——设备「设置 → 网络与连接 →
-  管理后台」二维码就是这个地址。产物目录自动探测（`webdist/` 或
-  `../web/dist`，也可 `-webdir` 显式指定）；开发时 Web 改动需
-  `npm run build` 后才反映到 :8081（Vite :5173 不受影响）。部署见
-  [docs/DEPLOY.md](docs/DEPLOY.md)。
-- **开发形态**：Mac 上 Vite 开发服务器（`host: true`）：
+  手机访问 `http://<Bridge 主机>:8081`——设备管理后台二维码就是这个地址。
+  产物目录自动探测（`webdist/` 或 `../web/dist`，也可 `-webdir` 指定）。
+- **开发形态**：Vite 开发服务器 `http://<Mac 局域网 IP>:5173`（热更新）。
+- **只在可信局域网/加鉴权使用**：后台可以改凭据；公网部署设 `BRIDGE_TOKEN` 并配 TLS，
+  浏览器端 `localStorage.setItem('bridge_token','<token>')`。
 
-```bash
-ipconfig getifaddr en0        # 取 Mac 局域网 IP（例如 192.168.0.23）
-# 手机/另一台电脑浏览器打开 http://192.168.0.23:5173
-```
-
-- **只在可信局域网使用**：后台可以改凭据、机器人配置。
-- 首次访问若被拦，在「系统设置 → 网络 → 防火墙」放行 node。
-- 若设置了 `BRIDGE_TOKEN`，在浏览器控制台执行
-  `localStorage.setItem('bridge_token','<token>')` 后刷新（暂无登录页）。
-
-### 7. 常见问题
+### 常见问题
 
 | 现象 | 处理 |
 |------|------|
-| 设备订阅页是空的 | Web「订阅中心」添加订阅实例（类型+名称+API Key）——实例才是设备显示的卡片；未建实例时设备显示"请添加订阅" |
-| 设备连不上 Bridge | 设置→网络与连接：确认 Wi-Fi 已连接、Bridge 地址正确（可改完立即生效）；再 `curl http://<BridgeIP>:8081/api/v1/device/status` 验证服务在跑 |
-| 设备对话一直失败 | Bridge 没起或不可达：`curl http://<BridgeIP>:8081/api/v1/device/status`；换过网络就在设备配网页改 Bridge 地址 |
-| 有文字没声音 | 设备音量/静音；或 TTS Key 没配（Web 语音设置页看「当前生效」）|
-| 说话后卡「思考中」 | 看 `/tmp/bridge.log` 的 `voice:` 分段耗时；确认 Bridge 在跑 |
+| 设备订阅页是空的 | Web「订阅中心」添加订阅实例（类型+名称+API Key）——实例才是设备显示的卡片 |
+| 设备连不上 Bridge | 设置→网络与连接：确认 Wi-Fi 已连接、Bridge 地址正确（改完立即生效）；`curl http://<BridgeIP>:8081/api/v1/device/status` 验证服务在跑 |
+| 设备对话一直失败 | Bridge 没起或不可达；换过网络就在设备地址簿里切换 Bridge 地址 |
+| AstrBot 提示「模型暂不可用」 | Web「AstrBot」页点「测试」看真实错误；检查 AstrBot 服务与实例配置 |
+| 有文字没声音 | 设备音量/静音；或 TTS Key 没配（Web 语音设置看「当前生效」）|
 | 设备偶尔自动重启一次 | 启动期显示管线楔死，任务看门狗约 20s 自动恢复；连续发生再看串口日志 |
-| 长按电源键关机 | 长按约 2s 优雅关机（灭屏即反馈）；**插着 USB 时关机后可能立即重新开机**（VBUS 触发上电，硬件行为）——拔掉 USB 再关或用电池状态关机。固件卡死时长按 10s 硬关兜底 |
+| 长按电源键关机 | 长按约 2s 优雅关机；**插着 USB 时关机后可能立即重新开机**（VBUS 触发，硬件行为）——拔掉 USB 再关。固件卡死时长按 10s 硬关兜底 |
 | 中文显示方块 | 字体过期：`scripts/gen_cn_font.sh` 后重刷 |
 | 刷写失败 | 先 `pkill -9 -f esp-idf-monitor`，再确认 `/dev/cu.usbmodem*` |
-| flash 余量告警 | app 分区只剩 5%（232KB）；加功能前先裁剪字体/素材 |
+| flash 余量告警 | app 分区只剩 5%；加功能前先裁剪字体/素材 |
 
-### 8. Muse 首次使用（必须先刷官方 SDK 配对）
+### Muse 配对与恢复
 
-Muse 的云端授权**不能在本固件里完成**，必须先走一次官方流程：
+Muse 云端授权**不能在本固件里完成**，必须先走一次官方流程：
 
 1. 确认原厂全片备份存在，然后刷**官方 Muse Gadget SDK 固件**
    （`sdkconfig.muse-waveshare-s3-216`，ESP-IDF v6.0.3）。
 2. 手机 Muse App 配对设备并完成授权（设备屏出现 `setup=done ws=up` 即成功）。
 3. 导出 NVS：`esptool read-flash 0x11000 0xC000 nvs.bin`，取出
    `access_token` / `refresh_token` / `node_id` / `noise_host`。
-4. **刷回本项目固件**，并重烧伴宠资源分区（官方固件的 files 会覆盖
-   `assets`，`scripts/flash_companion.sh`）。
+4. **刷回本项目固件**，并重烧伴宠资源分区（`scripts/flash_companion.sh`）。
 5. Web「Muse」页填四项凭据 → 保存 →「连通性测试」。
 
-凭据被 revoke/过期需要重做第 1–3 步。详细步骤与实测记录见
+注意：本项目固件的 app 从 0x10000 刷入会覆盖官方 SDK 的 NVS 区——**配对信息
+只在第 3 步的导出文件和 Bridge 里**，请妥善保存（建议存到私密目录，勿入 Git）。
+凭据被 revoke/过期需重做第 1–3 步。实测记录见
 [docs/HARDWARE.md §2.9](docs/HARDWARE.md) 与 [ADR-004](docs/DECISIONS.md)。
 
 ## 开发与检查命令

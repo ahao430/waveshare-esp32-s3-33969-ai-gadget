@@ -69,23 +69,54 @@ const groups = [
     </header>
 
     <div class="card">
-      <h3 class="mb-2 font-semibold">使用与访问</h3>
+      <h3 class="mb-2 font-semibold">Bridge（自部署服务）</h3>
+      <p class="mb-2 text-sm text-dim">
+        设备的所有 AI 能力都由 <b>Bridge</b> 提供：聊天/语音转发 AstrBot、TTS 合成、
+        天气与订阅额度抓取、配置下发。API Key 只在 Bridge 加密存储，设备端不含任何密钥。
+      </p>
       <ul class="space-y-1 text-sm text-dim">
-        <li>当前后台：<span class="text-accent2">{{ adminUrl }}</span></li>
+        <li>当前后台：<span class="text-accent2">{{ adminUrl }}</span>（Web 由 Bridge 托管，一个地址）</li>
         <li>
-          局域网：手机/另一台电脑打开
-          <code>http://&lt;Mac 局域网 IP&gt;:5173</code>（Vite 已监听 0.0.0.0；
-          首次可能需要在 macOS 防火墙里放行 node）。
+          <b>多环境切换</b>：设备「设置 → 网络与连接 → Bridge 地址」是地址簿——
+          开发调试连本机电脑、日常使用切远程服务器，点一下即生效（无需重刷）。
         </li>
         <li>
-          设备：刷好固件后走 Wi-Fi；接了电池即可拔掉 USB 独立运行。
-          AI 回复依赖本机 Bridge 常驻，且 Mac 不能休眠。
+          <b>部署</b>：开发用本机（<code>bridge/./run.sh</code>）；正式部署到常驻
+          服务器/NAS——一个进程托管 API 与后台，步骤见仓库 <code>docs/DEPLOY.md</code>。
         </li>
         <li>
-          安全：仅限可信局域网；若设置了 <code>BRIDGE_TOKEN</code>，浏览器需在
-          localStorage 写入 <code>bridge_token</code>。
+          <b>AstrBot 也要自部署</b>：聊天与语音回复的后端。部署后在
+          <RouterLink to="/bots" class="text-accent2">AstrBot</RouterLink> 页填地址与 Token。
+        </li>
+        <li>
+          拔 USB：Bridge 在服务器时设备完全独立；还在本机时 Mac 睡眠/关机则对话失败
+          （设备地址簿可随时切换）。
+        </li>
+        <li>
+          安全：仅限可信网络；公网部署请设 <code>BRIDGE_TOKEN</code> 并配 TLS。
         </li>
       </ul>
+    </div>
+
+    <div class="card">
+      <h3 class="mb-2 font-semibold">新用户上手</h3>
+      <ol class="list-decimal space-y-1 pl-5 text-sm text-dim">
+        <li>
+          （可选）<b>Muse 授权</b>：想用 Muse App 才需要——先刷官方 Muse SDK 配对一次，
+          导出配对凭据后刷回本固件；凭据在
+          <RouterLink to="/muse" class="text-accent2">Muse</RouterLink> 页填。
+        </li>
+        <li><b>部署 Bridge + AstrBot</b>（服务器或本机，步骤见 <code>docs/DEPLOY.md</code>）。</li>
+        <li><b>刷固件</b>（首次务必先做原厂全片备份）→ 设备「设置 → 网络与连接」配 Wi-Fi 与 Bridge 地址。</li>
+        <li>
+          <b>在本后台完成配置</b>：
+          <RouterLink to="/bots" class="text-accent2">AstrBot</RouterLink> 实例 ·
+          <RouterLink to="/voice" class="text-accent2">语音设置</RouterLink> Key/音色 ·
+          <RouterLink to="/subscriptions" class="text-accent2">订阅中心</RouterLink> ·
+          <RouterLink to="/xiaozhi" class="text-accent2">小智</RouterLink> ·
+          <RouterLink to="/appearance" class="text-accent2">外观排布</RouterLink>。
+        </li>
+      </ol>
     </div>
 
     <div v-for="g in groups" :key="g.title" class="space-y-3">
@@ -104,8 +135,9 @@ const groups = [
     </div>
 
     <div class="card text-xs text-dim">
-      说明：机器人（AstrBot）、ZCode、监控（Komari）与按键映射均由 Bridge
-      加密落库并即时生效；设备端开机联网后拉取最新配置。
+      说明：机器人（AstrBot）、ZCode、监控（Komari）、订阅与按键映射均由 Bridge
+      加密落库并即时生效；设备端开机联网后拉取最新配置。开发用本机 Bridge、
+      正式用服务器 Bridge，可在设备地址簿里一键切换。
     </div>
   </section>
 </template>
