@@ -17,6 +17,8 @@ extern "C" {
 #define WIFI_PROV_PASS_MAX 64
 
 typedef struct {
+    /* 字段顺序/类型必须与 simulator 的 ds_wifi_ap_t 完全一致
+     *（data_source_wifi.c 直接结构体转发） */
     char ssid[33];
     int8_t rssi;
     bool secure;     /* true=需要密码 */

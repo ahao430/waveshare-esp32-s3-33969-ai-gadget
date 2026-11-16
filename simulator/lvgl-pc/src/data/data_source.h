@@ -225,8 +225,10 @@ int ds_chat_set_active(const char *id);
 /* ---- 运行期配网（设备本地能力，ADR-009；实现 data_source_wifi.c，
  * 单文件双平台：固件=NVS+esp_wifi 真实现，模拟器=演示数据） ---- */
 typedef struct {
+    /* 注意：字段顺序/类型必须与 firmware wifi_prov_ap_t 完全一致
+     *（固件分支直接结构体转发；曾因 int/int8_t 不一致导致 rssi 全 0） */
     char ssid[33];
-    int rssi;
+    int8_t rssi;
     bool secure;     /* true=需要密码 */
     bool enterprise; /* true=企业认证（EAP），设备不支持连接 */
 } ds_wifi_ap_t;

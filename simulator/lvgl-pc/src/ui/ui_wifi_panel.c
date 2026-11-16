@@ -20,7 +20,7 @@
 #include "ui.h"
 #include "ui_theme.h"
 
-#define WIFI_AP_MAX 12
+#define WIFI_AP_MAX 24
 #define PANEL_BG 0x0B1020
 
 /* ---- 面板共享状态（LVGL 线程与 worker 之间只经 lv_async_call 传递） ---- */
