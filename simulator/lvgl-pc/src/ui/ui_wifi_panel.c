@@ -33,6 +33,8 @@ static ds_wifi_ap_t s_aps[WIFI_AP_MAX];
 static int s_ap_n;
 static volatile bool s_worker_busy; /* 扫描/连接进行中（防重入） */
 static lv_obj_t *g_net_tip;         /* 列表底部提示行（企业网拦截等） */
+static lv_obj_t *g_pass_ta;         /* 当前密码输入框（眼睛切换用） */
+static lv_obj_t *g_pass_eye_sym;    /* 眼睛图标（切换状态反馈） */
 
 /* ---- 工具 ---- */
 
@@ -65,6 +67,8 @@ static void mask_close_cb(lv_event_t *e)
         g_mask = NULL;
         g_view = NULL;
         g_net_tip = NULL;
+        g_pass_ta = NULL;
+        g_pass_eye_sym = NULL;
     }
     s_worker_busy = false;
 }
@@ -265,6 +269,18 @@ void ui_wifi_panel_open(void)
 
 /* ================= 密码输入视图 ================= */
 
+static void pass_eye_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!g_pass_ta) return;
+    bool hidden = lv_textarea_get_password_mode(g_pass_ta);
+    lv_textarea_set_password_mode(g_pass_ta, !hidden);
+    if (g_pass_eye_sym) {
+        lv_label_set_text(g_pass_eye_sym,
+                          hidden ? LV_SYMBOL_EYE_OPEN : LV_SYMBOL_EYE_CLOSE);
+    }
+}
+
 static void wifi_pass_view_build(const char *ssid)
 {
     if (g_view) {
@@ -283,12 +299,24 @@ static void wifi_pass_view_build(const char *ssid)
     lv_obj_align(st, LV_ALIGN_TOP_LEFT, 20, 46);
 
     lv_obj_t *ta = lv_textarea_create(g_view);
-    lv_obj_set_size(ta, 440, 54);
-    lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, 74);
+    lv_obj_set_size(ta, 380, 54);
+    lv_obj_align(ta, LV_ALIGN_TOP_LEFT, 20, 74);
     lv_textarea_set_one_line(ta, true);
     lv_textarea_set_password_mode(ta, true);
     lv_textarea_set_max_length(ta, 63);
     lv_textarea_set_placeholder_text(ta, ssid); /* 目标网络名放占位 */
+    g_pass_ta = ta;
+
+    /* 眼睛按钮：明文/密文切换（核对密码输入是否正确） */
+    lv_obj_t *eye = lv_button_create(g_view);
+    lv_obj_set_size(eye, 56, 54);
+    lv_obj_align(eye, LV_ALIGN_TOP_LEFT, 404, 74);
+    lv_obj_set_style_bg_color(eye, UI_CARD_HI, 0);
+    lv_obj_set_style_radius(eye, 14, 0);
+    lv_obj_add_event_cb(eye, pass_eye_cb, LV_EVENT_CLICKED, NULL);
+    g_pass_eye_sym = panel_label(eye, LV_SYMBOL_EYE_CLOSE, &lv_font_montserrat_16,
+                                 UI_TEXT);
+    lv_obj_align(g_pass_eye_sym, LV_ALIGN_CENTER, 0, 0);
 
     lv_obj_t *conn = lv_button_create(g_view);
     lv_obj_set_size(conn, 120, 44);
