@@ -173,9 +173,23 @@ int wifi_prov_bridge_remove(const char *url)
 int wifi_prov_scan(wifi_prov_ap_t *out, int max, int *n)
 {
     wifi_scan_config_t cfg = { .show_hidden = false };
+
+    /* 关键：STA 处于"正在连接"（自动重连已保存旧网）时 esp_wifi_scan_start
+     * 直接返回 ESP_ERR_WIFI_STATE —— 真机现象就是"列表永远空"。扫描前
+     * 先停掉连接尝试并让状态机落定；扫完（有凭据时）恢复自动重连。 */
+    char ssid[33], pass[WIFI_PROV_PASS_MAX];
+    bool had_creds = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
+    s_busy = true;                 /* wifi_evt 的自动重连在此窗口内避让 */
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(150));
+
     esp_err_t err = esp_wifi_scan_start(&cfg, true); /* block ~1.5-3s */
-    if (err == ESP_ERR_WIFI_STATE) return -1;        /* 正在连接，稍后再试 */
-    if (err != ESP_OK) return -2;
+    s_busy = false;
+    if (had_creds) esp_wifi_connect(); /* 恢复连接已保存网络（扫描会打断它） */
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "scan failed: %s", esp_err_to_name(err));
+        return err == ESP_ERR_WIFI_STATE ? -1 : -2;
+    }
 
     uint16_t total = 0;
     if (esp_wifi_scan_get_ap_num(&total) != ESP_OK || total == 0) {
