@@ -50,7 +50,7 @@ func TestAutoModeIPToForecast(t *testing.T) {
 	t.Cleanup(func() { ip.Close(); fc.Close(); geo.Close() })
 
 	svc := NewService(newTestClient(ip, geo, fc),
-		func() ResolveConfig { return ResolveConfig{Mode: "auto"} }, nil)
+		func() ResolveConfig { return ResolveConfig{Mode: "auto"} }, nil, nil)
 	svc.Refresh(context.Background())
 
 	v := svc.Get(context.Background(), false)
@@ -93,7 +93,7 @@ func TestManualModeCityGeocoding(t *testing.T) {
 	t.Cleanup(func() { ip.Close(); geo.Close(); fc.Close() })
 
 	svc := NewService(newTestClient(ip, geo, fc),
-		func() ResolveConfig { return ResolveConfig{Mode: "manual", City: "上海"} }, nil)
+		func() ResolveConfig { return ResolveConfig{Mode: "manual", City: "上海"} }, nil, nil)
 	svc.Refresh(context.Background())
 
 	v := svc.Get(context.Background(), false)
@@ -116,7 +116,7 @@ func TestLocateFailureKeepsStale(t *testing.T) {
 	t.Cleanup(func() { ip.Close(); geo.Close(); fc.Close() })
 
 	svc := NewService(newTestClient(ip, geo, fc),
-		func() ResolveConfig { return ResolveConfig{Mode: "auto"} }, nil)
+		func() ResolveConfig { return ResolveConfig{Mode: "auto"} }, nil, nil)
 	svc.Refresh(context.Background())
 	v := svc.Get(context.Background(), false)
 	if v.Snapshot != nil || !v.Stale {

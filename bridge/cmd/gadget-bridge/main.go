@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gadget-bridge/internal/ai"
 	"gadget-bridge/internal/api"
@@ -371,7 +372,8 @@ func main() {
 	}
 
 	// 天气（Open-Meteo 免费无 Key）：配置每次抓取现读（Web 改城市
-	// TTL 内收敛），启动即预热 + 每 10 分钟保温。
+	// 15s 内收敛），启动即预热；后台刷新间隔由 Web 配置
+	// auto_refresh_min 决定（0=关闭自动刷新，请求按需刷新）。
 	weatherSvc := weather.NewService(weather.NewClient(), func() weather.ResolveConfig {
 		cfg := weather.ResolveConfig{Mode: "auto"}
 		if db != nil {
@@ -386,6 +388,22 @@ func main() {
 			}
 		}
 		return cfg
+	}, func() time.Duration { // 后台刷新间隔（分钟→Duration；0=关闭）
+		m := 10 // 默认与 cacheTTL 一致
+		if db != nil {
+			if raw, err := db.GetSetting(storage.SettingKeyWeather); err == nil {
+				var c struct {
+					AutoRefreshMin *int `json:"auto_refresh_min"`
+				}
+				if json.Unmarshal([]byte(raw), &c) == nil && c.AutoRefreshMin != nil {
+					m = *c.AutoRefreshMin
+				}
+			}
+		}
+		if m <= 0 {
+			return 0
+		}
+		return time.Duration(m) * time.Minute
 	}, logger)
 	weatherSvc.Warm(context.Background())
 	// Komari 预热：设备端 HTTP 超时 1.5s，冷缓存时同步抓上游要 1.3~1.5s

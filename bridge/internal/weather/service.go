@@ -28,7 +28,10 @@ type ResolveConfig struct {
 type Service struct {
 	client  *Client
 	resolve func() ResolveConfig
-	logger  *slog.Logger
+	// refreshInterval 现读后台刷新间隔（Web 配置 auto_refresh_min；
+	// <=0 = 关闭自动刷新——请求时按需惰性刷新，后台不保温）
+	refreshInterval func() time.Duration
+	logger          *slog.Logger
 
 	mu       sync.Mutex
 	warmOnce sync.Once
@@ -38,27 +41,50 @@ type Service struct {
 	last     time.Time // 上次抓取尝试时间
 }
 
-// NewService resolve 每次抓取前现读配置（Web 改城市 10 分钟内生效，
-// 强制刷新立即生效）。
-func NewService(client *Client, resolve func() ResolveConfig, logger *slog.Logger) *Service {
+// NewService resolve/refreshInterval 每次抓取前现读配置（Web 改动即生效，
+// 最迟 15s 内被保温循环感知）。interval 为 nil 按 10 分钟默认。
+func NewService(client *Client, resolve func() ResolveConfig,
+	refreshInterval func() time.Duration, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{client: client, resolve: resolve, logger: logger}
+	if refreshInterval == nil {
+		refreshInterval = func() time.Duration { return cacheTTL }
+	}
+	return &Service{client: client, resolve: resolve,
+		refreshInterval: refreshInterval, logger: logger}
 }
 
-// Warm 启动后台保温（启动即抓一次 + 每 TTL 刷新；配置变更靠 TTL 收敛
-// 或 force）。必须在使用前启动一次；重复调用忽略。
+// interval 当前后台刷新间隔（<=0 = 关闭）。
+func (s *Service) interval() time.Duration { return s.refreshInterval() }
+
+// ttl 缓存有效期：跟随配置间隔（关闭时用默认 10 分钟，保证请求按需刷新）。
+func (s *Service) ttl() time.Duration {
+	if d := s.interval(); d > 0 {
+		return d
+	}
+	return cacheTTL
+}
+
+// Warm 启动后台保温：启动即抓一次；之后每 15s 检查一次配置——
+// 到达配置间隔才刷新（间隔改小/关闭最迟 15s 生效）。
+// 必须在使用前启动一次；重复调用忽略。
 func (s *Service) Warm(ctx context.Context) {
 	s.warmOnce.Do(func() {
 		go func() {
 			s.Refresh(context.Background()) // 启动预热（失败不影响服务）
-			t := time.NewTicker(cacheTTL)
+			t := time.NewTicker(15 * time.Second)
 			defer t.Stop()
 			for {
 				select {
 				case <-t.C:
-					s.Refresh(context.Background())
+					d := s.interval()
+					if d <= 0 {
+						continue // 自动刷新已关闭：仅按需刷新
+					}
+					if time.Since(s.lastFetch()) >= d {
+						s.Refresh(context.Background())
+					}
 				case <-ctx.Done():
 					return
 				}
@@ -111,9 +137,9 @@ func (s *Service) fetch(ctx context.Context, cfg ResolveConfig) (*Snapshot, erro
 	}, nil
 }
 
-// Get 缓存视图；超 TTL 且未保温时惰性抓取（保温常开，一般直接命中）。
+// Get 缓存视图；超 TTL 且未保温时惰性抓取（保温关闭时即为按需刷新）。
 func (s *Service) Get(ctx context.Context, force bool) View {
-	if force || time.Since(s.lastFetch()) > cacheTTL {
+	if force || time.Since(s.lastFetch()) > s.ttl() {
 		s.Refresh(ctx)
 	}
 	s.mu.Lock()

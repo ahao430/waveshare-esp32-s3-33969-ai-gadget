@@ -274,3 +274,10 @@ int ds_keys_fetch(char *pwr_short, char *boot_short,
     if (!g_impl->fetch_keys) return 1;
     return g_impl->fetch_keys(pwr_short, boot_short, key3_short, key3_long, cap);
 }
+
+int ds_device_config_fetch(int *sub_refresh_interval_s)
+{
+    if (!g_impl) ds_init(NULL, NULL, NULL);
+    if (!g_impl->device_config_fetch) return -1;
+    return g_impl->device_config_fetch(sub_refresh_interval_s);
+}

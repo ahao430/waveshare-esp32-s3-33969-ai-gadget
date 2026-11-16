@@ -129,6 +129,7 @@ func NewHandler(d Deps) http.Handler {
 	// 订阅配置与聚合快照（Web 后台动态配置；空列表 → 设备空态文案）。
 	if d.SubscriptionsDB != nil && d.MasterKey != nil {
 		serveSubscriptions(mux, d, logger)
+		serveDeviceConfig(mux, d, logger) // 设备运行配置下发（订阅刷新间隔）
 		// 大肥鱼机器人（AstrBot 实例，独立于订阅）+ 应用配置 KV
 		// （ZCode 远程 / Komari 监控 / 按键映射）——同一 storage.DB。
 		serveBots(mux, d, logger)

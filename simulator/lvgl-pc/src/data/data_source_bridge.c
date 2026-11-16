@@ -40,6 +40,7 @@ static char g_voice_url[256];
 static char g_chat_url[256];
 static char g_chat_reset_url[256];
 static char g_subs_url[256];
+static char g_devcfg_url[256];
 static char g_name[176]; /* "bridge(" + g_base(160) + ")" 余量 */
 static char g_provider[24];
 
@@ -301,6 +302,24 @@ static void fetch_subscriptions(gadget_state_t *st)
         st->updated_unix = (long)time(NULL);
     } while (0);
     cJSON_Delete(root);
+}
+
+/* 设备运行配置下发（订阅自动刷新间隔）：GET /api/v1/device/config。
+ * 数值进 gadget_state（ds_config_* 同一内存字段）；失败返回 -1。 */
+static int bridge_device_config_fetch(int *sub_refresh_interval_s)
+{
+    char buf[256];
+    if (http_get(g_devcfg_url, buf, sizeof(buf), BRIDGE_TIMEOUT_MS) != 200) return -1;
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return -1;
+    int ret = -1;
+    const cJSON *v = cJSON_GetObjectItem(root, "sub_refresh_interval_s");
+    if (cJSON_IsNumber(v) && v->valueint >= 60) {
+        if (sub_refresh_interval_s) *sub_refresh_interval_s = v->valueint;
+        ret = 0;
+    }
+    cJSON_Delete(root);
+    return ret;
 }
 
 static bool bridge_refresh(gadget_state_t *st)
@@ -577,6 +596,7 @@ static void urls_fill(void)
     snprintf(g_chat_reset_url, sizeof(g_chat_reset_url), "%s/api/v1/chat/reset", g_base);
     snprintf(g_chat_url, sizeof(g_chat_url), "%s/api/v1/chat/completions", g_base);
     snprintf(g_subs_url, sizeof(g_subs_url), "%s/api/v1/quota/subscriptions", g_base);
+    snprintf(g_devcfg_url, sizeof(g_devcfg_url), "%s/api/v1/device/config", g_base);
 }
 
 void ds_bridge_rebind(const char *bridge_url)
@@ -601,6 +621,7 @@ const ds_impl_t *ds_bridge_impl(const char *bridge_url, const char *provider)
         .chat_send_stream = bridge_chat_stream,
         .voice_interact  = bridge_voice_interact,
         .chat_reset      = bridge_chat_reset,
+        .device_config_fetch = bridge_device_config_fetch,
         .chat_providers  = bridge_chat_providers,
         .chat_bots       = bridge_chat_bots,
         .chat_active_id  = bridge_chat_active_id,

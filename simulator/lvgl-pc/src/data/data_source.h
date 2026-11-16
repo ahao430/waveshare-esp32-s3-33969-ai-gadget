@@ -152,6 +152,11 @@ ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int fra
 void ds_config_update(int brightness, int volume, int timeout_s);
 void ds_config_set_refresh_interval(int seconds); /* 订阅自动刷新间隔 */
 int ds_config_refresh_interval(void);
+
+/* 设备运行配置下发（Bridge /api/v1/device/config，启动时拉取）：
+ * 0=成功写 *sub_refresh_interval_s / -1=失败（保留本地默认）。
+ * mock 恒 900。 */
+int ds_device_config_fetch(int *sub_refresh_interval_s);
 void ds_config_set_theme(int idx);
 
 /* 清空云端对话记忆（AstrBot username+session 轮换；bot_id 空=全部实例）。

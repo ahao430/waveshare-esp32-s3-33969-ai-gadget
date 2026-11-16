@@ -89,6 +89,39 @@ async function saveOrder() {
   }
 }
 
+/* ---- 设备订阅自动刷新间隔（下发设备，见 Bridge device/config） ---- */
+const devInterval = ref(900)
+const devIntervalBusy = ref(false)
+const devIntervalOptions = [
+  { v: 300, label: '5 分钟' },
+  { v: 900, label: '15 分钟' },
+  { v: 1800, label: '30 分钟' },
+  { v: 3600, label: '60 分钟' },
+]
+async function loadDeviceCfg() {
+  try {
+    const r = await request<{ sub_refresh_interval_s: number }>('/api/v1/device/config')
+    devInterval.value = r.sub_refresh_interval_s
+  } catch {
+    /* 读不到保持默认 */
+  }
+}
+async function saveDeviceCfg() {
+  devIntervalBusy.value = true
+  try {
+    await request('/api/v1/device/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub_refresh_interval_s: devInterval.value }),
+    })
+    message.value = `设备订阅自动刷新已设为 ${devIntervalOptions.find((o) => o.v === devInterval.value)?.label ?? devInterval.value + ' 秒'}（重开设备订阅页生效）`
+  } catch (e) {
+    message.value = `保存失败：${e instanceof Error ? e.message : e}`
+  } finally {
+    devIntervalBusy.value = false
+  }
+}
+
 /* ---- 快照摘要（异步，不阻塞列表；设备订阅页同源数据） ---- */
 interface SnapBrief {
   plan?: string
@@ -217,6 +250,7 @@ async function removeSub(id: string) {
 
 onMounted(() => {
   loadSubs()
+  loadDeviceCfg()
   onKindChange()
 })
 </script>
@@ -298,6 +332,21 @@ onMounted(() => {
         {{ subAdding ? '保存中…' : editingId ? '保存修改' : '添加订阅' }}
       </button>
       <button v-if="editingId" class="btn-ghost" @click="resetForm">取消</button>
+    </div>
+  </div>
+
+  <div class="card mt-4">
+    <h3 class="mb-1 font-semibold">设备订阅自动刷新</h3>
+    <p class="mb-3 text-xs text-dim">
+      设备订阅页按此间隔自动拉取额度（PLAN §6.3：5~60 分钟）。设备开机时拉取本配置，改完重开设备订阅页生效。
+    </p>
+    <div class="flex flex-wrap items-center gap-2">
+      <select v-model.number="devInterval" class="input !w-40">
+        <option v-for="o in devIntervalOptions" :key="o.v" :value="o.v">{{ o.label }}</option>
+      </select>
+      <button class="btn !px-3 !py-1" :disabled="devIntervalBusy" @click="saveDeviceCfg">
+        {{ devIntervalBusy ? '保存中…' : '保存' }}
+      </button>
     </div>
   </div>
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 天气页：定位方式配置（自动 IP 定位 / 手动城市）。数据源 Open-Meteo
-// 免费、无需 API Key；Bridge 每 10 分钟自动刷新。
+// 天气页：定位方式 + 自动刷新间隔配置。数据源 Open-Meteo 免费无需 Key；
+// 自动刷新可关闭（0=关闭，Bridge 仅请求时按需刷新）。
 import { onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
@@ -12,6 +12,15 @@ const message = ref('')
 const messageErr = ref(false)
 const busy = ref(false)
 const preview = ref('')
+// 自动刷新间隔（分钟；0=关闭）
+const autoRefresh = ref(10)
+const refreshOptions = [
+  { v: 0, label: '关闭（按需刷新）' },
+  { v: 10, label: '10 分钟' },
+  { v: 30, label: '30 分钟' },
+  { v: 60, label: '60 分钟' },
+  { v: 120, label: '120 分钟' },
+]
 
 interface WeatherView {
   snapshot?: {
@@ -24,12 +33,13 @@ interface WeatherView {
 
 onMounted(async () => {
   try {
-    const c = await request<{ mode: string; city?: string; location?: string }>(
+    const c = await request<{ mode: string; city?: string; location?: string; auto_refresh_min?: number }>(
       '/api/v1/weather/config',
     )
     mode.value = c.mode === 'manual' ? 'manual' : 'auto'
     city.value = c.city ?? ''
     location.value = c.location ?? ''
+    autoRefresh.value = c.auto_refresh_min ?? 10
   } catch {
     /* 静默 */
   }
@@ -57,7 +67,11 @@ async function save() {
     await request('/api/v1/weather/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: mode.value, city: city.value.trim() }),
+      body: JSON.stringify({
+        mode: mode.value,
+        city: city.value.trim(),
+        auto_refresh_min: autoRefresh.value,
+      }),
     })
     messageErr.value = false
     message.value = '已保存（Bridge 正按新配置刷新…）'
@@ -90,7 +104,7 @@ async function refreshNow() {
   <h1 class="page-title">天气</h1>
   <p class="page-sub">
     数据源 <a class="text-accent2" href="https://open-meteo.com" target="_blank">Open-Meteo</a>
-    ——免费、无需注册 API Key。Bridge 每 10 分钟自动刷新，设备端即开即看。
+    ——免费、无需注册 API Key。Bridge 按下方间隔自动刷新（默认 10 分钟），设备端即开即看。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="messageErr ? 'text-err' : 'text-ok'">{{ message }}</p>
@@ -108,6 +122,15 @@ async function refreshNow() {
     <div v-if="mode === 'manual'" class="pl-6">
       <input v-model="city" class="input" placeholder="城市名（如：上海 / 杭州 / Shenzhen）" />
       <p class="mt-1 text-xs text-dim">支持中文/拼音/英文，经 Open-Meteo 地理编码解析。</p>
+    </div>
+    <div>
+      <h3 class="mb-2 font-semibold">自动刷新</h3>
+      <select v-model.number="autoRefresh" class="input !w-56">
+        <option v-for="o in refreshOptions" :key="o.v" :value="o.v">{{ o.label }}</option>
+      </select>
+      <p class="mt-1 text-xs text-dim">
+        关闭后 Bridge 不后台保温，设备/页面请求时按需刷新（有缓存仍先回缓存）。
+      </p>
     </div>
     <div class="flex gap-2">
       <button class="btn" :disabled="busy || (mode === 'manual' && !city.trim())" @click="save">保存</button>

@@ -16,6 +16,9 @@ import (
 type weatherCfg struct {
 	Mode string `json:"mode"` // auto|manual
 	City string `json:"city,omitempty"`
+	// AutoRefreshMin 后台自动刷新间隔（分钟；0=关闭，nil=默认 10）。
+	// 指针区分"未设置"与显式关闭。
+	AutoRefreshMin *int `json:"auto_refresh_min,omitempty"`
 }
 
 func serveWeather(mux *http.ServeMux, d Deps, logger *slog.Logger) {
@@ -34,12 +37,20 @@ func serveWeather(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		}
 		return c
 	}
+	// 自动刷新默认 10 分钟（与 weatherSvc 默认 TTL 一致）
+	defaultRefresh := func(p *int) int {
+		if p == nil || *p < 0 {
+			return 10
+		}
+		return *p
+	}
 
 	mux.HandleFunc("GET /api/v1/weather/config", func(w http.ResponseWriter, r *http.Request) {
 		c := readCfg()
 		view := map[string]any{
-			"mode": c.Mode,
-			"city": c.City,
+			"mode":             c.Mode,
+			"city":             c.City,
+			"auto_refresh_min": defaultRefresh(c.AutoRefreshMin),
 		}
 		if d.Weather != nil { // 当前实际定位（缓存）供预览
 			if loc := d.Weather.Location(); loc != "" {
@@ -62,6 +73,14 @@ func serveWeather(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		if body.Mode == "manual" && body.City == "" {
 			writeErr(w, logger, http.StatusBadRequest, "bad_city", "manual 模式需要 city")
 			return
+		}
+		// 0=关闭自动刷新；开启时 5~1440 分钟
+		if body.AutoRefreshMin != nil {
+			m := *body.AutoRefreshMin
+			if m != 0 && (m < 5 || m > 1440) {
+				writeErr(w, logger, http.StatusBadRequest, "bad_interval", "auto_refresh_min 须为 0（关闭）或 5~1440")
+				return
+			}
 		}
 		raw, _ := json.Marshal(body)
 		if err := db.SaveSetting(storage.SettingKeyWeather, string(raw)); err != nil {

@@ -12,6 +12,13 @@ static void mock_init(void)
     (void)mock_state(); /* 触发内部初值（重置时间/更新时间） */
 }
 
+/* 设备运行配置下发：mock 恒 15 分钟（与 PLAN §6.3 默认一致）。 */
+static int mock_device_config_fetch(int *sub_refresh_interval_s)
+{
+    if (sub_refresh_interval_s) *sub_refresh_interval_s = 900;
+    return 0;
+}
+
 static bool mock_ds_refresh(gadget_state_t *st)
 {
     mock_refresh(); /* mock_data 的同名函数：伪随机刷新底层状态 */
@@ -186,6 +193,7 @@ const ds_impl_t *ds_mock_impl(void)
         .chat_send_stream = mock_chat_stream,
         .voice_interact  = mock_voice_interact,
         .fetch_weather   = mock_fetch_weather,
+        .device_config_fetch = mock_device_config_fetch,
     };
     return &impl;
 }

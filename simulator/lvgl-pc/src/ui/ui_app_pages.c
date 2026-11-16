@@ -55,6 +55,8 @@ static struct {
     bool have_layout;
     char layout[192];
     int lay_n;
+    bool have_devcfg;
+    int sub_interval; /* 订阅自动刷新间隔（秒，Web 下发） */
 } s_rcfg;
 
 void ui_remote_config_prefetch(void)
@@ -65,6 +67,7 @@ void ui_remote_config_prefetch(void)
     (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
     s_rcfg.have_keys = ds_keys_fetch(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l,
                                      (int)sizeof(s_rcfg.kp)) == 0;
+    s_rcfg.have_devcfg = ds_device_config_fetch(&s_rcfg.sub_interval) == 0;
 #ifdef ESP_PLATFORM
     s_remote_layout_ready = true;
     s_rcfg.have_layout =
@@ -87,6 +90,9 @@ void ui_remote_config_refresh(void)
     if (s_rcfg.have_keys) {
         ui_keys_apply_config(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l);
     }
+    if (s_rcfg.have_devcfg) {
+        ds_config_set_refresh_interval(s_rcfg.sub_interval);
+    }
 
     /* 主页排布：真机开机时 Wi-Fi 未起、拉不到 Web 配置（register_apps
      * 回落出厂顺序），联网后在这里用预取结果重排并重建桌面。 */
@@ -100,6 +106,7 @@ static void voice_demo_begin_cb(lv_timer_t *t);
 static void voice_demo_end_cb(lv_timer_t *t);
 static void quota_on_exit(void);
 static void quota_countdown_cb(lv_timer_t *t);
+static void quota_auto_refresh_cb(lv_timer_t *t);
 static void quota_update_all(void);
 static void quota_tile_scroll_cb(lv_event_t *e);
 static void quota_refresh_cb(lv_event_t *e);
@@ -125,6 +132,10 @@ void ui_init(void)
         char kp[8], kb[8], k3s[8], k3l[8];
         if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
             ui_keys_apply_config(kp, kb, k3s, k3l);
+        }
+        int sub_int = 0;
+        if (ds_device_config_fetch(&sub_int) == 0) {
+            ds_config_set_refresh_interval(sub_int);
         }
     }
 #endif
@@ -196,6 +207,8 @@ static quota_refs_t g_q[DS_SUB_MAX];
 static lv_obj_t *g_q_dots[UI_DOTS_MAX];
 static lv_obj_t *g_q_tv;
 static lv_timer_t *g_q_cd_timer;
+static lv_timer_t *g_q_auto_timer;
+static int g_q_app_id;
 
 static void quota_tile_scroll_cb(lv_event_t *e)
 {
@@ -369,7 +382,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_clear_flag(r->arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_arc_width(r->arc, 18, LV_PART_MAIN);
     lv_obj_set_style_arc_width(r->arc, 18, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(r->arc, UI_CARD, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(r->arc, lv_color_hex(0x333A55), LV_PART_MAIN); /* 设计稿灰紫 track */
 
     /* 环心：大号剩余百分比（y≈环心-26）+ 重置倒计时（其下） */
     r->arc_lbl = ui_label(tile, "68%", &lv_font_montserrat_48, UI_TEXT);
@@ -399,7 +412,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
         lv_obj_align(pw, LV_ALIGN_TOP_MID, -68, 404);
         ui_style_card(pw);
         lv_obj_set_style_bg_color(pw, lv_color_hex(0xFF8A3D), 0);
-        lv_obj_set_style_radius(pw, 14, 0);
+        lv_obj_set_style_radius(pw, 22, 0); /* 设计稿胶囊按钮 */
         lv_obj_add_event_cb(pw, quota_prewarm_cb, LV_EVENT_CLICKED,
                             (void *)(uintptr_t)idx);
         lv_obj_t *pw_sym = ui_label(pw, LV_SYMBOL_CHARGE, &lv_font_montserrat_14, UI_TEXT);
@@ -412,8 +425,8 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_align(btn, LV_ALIGN_TOP_MID, can_pre ? 68 : 0, 404);
     ui_style_card(btn);
     lv_obj_set_style_bg_color(btn, UI_CARD_HI, 0);
-    lv_obj_set_style_radius(btn, 14, 0);
-    lv_obj_add_event_cb(btn, quota_refresh_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_set_style_radius(btn, 22, 0); /* 设计稿胶囊按钮 */
+    lv_obj_add_event_cb(btn, quota_refresh_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)g_q_app_id);
     lv_obj_t *btn_sym = ui_label(btn, LV_SYMBOL_REFRESH, &lv_font_montserrat_14, UI_TEXT);
     lv_obj_align(btn_sym, LV_ALIGN_CENTER, -28, 0);
     lv_obj_t *btn_txt = ui_label(btn, "刷新", &lv_font_cn_14, UI_TEXT);
@@ -427,7 +440,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
 /* 订阅页装配：空态分支 + 每订阅一 tile（横滑 + 页点） */
 static void quota_build(lv_obj_t *scr, int app_id)
 {
-    (void)app_id;
+    g_q_app_id = app_id;
     ui_gesture_back_add(scr); /* 上滑返回（无返回按钮） */
 
     const gadget_state_t *s = ds_state();
@@ -482,6 +495,14 @@ static void quota_build(lv_obj_t *scr, int app_id)
     /* 倒计时 timer（更新全部 tile；on_exit 清理） */
     g_q_cd_timer = lv_timer_create(quota_countdown_cb, 1000, NULL);
 
+    /* 自动刷新 timer：间隔由 Web 下发（ds_config_refresh_interval，
+     * 默认 900s）；每次进页面重建，改设置后重开即生效 */
+    {
+        int ivs = ds_config_refresh_interval();
+        if (ivs < 60) ivs = 900;
+        g_q_auto_timer = lv_timer_create(quota_auto_refresh_cb, (uint32_t)ivs * 1000u, NULL);
+    }
+
     /* 回归钩子：GADGET_DEMO_SUB_IDX=<n> 直接定位到第 n 张订阅卡截帧 */
     const char *sid = getenv("GADGET_DEMO_SUB_IDX");
     if (sid && sid[0]) {
@@ -519,11 +540,29 @@ static void quota_countdown_cb(lv_timer_t *t)
     }
 }
 
+/* 自动刷新（间隔由 Web「订阅自动刷新」下发，默认 15 分钟）：
+ * 到点拉一次数据；订阅数量变化（增删实例）重建页面，否则就地更新。 */
+static void quota_auto_refresh_cb(lv_timer_t *t)
+{
+    (void)t;
+    int before = ds_state()->sub_count;
+    ds_refresh();
+    if (ds_state()->sub_count != before) {
+        app_manager_open(g_q_app_id);
+        return;
+    }
+    quota_update_all();
+}
+
 static void quota_on_exit(void)
 {
     if (g_q_cd_timer) {
         lv_timer_delete(g_q_cd_timer);
         g_q_cd_timer = NULL;
+    }
+    if (g_q_auto_timer) {
+        lv_timer_delete(g_q_auto_timer);
+        g_q_auto_timer = NULL;
     }
     memset(g_q_dots, 0, sizeof(g_q_dots));
 }

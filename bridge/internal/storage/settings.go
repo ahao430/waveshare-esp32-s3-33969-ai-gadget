@@ -50,7 +50,10 @@ const (
 	SettingKeyZCode     = "zcode"      // ZCode 远程 {base_url, enc_token}
 	SettingKeyMonitor   = "monitor"    // Komari 监控 {base_url, enc_token}
 	SettingKeyKeys      = "keys"       // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
-	SettingKeyWeather   = "weather"    // 天气 {mode: auto|manual, city}
+	SettingKeyWeather   = "weather"    // 天气 {mode: auto|manual, city, auto_refresh_min(0=关闭)}
+	// device_config：设备运行配置下发（设备启动时 GET 应用）
+	// {sub_refresh_interval_s} 订阅页自动刷新间隔（PLAN §6.3：5~60 分钟）
+	SettingKeyDeviceConfig = "device_config"
 	SettingKeyLauncher  = "launcher"   // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
 	SettingKeyAstrBot   = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
 	SettingKeyVoiceApps = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}

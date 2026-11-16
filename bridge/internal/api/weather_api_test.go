@@ -22,7 +22,7 @@ func TestWeatherConfigAndFetch(t *testing.T) {
 
 	svc := weather.NewService(
 		weather.NewClientWithEndpoints(ip.URL, ip.URL, ip.URL, fc.URL),
-		func() weather.ResolveConfig { return weather.ResolveConfig{Mode: "auto"} }, nil)
+		func() weather.ResolveConfig { return weather.ResolveConfig{Mode: "auto"} }, nil, nil)
 	svc.Refresh(t.Context())
 
 	srv, _ := newConfigServerWith(t, mk, func(d *Deps) { d.Weather = svc })
