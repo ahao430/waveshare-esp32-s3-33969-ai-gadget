@@ -45,9 +45,8 @@ const groups = [
       { to: '/voice', label: '语音设置', desc: '语音识别 Key（可跳转官方控制台获取）与各 App 音色' },
       { to: '/muse', label: 'Muse', desc: '云端连接凭据（配对导出）与连通性测试' },
       { to: '/xiaozhi', label: '小智', desc: '连接官方 xiaozhi.me（激活码绑定）；未绑定走本机语音链路' },
-      { to: '/zcode', label: 'ZCode 远程', desc: '远程编码会话源（状态/待确认数量）' },
-      { to: '/monitor', label: '服务器监控', desc: 'Komari 面板对接（节点列表与详情数据源）' },
       { to: '/weather', label: '天气', desc: 'Open-Meteo 免 Key；自动 IP 定位或手动城市' },
+      { to: '/files', label: '设备文件', desc: '与设备 TF 卡双向同步（设备「文件」App）' },
     ],
   },
 ]
@@ -135,7 +134,7 @@ const groups = [
     </div>
 
     <div class="card text-xs text-dim">
-      说明：机器人（AstrBot）、ZCode、监控（Komari）、订阅与按键映射均由 Bridge
+      说明：机器人（AstrBot）、订阅与按键映射均由 Bridge
       加密落库并即时生效；设备端开机联网后拉取最新配置。开发用本机 Bridge、
       正式用服务器 Bridge，可在设备地址簿里一键切换。
     </div>

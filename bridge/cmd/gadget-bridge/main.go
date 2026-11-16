@@ -25,7 +25,6 @@ import (
 	"gadget-bridge/internal/api"
 	museapi "gadget-bridge/internal/api"
 	"gadget-bridge/internal/events"
-	"gadget-bridge/internal/komari"
 	"gadget-bridge/internal/muse"
 	"gadget-bridge/internal/quota"
 	"gadget-bridge/internal/quota/codingplan"
@@ -156,35 +155,6 @@ func main() {
 		func() quota.AccountRef { return resolveAccount("zhipu") },
 		os.Getenv("ZHIPU_PREWARM_MODEL")) // 空=默认 glm-4-flash
 	prewarmZhipu := prewarmer.Prewarm
-
-	// Komari 监控源（动态解析，每次抓取现读配置）：Web 后台配置
-	// （app_settings.monitor）优先 → 环境变量 KOMARI_URL → 空（不回退
-	// mock：未配置就返回空列表，设备/Web 显示空态引导去后台配置）。
-	resolveKomari := func() komari.Source {
-		if db != nil && masterKey != nil {
-			if raw, err := db.GetSetting(storage.SettingKeyMonitor); err == nil {
-				var cfg struct {
-					BaseURL  string `json:"base_url"`
-					EncToken string `json:"enc_token"`
-				}
-				if json.Unmarshal([]byte(raw), &cfg) == nil && cfg.BaseURL != "" {
-					token := ""
-					if cfg.EncToken != "" {
-						if t, derr := security.Decrypt(cfg.EncToken, masterKey); derr == nil {
-							token = t
-						}
-					}
-					return komari.NewClient(cfg.BaseURL, token)
-				}
-			}
-		}
-		if u := os.Getenv("KOMARI_URL"); u != "" {
-			return komari.NewClient(u, os.Getenv("KOMARI_TOKEN"))
-		}
-		return nil
-	}
-	komariSvc := komari.NewService(komari.NewDynamicSource(resolveKomari))
-	logger.Info("komari source = dynamic (web config > KOMARI_URL > none)")
 
 	// Bigfish Chat Model Router（PLAN §7.4）：OpenAI 兼容 upstream。
 	// 环境变量示例：CHAT_UPSTREAM_ZHIPU="https://open.bigmodel.cn/api/paas/v4,ZHIPU_KEY"
@@ -323,6 +293,8 @@ func main() {
 	if *dbPath == "" {
 		appearanceDir = envOr("BRIDGE_APPEARANCE_DIR", "data/appearance")
 	}
+	// 设备文件互通目录（TF 文件管理器，ADR-010）：默认 db 同目录 device_files/。
+	filesDir := envOr("BRIDGE_FILES_DIR", filepath.Join(filepath.Dir(*dbPath), "device_files"))
 
 	// 一次性迁移：旧版把地址/Token 存在 bots 行里——若公用连接还是空，
 	// 启动时从旧行搬到 app_settings.astrbot（之后实例更新不再丢凭据）
@@ -406,19 +378,13 @@ func main() {
 		return time.Duration(m) * time.Minute
 	}, logger)
 	weatherSvc.Warm(context.Background())
-	// Komari 预热：设备端 HTTP 超时 1.5s，冷缓存时同步抓上游要 1.3~1.5s
-	// → 设备永远拿不到数据。启动时后台预热，首个请求即有缓存。
-	if komariSvc != nil {
-		go komariSvc.Warm(context.Background())
-	}
-
 	handler := api.NewHandler(api.Deps{
 		Registry:        reg,
 		Store:           store,
 		Logger:          logger,
 		Token:           os.Getenv("BRIDGE_TOKEN"), // 非空即启用 Bearer 认证（PLAN §19）
-		Komari:          komariSvc,
 		AppearanceDir:   appearanceDir,
+		FilesDir:        filesDir,
 		PrewarmZhipu:    prewarmZhipu,
 		Events:          eventHub,
 		ChatRouter:      chatRouter,

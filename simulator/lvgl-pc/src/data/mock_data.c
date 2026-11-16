@@ -13,8 +13,6 @@ static mock_state_t g_state = {
     .kimi_used_5h   = 12,
     .kimi_used_week = 35,
 
-    .servers_online = 3,
-    .servers_total  = 4,
 
     .battery_pct  = 82,
     .wifi_ok      = 1,

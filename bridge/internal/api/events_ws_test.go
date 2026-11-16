@@ -89,7 +89,7 @@ func TestEventsWebSocketCustomTopic(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	go func() {
 		for i := 0; i < 20; i++ {
-			hub.Publish("komari.updated", map[string]int{"n": 1})
+			hub.Publish("appearance.theme", map[string]int{"n": 1})
 			time.Sleep(50 * time.Millisecond)
 		}
 	}()
@@ -100,7 +100,7 @@ func TestEventsWebSocketCustomTopic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read ws: %v", err)
 		}
-		if strings.Contains(string(raw), "komari.updated") {
+		if strings.Contains(string(raw), "appearance.theme") {
 			return // 收到即通过
 		}
 	}

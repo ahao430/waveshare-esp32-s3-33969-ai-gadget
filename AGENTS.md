@@ -23,7 +23,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 语音链路 / 音色试听 | `bridge/internal/voice/` | ASR→LLM→TTS；`POST /api/v1/voice/preview` 只读试听（不落配置/不改冷却） |
 | 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
-| 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
+| 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连；Bridge 地址簿+预置） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
 | 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c` | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块 |
 | 桌面图标 | `simulator/lvgl-pc/assets/icons/`（88×88） | 缺位自动回退符号；名字与 launcher catalog key 对齐 |
 
@@ -101,6 +101,17 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 10. **主任务发 QSPI polling 事务必须持 display_lock**：开机背光
     `tx_param` 与 LVGL 首帧 DMA 并发会撑死 `spi_device_release_bus`
     断言（实测撑 125s 后崩溃重启）。`bsp_display_backlight_on` 已持锁。
+11. **LVGL 线程内禁一切阻塞调用（2026-11-16 冻屏根因，HARDWARE §2.10）**：
+    `ds_state()` 曾带"首次访问惰性刷新"，Bridge 不可达时被状态栏(5s)/
+    倒计时(1s)在 LVGL 线程里反复同步发 HTTP → 持显示锁冻屏（"家里正常、
+    公司必现"）。规则：`ds_state()` 只读缓存；页面/按钮的网络刷新一律
+    worker 线程 + `lv_async_call` 回 UI（页面代际计数防悬垂控件）；
+    `http_client` connect 带 5s 上限；探针/net_probe 不占看门狗任务。
+12. **Wi-Fi 扫描别先断开再扫（2026-11-16）**：连接态直接
+    `esp_wifi_scan_start` 即可（实测 46~63 APs，不打断连接）；只在返回
+    `ESP_ERR_WIFI_STATE`（正在连接）时才断开中止、**等 DISCONNECTED 事件
+    落定**再扫。曾用固定 150ms：从已连接态 deauth 要 300ms+，扫描被驱动
+    静默吞掉（返回 OK 但 0 结果）——真机"配网页列表永远空"。
 
 ### 当前能力边界（对外说明别说过头）
 
@@ -116,9 +127,15 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 - 设备只连 Bridge（默认 `http://<主机>:8081`），不连 Web。Bridge 可
   部署在任意常驻主机（`-webdir` 托管 Web 后台，部署链见
   `docs/DEPLOY.md`）；开发期在 Mac 上跑则 Mac 睡眠/关机对话失败。
+- **设备 HTTP 只支持明文、不带鉴权**：`http_client.c` 只认 `http://`
+  （无 TLS），也不发 `Authorization`。公网 Bridge 必须开 80/8081 明文端口
+  （https-only / http→https 强跳设备连不上），且**不能设 `BRIDGE_TOKEN`**
+  （设备全部 401）。无鉴权暴露面用非默认端口 + 防火墙白名单收窄（DEPLOY §5）。
+  地址簿可用 `wifi_secret.h` 的 `BRIDGE_SEED_HOSTS` 开机预置（幂等，不改当前）。
 - **局域网后台**：Bridge 监听 `:8081` 全部网卡，Vite 已 `host: true`，
   手机访问 `http://<MacIP>:5173`。仅限可信局域网；设了 `BRIDGE_TOKEN` 时
-  浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）。
+  浏览器需 `localStorage.setItem('bridge_token', ...)`（无登录页）——但
+  设备链路不支持 token，公网部署两者不可兼得（见上一条）。
 - **订阅实例 = 唯一配置入口**（Web 订阅中心）：实例自带 Key，保存时
   Bridge 把 Key 投影到凭据表（语音 ASR `resolveAccount` 动态解析同一份）；
   独立凭据编辑区已删（2026-11-16 用户拍板），别恢复两层概念。设备订阅页

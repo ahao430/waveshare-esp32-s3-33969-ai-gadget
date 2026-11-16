@@ -62,3 +62,6 @@ firmware/main/wifi_secret.h
 
 # build-release.sh 部署产物
 /dist/
+
+# ZCode CLI 工作目录
+/.zcode/

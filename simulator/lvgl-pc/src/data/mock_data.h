@@ -15,10 +15,6 @@ typedef struct {
     int kimi_used_5h;
     int kimi_used_week;
 
-    /* 服务器监控 */
-    int servers_online;
-    int servers_total;
-
     /* 系统状态 */
     int battery_pct;
     int wifi_ok; /* 0/1 */

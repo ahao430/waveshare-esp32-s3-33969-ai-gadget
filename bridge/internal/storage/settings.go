@@ -1,4 +1,4 @@
-// settings.go — 应用配置 KV（ZCode 远程 / Komari 监控 / 按键映射等）。
+// settings.go — 应用配置 KV（按键映射 / 外观 / launcher / 天气等）。
 // value 为 JSON 文本；含密钥的配置由调用方加密后再存（如 enc_token 字段），
 // 明文密钥绝不进本表。
 package storage
@@ -47,17 +47,15 @@ func (d *DB) DeleteSetting(key string) error {
 
 // 常用配置键。
 const (
-	SettingKeyZCode     = "zcode"      // ZCode 远程 {base_url, enc_token}
-	SettingKeyMonitor   = "monitor"    // Komari 监控 {base_url, enc_token}
-	SettingKeyKeys      = "keys"       // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
-	SettingKeyWeather   = "weather"    // 天气 {mode: auto|manual, city, auto_refresh_min(0=关闭)}
+	SettingKeyKeys    = "keys"    // 按键映射 {pwr_short, boot_short, key3_short, key3_long}
+	SettingKeyWeather = "weather" // 天气 {mode: auto|manual, city, auto_refresh_min(0=关闭)}
 	// device_config：设备运行配置下发（设备启动时 GET 应用）
 	// {sub_refresh_interval_s} 订阅页自动刷新间隔（1~60 分钟）
 	SettingKeyDeviceConfig = "device_config"
-	SettingKeyLauncher  = "launcher"   // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
-	SettingKeyAstrBot   = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
-	SettingKeyVoiceApps = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}
-	SettingKeyMuse      = "muse"       // Muse 连接 {node_id, noise_host, api_url, proxy_url, enc_creds}
+	SettingKeyLauncher     = "launcher"   // 桌面排布 {order: [app key 列表]；不在列表=隐藏}
+	SettingKeyAstrBot      = "astrbot"    // AstrBot 公用连接 {base_url, enc_token}（机器人实例共用）
+	SettingKeyVoiceApps    = "voice_apps" // 各 App 语音偏好 {"muse":{"provider","voice"},"xiaozhi":{...}}
+	SettingKeyMuse         = "muse"       // Muse 连接 {node_id, noise_host, api_url, proxy_url, enc_creds}
 	// chat_active_bot：AstrBot 对话 App 的"当前机器人"实例 id（多实例
 	// 切换，设备端点标题切换/Web 设为默认都写这里；空/失效回落第一个）
 	SettingKeyChatActiveBot = "chat_active_bot"

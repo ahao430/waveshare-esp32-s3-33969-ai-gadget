@@ -1,5 +1,7 @@
 #include "http_client.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdbool.h>
@@ -7,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -45,6 +48,62 @@ static void set_timeouts(int fd, int timeout_ms)
     };
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+}
+
+/* 诊断（临时）：记录 connect 失败阶段与 errno，供真机串口定位
+ * （0=ok 1=fcntl 2=connect 立即失败 3=select 超时 4=SO_ERROR） */
+int http_connect_stage;
+int http_connect_errno;
+
+/* connect 带超时（上限 5s）。裸 connect() 对不可达地址会卡到 SYN 重传
+ * 失败（十几秒~分钟级）：Bridge 不在时设备端的 UI/语音/探针任务会全部
+ * 被拖住，真机表现为看门狗重启（2026-11-16 定位）。 */
+static int connect_timeout(int fd, const struct sockaddr *addr, socklen_t alen,
+                           int timeout_ms)
+{
+    http_connect_stage = 0;
+    http_connect_errno = 0;
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        http_connect_stage = 1;
+        http_connect_errno = errno;
+        return -1;
+    }
+    (void)fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+    int rc = connect(fd, addr, alen);
+    if (rc == 0) {
+        (void)fcntl(fd, F_SETFL, flags);
+        return 0;
+    }
+    if (errno != EINPROGRESS && errno != EWOULDBLOCK) {
+        http_connect_stage = 2;
+        http_connect_errno = errno;
+        (void)fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    int cto = timeout_ms > 5000 ? 5000 : timeout_ms; /* 建连不该超过 5s */
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(fd, &wfds);
+    struct timeval tv = {
+        .tv_sec  = cto / 1000,
+        .tv_usec = (cto % 1000) * 1000,
+    };
+    rc = select(fd + 1, NULL, &wfds, NULL, &tv);
+    int soerr = -1;
+    if (rc > 0) {
+        socklen_t sl = sizeof(soerr);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &sl) != 0) soerr = -1;
+        http_connect_stage = 4;
+        http_connect_errno = soerr;
+    } else {
+        http_connect_stage = 3;
+        http_connect_errno = errno;
+    }
+    (void)fcntl(fd, F_SETFL, flags);
+    return soerr == 0 ? 0 : -1;
 }
 
 static int http_request(const char *method, const char *url, const char *json_body,
@@ -95,7 +154,7 @@ static int connect_and_send(const char *url, const char *body, int timeout_ms,
         return -3;
     }
     set_timeouts(fd, timeout_ms);
-    if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
+    if (connect_timeout(fd, res->ai_addr, res->ai_addrlen, timeout_ms) != 0) {
         close(fd);
         freeaddrinfo(res);
         return -4;
@@ -238,7 +297,7 @@ static int http_request(const char *method, const char *url, const char *json_bo
     }
     set_timeouts(fd, timeout_ms);
 
-    if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
+    if (connect_timeout(fd, res->ai_addr, res->ai_addrlen, timeout_ms) != 0) {
         close(fd);
         freeaddrinfo(res);
         return -4;
@@ -330,7 +389,7 @@ int http_post_raw_stream(const char *url, const char *content_type,
         return -3;
     }
     set_timeouts(fd, timeout_ms);
-    if (connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
+    if (connect_timeout(fd, res->ai_addr, res->ai_addrlen, timeout_ms) != 0) {
         close(fd);
         freeaddrinfo(res);
         return -4;

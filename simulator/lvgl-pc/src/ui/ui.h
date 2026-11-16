@@ -20,12 +20,12 @@ static inline void ui_lock(void) {}
 static inline void ui_unlock(void) {}
 #endif
 
-/* App 目录（与 PLAN §5.1 对应；顺序即桌面网格顺序） */
+/* App 目录（与 PLAN §5.1 对应；顺序即桌面网格顺序）。
+ * 2026-11-16 精简：删 ZCode 远程/服务器监控（全链路下线，见 ADR-010），
+ * 同步清理了无引用的 KIMI 枚举——枚举值有变化，GADGET_DEMO_APP 数字
+ * 钩子按新枚举取值。 */
 enum ui_app_id {
     UI_APP_ZHIPU = 0,
-    UI_APP_KIMI,
-    UI_APP_MONITOR,
-    UI_APP_ZCODE,
     UI_APP_CHAT,
     UI_APP_MUSE,
     UI_APP_XIAOZHI,
@@ -45,7 +45,6 @@ void ui_show_launcher(void);
 void ui_open_app(int app_id);
 
 /* 各页面构建器（app_manager 注册用；screen 由 app_manager 预建） */
-void ui_monitor_build(lv_obj_t *screen, int app_id);
 void ui_weather_build(lv_obj_t *screen, int app_id); /* 天气（Open-Meteo） */
 void ui_weather_on_exit(void);
 /* 联网后补拉 Web 下发配置（主题/背景/按键/主页排布）；main 在 GOT_IP

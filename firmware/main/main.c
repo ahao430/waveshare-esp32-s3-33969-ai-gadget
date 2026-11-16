@@ -52,6 +52,29 @@
 #define BRIDGE_HOST ""
 #endif
 
+/* 编译期预置的 Bridge 地址簿（逗号分隔，wifi_secret.h 可选）：
+ * BRIDGE_HOST 决定"没配置时用哪个"，SEED 只是把这些地址并进设备的
+ * 地址簿（幂等、不改当前地址），切换仍在设备 UI 完成——公网服务器
+ * 地址很长，设备软键盘输入体验差，预置后开机即出现在簿里。 */
+#ifndef BRIDGE_SEED_HOSTS
+#define BRIDGE_SEED_HOSTS ""
+#endif
+
+/* 可选：开机把"当前 Bridge"强制切到这个地址（部署新服务器后免设备点按）。
+ * 空=不启用；它会覆盖设备上手动选择，用完记得删。 */
+#ifndef BRIDGE_ACTIVATE_HOST
+#define BRIDGE_ACTIVATE_HOST ""
+#endif
+
+/* 可选：一次性把"当前 Wi-Fi"切到该 SSID（换网/部署时免设备软键盘输入）。
+ * 旧网络仍留在多网络列表（自动连接兜底）；同样用完删。 */
+#ifndef WIFI_ACTIVATE_SSID
+#define WIFI_ACTIVATE_SSID ""
+#endif
+#ifndef WIFI_ACTIVATE_PASS
+#define WIFI_ACTIVATE_PASS ""
+#endif
+
 static const char *TAG = "gadget";
 
 /* ---- 显示锁：必须用 -1（无限等待） ----
@@ -75,11 +98,12 @@ static inline void display_unlock(void) { esp_lv_adapter_unlock(); }
  * 注意任务栈要 ≥12KB：http_client.c 的 GET/POST 路径有 2~4KB 栈缓冲
  *（曾用 6KB → 栈溢出踩坏堆，表现为 LVGL 任务里 time() 的 newlib 锁
  * 断言 xQueueSemaphoreTake failed: uxItemSize == 0）。 */
+/* 连通性自检：GET <bridge>/api/v1/bots（不需要用户操作就能验证设备→
+ * Bridge 这条 HTTP 路径；语音链路卡 15s 超时时先看这个）。 */
 static void net_probe_once(void)
 {
     /* 与语音请求同一条通道（data/http_client.c 的 BSD socket 实现）。
      * Bridge 地址运行期可配（ADR-009）：NVS 优先，编译期宏兜底 */
-    static char body[256];
     char url[192];
     char host[160];
     if (!ds_bridge_host_get(host, sizeof(host))) {
@@ -87,11 +111,17 @@ static void net_probe_once(void)
         return;
     }
     snprintf(url, sizeof(url), "%s/api/v1/bots", host);
+    static char body[256];
     size_t blen = 0;
+    extern int http_connect_stage;
+    extern int http_connect_errno;
     int64_t t0 = esp_timer_get_time();
     int st = http_get_bin(url, body, sizeof(body), &blen, 5000);
-    ESP_LOGW(TAG, "net probe: status=%d body=%u dur=%lldms", st,
-             (unsigned)blen, (long long)((esp_timer_get_time() - t0) / 1000));
+    /* stage：0=ok 1=fcntl 2=connect 立即失败 3=select 超时 4=SO_ERROR
+     *（公网/访客网到达性问题看这里：3=被网络挡住/不可达） */
+    ESP_LOGW(TAG, "net probe: status=%d body=%u dur=%lldms stage=%d errno=%d url=%s",
+             st, (unsigned)blen, (long long)((esp_timer_get_time() - t0) / 1000),
+             http_connect_stage, http_connect_errno, host);
 }
 
 /* 一次性自检（默认关）：开机 8s 进 AstrBot 页、11s 弹选择面板，
@@ -101,6 +131,27 @@ static void net_probe_once(void)
 #endif
 #ifndef GADGET_SELFTEST_VOICE
 #define GADGET_SELFTEST_VOICE 0
+#endif
+/* 开机 12s 自动扫一次打印结果（验证扫描链路用），平时保持 0 */
+#ifndef GADGET_SELFTEST_SCAN
+#define GADGET_SELFTEST_SCAN 0
+#endif
+#if GADGET_SELFTEST_SCAN
+static void selftest_scan_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(12000)); /* 等自动连上已保存网络 */
+    /* 验证真实路径：连接态下调 wifi_prov_scan（新逻辑应不再断开、直接出列表） */
+    static wifi_prov_ap_t aps[24];
+    int n = 0;
+    int rc = wifi_prov_scan(aps, 24, &n);
+    ESP_LOGW(TAG, "SELFTEST scan rc=%d n=%d", rc, n);
+    for (int i = 0; i < n && i < 8; i++) {
+        ESP_LOGW(TAG, "SELFTEST ap[%d] %s rssi=%d", i, aps[i].ssid,
+                 (int)aps[i].rssi);
+    }
+    vTaskDelete(NULL);
+}
 #endif
 #if GADGET_SELFTEST_BOTPICK || GADGET_SELFTEST_VOICE
 static void selftest_botpick_task(void *arg)
@@ -139,6 +190,16 @@ static volatile uint32_t g_lvgl_beat;
  * 3 次（15s）拿不到锁 → 判定挂死，记录后 esp_restart 自愈——相当于
  * 用户"再断电重开一次"的自动化。运行期误触发风险：正常 UI 不会连续
  * 15s 持锁；真触发也只损失一次重启。 */
+/* net_probe 独立任务：HTTP connect 可能阻塞数秒（Bridge 不可达时），
+ * 不能占着看门狗任务——曾把 TWDT 喂狗拖超时导致健康启动也被重启
+ * （2026-11-16 真机定位）。 */
+static void net_probe_task(void *arg)
+{
+    (void)arg;
+    net_probe_once();
+    vTaskDelete(NULL);
+}
+
 static void hang_probe_task(void *arg)
 {
     (void)arg;
@@ -154,7 +215,7 @@ static void hang_probe_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(5000));
         if (!net_done && i >= 3) {
             net_done = true;
-            net_probe_once();
+            xTaskCreate(net_probe_task, "net_probe", 12288, NULL, 3, NULL);
         }
         /* 非阻塞 try-lock：带超时的锁在楔死时会把探针自己挂住
          * （200ms 那次实测连 probe#3 都出不来），try-lock 才能持续探测 */
@@ -163,6 +224,17 @@ static void hang_probe_task(void *arg)
                  r == ESP_OK ? "FREE" : "BUSY",
                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                  (unsigned)g_lvgl_beat);
+        if (r != ESP_OK) {
+            /* 冻屏定位（2026-11-16 根因：ds_state 惰性刷新在 LVGL 回调里
+             * 同步发 HTTP）：锁被占时打印 lvgl 任务行（B=阻塞 R=就绪）。 */
+            vTaskList(tbuf);
+            const char *p = strstr(tbuf, "lvgl");
+            if (p) {
+                char line[96] = "";
+                sscanf(p, "%95[^\n]", line);
+                ESP_LOGW(TAG, "probe#%d lvgl task: %s", i, line);
+            }
+        }
         if (r == ESP_OK) esp_lv_adapter_unlock();
 
         /* 判据是心跳是否推进（不是锁是否 BUSY）：LVGL 定时器 1s 一次，
@@ -689,6 +761,55 @@ static void net_task(void *arg)
     }
 }
 
+/* 把 BRIDGE_SEED_HOSTS（逗号分隔）逐条并进设备地址簿；幂等，
+ * 只追加不激活（当前地址由设备 UI/上次选择决定）。需在 NVS 初始化后调用。 */
+static void seed_bridge_hosts(void)
+{
+    char buf[sizeof(BRIDGE_SEED_HOSTS)] = "";
+    strlcpy(buf, BRIDGE_SEED_HOSTS, sizeof(buf));
+    char *p = buf;
+    while (p && *p) {
+        char *comma = strchr(p, ',');
+        if (comma) *comma = '\0';
+        while (*p == ' ' || *p == '\t') p++;
+        char *end = p + strlen(p);
+        while (end > p && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n')) {
+            *--end = '\0';
+        }
+        if (*p) {
+            wifi_prov_bridge_seed(p);
+            ESP_LOGI(TAG, "bridge addr seeded: %s", p);
+        }
+        if (!comma) break;
+        p = comma + 1;
+    }
+
+    /* 一次性激活（BRIDGE_ACTIVATE_HOST，非空才生效）：把当前地址切过去。
+     * 仅当与当前不同才写 NVS（幂等不磨损 flash）；这是部署新 Bridge 后
+     * 免设备点按的过渡开关，用完请从 wifi_secret.h 删除，否则每次开机
+     * 都会覆盖设备上手动选择的地址。 */
+    if (BRIDGE_ACTIVATE_HOST[0] != '\0') {
+        char cur[160] = "";
+        if (!wifi_prov_bridge_get(cur, sizeof(cur)) ||
+            strcmp(cur, BRIDGE_ACTIVATE_HOST) != 0) {
+            wifi_prov_bridge_save(BRIDGE_ACTIVATE_HOST);
+            ESP_LOGW(TAG, "bridge host activated: %s", BRIDGE_ACTIVATE_HOST);
+        }
+    }
+
+    /* 一次性 Wi-Fi 激活：把当前网络切到 WIFI_ACTIVATE_SSID（旧网络仍在
+     * 多网络列表，开机磋商兜底）。wifi_start 在 net_stack_init 之后跑，
+     * 同一次开机即直连新网络。 */
+    if (WIFI_ACTIVATE_SSID[0] != '\0') {
+        char cur_ssid[33], cur_pass[WIFI_PROV_PASS_MAX];
+        if (!wifi_prov_load(cur_ssid, sizeof(cur_ssid), cur_pass, sizeof(cur_pass)) ||
+            strcmp(cur_ssid, WIFI_ACTIVATE_SSID) != 0) {
+            wifi_prov_save(WIFI_ACTIVATE_SSID, WIFI_ACTIVATE_PASS);
+            ESP_LOGW(TAG, "wifi activated: %s", WIFI_ACTIVATE_SSID);
+        }
+    }
+}
+
 /* TCP/IP 栈 + 事件循环：必须在**任何 socket 调用之前**起来。
  * 真机事故（2026-11-15）：UI 初始化会拉 Bridge 外观/按键配置，
  * 那时栈还没起（原来栈初始化在 wifi_start 里，排在 UI 之后）→
@@ -704,6 +825,8 @@ static void net_stack_init(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+    /* 地址簿预置要在 ds_init 读地址之前完成 */
+    seed_bridge_hosts();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -830,6 +953,9 @@ void app_main(void)
     xTaskCreate(hang_probe_task, "hangprobe", 8192, NULL, 3, NULL);
 #if GADGET_SELFTEST_BOTPICK || GADGET_SELFTEST_VOICE
     xTaskCreate(selftest_botpick_task, "selftest", 12288, NULL, 3, NULL);
+#endif
+#if GADGET_SELFTEST_SCAN
+    xTaskCreate(selftest_scan_task, "st_scan", 6144, NULL, 3, NULL);
 #endif
 
     heap_report("post-display");

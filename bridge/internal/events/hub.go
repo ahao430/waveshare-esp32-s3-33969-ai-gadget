@@ -10,7 +10,7 @@ import (
 
 // Message 是推送给客户端的事件信封。
 type Message struct {
-	Topic string `json:"topic"`          // 如 "quota.zhipu" / "komari.updated"
+	Topic string `json:"topic"`          // 如 "quota.zhipu" / "appearance.background"
 	Data  any    `json:"data,omitempty"` // 主题相关载荷
 }
 

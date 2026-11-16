@@ -1,6 +1,6 @@
 // voice_apps.go — 各 App 的语音合成偏好（音色）配置。
 //
-// 设备语音请求带 ?app=chat|xiaozhi|muse|zcode：
+// 设备语音请求带 ?app=chat|xiaozhi|muse：
 //   - chat（大肥鱼/AstrBot）：用「聊天机器人」第一个实例的 TTS 设置
 //   - 其他 App：用这里配置的引擎/音色；未配置时回退默认实例
 //
@@ -31,7 +31,7 @@ func serveVoiceApps(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		}
 		// 只接受已知 App key，避免脏配置
 		clean := map[string]storage.VoicePref{}
-		for _, app := range []string{"chat", "xiaozhi", "muse", "zcode"} {
+		for _, app := range []string{"chat", "xiaozhi", "muse"} {
 			if p, ok := body[app]; ok {
 				clean[app] = p
 			}

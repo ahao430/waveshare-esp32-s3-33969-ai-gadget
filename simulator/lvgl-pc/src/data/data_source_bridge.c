@@ -1,7 +1,7 @@
 /* bridge 实现：HTTP GET Go Bridge 的额度快照接口。
  * 对应 Bridge API：GET /api/v1/quota/{provider}/snapshot（internal/api）。
  * 说明：Phase 1 只映射额度窗口；电池/Wi-Fi/服务器数保持 mock 初值
- * （固件上这些来自 power/network 服务与 Bridge komari 聚合器）。
+ * （固件上这些来自 power/network 服务）。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,13 +27,11 @@
 #define BRIDGE_TIMEOUT_MS 1500
 /* Komari 聚合要等 Bridge 先去抓上游（实测 1.3~1.5s），给足余量；
  * 1500ms 会让监控页永远是空的（2026-11-15 用户反馈）。 */
-#define KOMARI_TIMEOUT_MS 6000
 #define BRIDGE_BUF_SIZE   (64 * 1024)
 
 static char g_base[160];
 static char g_url[256];       /* 主 provider（GADGET_BRIDGE_PROVIDER） */
 static char g_kimi_url[256];
-static char g_komari_url[256];
 static char g_prewarm_url[256];
 static char g_providers_url[256];
 static char g_voice_url[256];
@@ -160,64 +158,6 @@ static bool fetch_quota(const char *url, int *used_5h, long *reset_5h,
     return ok;
 }
 
-/* 拉取 Komari 服务器摘要（Bridge 聚合后的 /api/v1/komari/nodes）。
- * 失败静默保留旧值（监控页下次刷新重试）。 */
-static void fetch_servers(gadget_state_t *st)
-{
-    char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
-    if (!buf) return;
-    int status = http_get(g_komari_url, buf, BRIDGE_BUF_SIZE, KOMARI_TIMEOUT_MS);
-    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
-    free(buf);
-    if (!root) return;
-
-    do {
-        const cJSON *snap = cJSON_GetObjectItem(root, "snapshot");
-        if (!cJSON_IsObject(snap)) break;
-        const cJSON *servers = cJSON_GetObjectItem(snap, "servers");
-        if (!cJSON_IsArray(servers)) break;
-
-        int n = 0;
-        const cJSON *it;
-        cJSON_ArrayForEach(it, servers) {
-            if (n >= DS_SERVER_MAX) break;
-            gadget_server_t *s = &st->servers[n];
-
-            const cJSON *name = cJSON_GetObjectItem(it, "name");
-            if (cJSON_IsString(name)) {
-                strncpy(s->name, name->valuestring, sizeof(s->name) - 1);
-                s->name[sizeof(s->name) - 1] = '\0';
-            } else {
-                snprintf(s->name, sizeof(s->name), "#%d", n + 1);
-            }
-
-            const cJSON *on = cJSON_GetObjectItem(it, "online");
-            s->online = !cJSON_IsFalse(on);
-
-            const cJSON *cpu = cJSON_GetObjectItem(it, "cpu_pct");
-            s->cpu_pct = cJSON_IsNumber(cpu) ? (int)(cpu->valuedouble + 0.5) : 0;
-            const cJSON *mem = cJSON_GetObjectItem(it, "mem_pct");
-            s->mem_pct = cJSON_IsNumber(mem) ? (int)(mem->valuedouble + 0.5) : 0;
-
-            const cJSON *up = cJSON_GetObjectItem(it, "uptime_s");
-            s->uptime_h = cJSON_IsNumber(up) ? (int)(up->valuedouble / 3600.0 + 0.5) : 0;
-
-            const cJSON *disk = cJSON_GetObjectItem(it, "disk_pct");
-            s->disk_pct = cJSON_IsNumber(disk) ? (int)(disk->valuedouble + 0.5) : 0;
-            const cJSON *nup = cJSON_GetObjectItem(it, "net_up_bps");
-            s->net_up_kbps = cJSON_IsNumber(nup) ? (int)(nup->valuedouble / 1024.0 + 0.5) : 0;
-            const cJSON *ndn = cJSON_GetObjectItem(it, "net_down_bps");
-            s->net_down_kbps = cJSON_IsNumber(ndn) ? (int)(ndn->valuedouble / 1024.0 + 0.5) : 0;
-            n++;
-        }
-        /* 空列表也是有效状态（后台删光 → 设备空态提示），无条件覆写；
-         * 走到这里 = snapshot/servers 结构校验已通过，解析失败早退保留旧值 */
-        st->server_count = n;
-    } while (0);
-
-    cJSON_Delete(root);
-}
-
 /* 拉取订阅实例聚合快照（GET /api/v1/quota/subscriptions）：
  * 动态填充 st->subs[]（数量由配置决定，不再写死智谱/Kimi）。
  * 快照窗口映射：5h/weekly → 设备展示字段；credits → 余额副行。 */
@@ -337,8 +277,6 @@ static bool bridge_refresh(gadget_state_t *st)
         }
     }
 
-    /* Komari 服务器 → 监控页 */    /* Komari 服务器 → 监控页 */
-    fetch_servers(st);
     return true;
 }
 
@@ -589,7 +527,6 @@ static void urls_fill(void)
     snprintf(g_url, sizeof(g_url), "%s/api/v1/quota/%s/snapshot",
              g_base, g_provider);
     snprintf(g_kimi_url, sizeof(g_kimi_url), "%s/api/v1/quota/kimi/snapshot", g_base);
-    snprintf(g_komari_url, sizeof(g_komari_url), "%s/api/v1/komari/nodes", g_base);
     snprintf(g_prewarm_url, sizeof(g_prewarm_url), "%s/api/v1/quota/zhipu/prewarm", g_base);
     snprintf(g_voice_url, sizeof(g_voice_url), "%s/api/v1/voice/interact", g_base);
     snprintf(g_providers_url, sizeof(g_providers_url), "%s/api/v1/chat/providers", g_base);

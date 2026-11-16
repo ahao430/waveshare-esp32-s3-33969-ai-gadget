@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS bots (          -- 大肥鱼机器人（AstrBot 实�
     model       TEXT NOT NULL DEFAULT '',  -- 覆盖模型名（可选）
     updated_at  INTEGER NOT NULL
 );
-CREATE TABLE IF NOT EXISTS app_settings (  -- 应用配置 KV（zcode/monitor/keys）
+CREATE TABLE IF NOT EXISTS app_settings (  -- 应用配置 KV（keys/外观/launcher 等）
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL,             -- JSON；密钥字段加密后存
     updated_at  INTEGER NOT NULL

@@ -11,19 +11,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define DS_SERVER_MAX 6
-
-typedef struct {
-    char name[16];
-    bool online;
-    int cpu_pct;
-    int mem_pct;
-    int disk_pct;
-    int net_up_kbps;   /* 上行 KB/s（bps/1024 换算，UI 显示用） */
-    int net_down_kbps; /* 下行 KB/s */
-    int uptime_h; /* 小时粒度，设备端够用 */
-} gadget_server_t;
-
 #define DS_SUB_MAX 8
 
 /* 一个订阅（Provider）的额度视图（PLAN §5.1：单 App 多订阅左右切换）。
@@ -57,10 +44,6 @@ typedef struct {
 
     int kimi_used_5h;
     int kimi_used_week;
-
-    /* 服务器监控（Komari 经 Bridge 聚合，设备收摘要） */
-    gadget_server_t servers[DS_SERVER_MAX];
-    int server_count;
 
     /* 设备本地状态 */
     int battery_pct;
@@ -142,7 +125,7 @@ typedef enum {
     DS_VOICE_ERROR,
 } ds_voice_result_t;
 
-/* app：调用方 App 标识（"chat"/"xiaozhi"/"muse"/"zcode"），Bridge 按
+/* app：调用方 App 标识（"chat"/"xiaozhi"/"muse"），Bridge 按
  * App 选择 TTS 引擎/音色；NULL 或空 = 默认（第一个机器人实例）。 */
 ds_voice_result_t ds_voice_interact(const char *app, const int16_t *pcm, int frames,
                                     char *transcript, int transcript_len,

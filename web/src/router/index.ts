@@ -13,8 +13,7 @@ export const router = createRouter({
     { path: '/voice', name: 'voice', component: () => import('@/pages/Voice.vue') },
     { path: '/muse', name: 'muse', component: () => import('@/pages/Muse.vue') },
     { path: '/xiaozhi', name: 'xiaozhi', component: () => import('@/pages/Xiaozhi.vue') },
-    { path: '/zcode', name: 'zcode', component: () => import('@/pages/Zcode.vue') },
-    { path: '/monitor', name: 'monitor', component: () => import('@/pages/Monitor.vue') },
     { path: '/weather', name: 'weather', component: () => import('@/pages/Weather.vue') },
+    { path: '/files', name: 'files', component: () => import('@/pages/Files.vue') },
   ],
 })

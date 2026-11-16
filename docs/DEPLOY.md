@@ -50,7 +50,9 @@ scp bridge/data/gadget.db  user@server:/opt/gadget/data/gadget.db
 # bridge.env（含 BRIDGE_MASTER_KEY）手工在服务器重建：
 cat > /opt/gadget/bridge.env <<'EOF'
 export BRIDGE_MASTER_KEY=<与 Mac 相同的 64 位 hex>
-# export BRIDGE_TOKEN=<可选：API/后台访问令牌>
+# ⚠️ 设备接入时不要设 BRIDGE_TOKEN：设备 HTTP 请求不带 Authorization，
+# 设了 token 设备全部接口 401（见 §5「设备侧的协议限制」）。
+# export BRIDGE_TOKEN=<可选：仅供纯浏览器/局域网访问；设备要用就不能设>
 EOF
 ```
 
@@ -82,8 +84,12 @@ curl http://127.0.0.1:8081/api/v1/device/status   # 验证
 
 - `-webdir` 让 Bridge 托管 Web 后台：手机访问 `http://<服务器>:8081`
   即后台（SPA，改配置即时生效），设备「设置→管理后台」二维码就是这个地址。
-- 防火墙放行 8081；**仅可信网络暴露**，公网部署务必设 `BRIDGE_TOKEN`
-  并套反向代理 TLS。
+- 防火墙放行 8081（或反代到 80）。**反向代理不要给设备链路做
+  https-only / http→https 强跳**：设备只支持明文 `http://`，跳转会直接连不上
+  （Cloudflare 橙云只能代理 80/443，8081 需灰云或直连；且要关
+  「Always Use HTTPS」）。
+- 公网暴露时**不要设 `BRIDGE_TOKEN`**（设备不发 Authorization，设了 401）。
+  接口无鉴权时用非默认端口 + 防火墙/IP 白名单收窄暴露面（详见 §5）。
 - 语音识别（Edge-TTS/DeepSeek ASR/小智官方）都从服务器出网，注意
   服务器网络可达性（需要代理的环境在 bridge.env 加 `proxy_url` 相关
   变量，见 README §代理）。
@@ -100,6 +106,25 @@ curl http://127.0.0.1:8081/api/v1/device/status   # 验证
    切换即生效（对话/订阅立刻走新地址，无需重刷）；非当前地址可删除，
    当前地址不可删。开发机和服务器各部署一套 Bridge 时，用同一个
    `BRIDGE_MASTER_KEY` 可让配置库互相拷贝通用。
+3. **预置地址（可选，免软键盘输入）**：`wifi_secret.h` 里
+   `BRIDGE_SEED_HOSTS "http://a:8081,http://b"`（逗号分隔）——开机把每条
+   幂等并进地址簿（不改当前激活地址），适合公网域名这种长地址。
+
+### ⚠️ 设备侧的协议限制（公网部署必读）
+
+- **只支持明文 `http://`**：固件 HTTP 客户端没有 TLS（`http_client.c`
+  只认 `http://`），所以公网 Bridge 必须开 **80 或 8081 明文端口**。
+  只开 443/HTTPS（如 Caddy 默认的 http→https 重定向）设备连不上；
+  需要给设备单独留一个明文入口。
+- **不能设 `BRIDGE_TOKEN`**：设备请求不带 `Authorization`（本次未实现），
+  一旦服务器设了 token，设备全部接口 401。代价是公网明文接口无鉴权——
+  请用防火墙/IP 白名单/非默认端口收窄暴露面，或后续给设备补 token 支持。
+- **设备所在 Wi-Fi 必须允许出站 TCP**：公司访客网常做完全隔离——实测
+  GYJX-GUEST 对服务器 80/443 和局域网 Mac 8081 全部 TCP 超时（DNS/DHCP
+  可用）。串口启动日志 `net probe: status=-4 ... stage=3` 就是这种情况
+  （3=select 超时），换到能出网的 Wi-Fi/热点即可，与 Bridge 无关。
+- 设备会把 Bridge 地址存进 NVS；**换服务器地址不需要重刷固件**，
+  在设备地址簿点选即可（预置只是省输入）。
 
 凭据优先级：NVS（配网页保存）> `firmware/main/wifi_secret.h`（编译期
 兜底，刷开发固件时仍可用）。

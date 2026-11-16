@@ -3,6 +3,7 @@
  * （上滑返回）、无 prev/next（左右滑动）。倒计时 1s 刷新。
  * 数据一律来自 data_source（mock 或 Bridge，ADR-001）。
  */
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,6 +83,10 @@ void ui_remote_config_prefetch(void)
 void ui_remote_config_refresh(void)
 {
     if (!s_rcfg.done) ui_remote_config_prefetch(); /* 未预取（直调路径） */
+
+    UILOG("remote cfg: theme=%d keys=%d devcfg=%d layout=%d",
+          (int)s_rcfg.have_theme, (int)s_rcfg.have_keys,
+          (int)s_rcfg.have_devcfg, (int)s_rcfg.have_layout);
 
     if (s_rcfg.have_theme) {
         ds_config_set_theme(s_rcfg.theme);
@@ -542,20 +547,75 @@ static void quota_countdown_cb(lv_timer_t *t)
 
 /* 自动刷新（间隔由 Web「订阅自动刷新」下发，默认 15 分钟）：
  * 到点拉一次数据；订阅数量变化（增删实例）重建页面，否则就地更新。 */
+/* ---- 订阅后台刷新（防网络冻屏，2026-11-16）----
+ * ds_refresh 是阻塞 HTTP（Bridge 不可达时每个请求等 5s connect 超时），
+ * 曾直接在 LVGL timer/按钮回调里同步调用——网络一断 LVGL 线程持显示锁
+ * 停 5~25s，屏幕冻住（真机实测心跳 10s 才走一拍）。改 worker 线程拉数 +
+ * lv_async_call 回 LVGL 线程更新；页面已退出（代际变化）则只更新数据不动 UI。 */
+static volatile int g_q_gen;   /* 页面代际：quota_on_exit 自增 */
+static volatile bool g_q_fetch;
+
+typedef struct {
+    int gen;
+    int before;
+    int app_id;
+} quota_fetch_t;
+
+static void quota_fetch_done(void *arg)
+{
+    quota_fetch_t *d = arg;
+    g_q_fetch = false;
+    if (d->gen == g_q_gen) { /* 页面还活着才动 UI（防悬垂控件） */
+        if (ds_state()->sub_count != d->before) {
+            app_manager_open(d->app_id); /* 订阅数量变化：重建（空态↔列表） */
+        } else {
+            quota_update_all();
+        }
+    }
+    free(d);
+}
+
+static void *quota_fetch_worker(void *arg)
+{
+    ds_refresh();
+    lv_async_call(quota_fetch_done, arg);
+    return NULL;
+}
+
+static void quota_fetch_start(int app_id)
+{
+    if (g_q_fetch) return; /* 上一轮还在路上：忽略重入 */
+    g_q_fetch = true;
+    quota_fetch_t *d = malloc(sizeof(*d));
+    if (!d) {
+        g_q_fetch = false;
+        return;
+    }
+    d->gen = g_q_gen;
+    d->before = ds_state()->sub_count;
+    d->app_id = app_id;
+    pthread_t tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 16 * 1024); /* HTTP 链栈预算，同 wx_worker */
+    if (pthread_create(&tid, &attr, quota_fetch_worker, d) != 0) {
+        g_q_fetch = false;
+        free(d);
+        return;
+    }
+    pthread_attr_destroy(&attr);
+    pthread_detach(tid);
+}
+
 static void quota_auto_refresh_cb(lv_timer_t *t)
 {
     (void)t;
-    int before = ds_state()->sub_count;
-    ds_refresh();
-    if (ds_state()->sub_count != before) {
-        app_manager_open(g_q_app_id);
-        return;
-    }
-    quota_update_all();
+    quota_fetch_start(g_q_app_id);
 }
 
 static void quota_on_exit(void)
 {
+    g_q_gen++; /* 在途 worker 的回调据此丢弃 UI 操作 */
     if (g_q_cd_timer) {
         lv_timer_delete(g_q_cd_timer);
         g_q_cd_timer = NULL;
@@ -570,13 +630,7 @@ static void quota_on_exit(void)
 static void quota_refresh_cb(lv_event_t *e)
 {
     int app_id = (int)(uintptr_t)lv_event_get_user_data(e);
-    int before = ds_state()->sub_count;
-    ds_refresh();
-    if (ds_state()->sub_count != before) {
-        app_manager_open(app_id); /* 订阅数量变化：重建（空态↔列表） */
-        return;
-    }
-    quota_update_all();
+    quota_fetch_start(app_id);
 }
 
 /* ---------------- 占位页（上滑返回） ---------------- */
@@ -588,7 +642,6 @@ typedef struct {
 } placeholder_meta_t;
 
 static const placeholder_meta_t g_placeholders[] = {
-    { UI_APP_ZCODE,   "ZCode 会话", "Phase 4（数据源待定）" },
     { UI_APP_WEATHER, "天气",       "Phase 5+（Bridge 天气源）" },
     { UI_APP_MUSIC,   "音乐播放",   "Phase 5+" },
 };
@@ -636,7 +689,8 @@ static void register_apps(void)
 static void register_apps_layout(const char *layout_csv, int lay_n)
 {
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
-     * 页1 AI 三位 + 订阅｜页2 ZCode/天气/服务器/设置｜页3 音乐 */
+     * 页1 AI 三位 + 订阅｜页2 天气/设置｜页3 音乐
+     * （2026-11-16 删 ZCode/服务器监控两 App，ADR-010） */
     const app_def_t defs[] = {
         /* 头像 App：symbol/color 是头像素材缺位时的磁贴回退（NULL symbol
          * 会被 LVGL 渲染成默认 "Text"——真机/模拟器均踩过） */
@@ -644,9 +698,7 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
         { UI_APP_XIAOZHI,  "xiaozhi",  "小智",    LV_SYMBOL_AUDIO,   0x2EC4B6, "A:simulator/lvgl-pc/assets/avatars/xiaozhi.png", true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
-        { UI_APP_ZCODE,    "zcode",    "ZCode",   LV_SYMBOL_KEYBOARD, 0x3A6FF7, "A:simulator/lvgl-pc/assets/icons/zcode.png",     true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },
-        { UI_APP_MONITOR,  "monitor",  "服务器",  LV_SYMBOL_EYE_OPEN, 0x9B5DE5, "A:simulator/lvgl-pc/assets/icons/server.png",    true,  ui_monitor_build,      NULL },
         { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit },
         { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL },
     };

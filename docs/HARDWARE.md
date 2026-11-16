@@ -358,7 +358,25 @@
   `saver_tick`（LVGL 定时器，1s）累加 `g_lvgl_beat`，hangprobe 连续 15s
   看不到心跳推进才重启。正常重绘再慢也不会误杀。
 - 仍待 root-cause：阻塞点的堆栈（需在楔死时用 TWDT panic 的 backtrace
-  或 JTAG 抓 lvgl 任务栈）。
+  或 JTAG 抓 lvgl 任务栈）。→ **2026-11-16 已抓到，见下**。
+
+**2026-11-16 root-cause（公司网"必现冻屏/重启"家族，已修）**：
+- 症状：开机 ~8s 后 LVGL 心跳 10s 才走一拍、显示锁全程 BUSY、屏幕冻住；
+  更早版本还叠加看门狗误重启（net_probe 的裸 connect 卡住看门狗任务）。
+- 取证方法（可复用）：vTaskList 看 lvgl 任务状态=B（阻塞）；uxTaskGetSystemState
+  读 lvgl 任务栈扫出疑似返回地址 + `addr2line` 还原，得到
+  `statusbar_timer_cb → bridge_refresh → lwip_netconn_do_connect/lwip_select`。
+- 根因：`ds_state()` 带"首次访问惰性刷新"——Bridge 不可达时
+  `updated_unix` 恒为 0，状态栏（5s）/订阅倒计时（1s）等 LVGL 回调**每次**
+  `ds_state()` 都同步发 HTTP（connect 最长 5s），在 LVGL 线程内持显示锁等待。
+  Bridge 可达时首次刷新 10ms 即成功、之后不再触发——"家里正常、公司必现"。
+- 修复（当日真机验证：心跳恢复 1s/拍、锁全程 FREE、60s 零重启、断网 UI 仍流畅）：
+  1) `ds_state()` 改纯读缓存（惰性刷新删除；mock 在 ds_init 预填）；
+  2) 订阅/监控页刷新改 worker 线程 + `lv_async_call` 回 UI（页面代际防悬垂）；
+  3) `http_client` 全部 connect 加 5s 上限（非阻塞 + select，stage/errno 诊断）；
+  4) `net_probe` 移出看门狗任务（独立 12KB 任务）。
+- 早前"启动期 30-50% 楔死"在公司网环境的部分应即本症；家中环境
+  （Bridge 可达）是否仍有独立楔死，待复测。
 
 **2026-11-15 另一类"一说话就重启"（已解）**：设备端日志链条
 

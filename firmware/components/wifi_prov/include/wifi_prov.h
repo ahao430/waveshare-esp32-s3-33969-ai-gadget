@@ -42,6 +42,10 @@ int wifi_prov_autoconnect_others(void);
 bool wifi_prov_bridge_get(char *out, size_t cap);
 /* 保存并激活：加入地址簿（已存在则只激活）。 */
 void wifi_prov_bridge_save(const char *url);
+/* 编译期预置：把地址并进地址簿（幂等），不改当前激活地址；设备从未
+ * 配置过地址时才同时设为默认激活项。用于 wifi_secret.h 的
+ * BRIDGE_SEED_HOSTS（新服务器地址零输入进簿，切换仍在设备 UI 完成）。 */
+void wifi_prov_bridge_seed(const char *url);
 /* 地址簿（"\n" 分隔，首条=当前激活地址；簿空时返回编译期兜底单条）。
  * 返回 0=已写 out / -1=完全无地址。 */
 int wifi_prov_bridge_list(char *out, size_t cap);

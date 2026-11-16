@@ -156,7 +156,6 @@ static const struct {
     const char *title;
     bool voice;
 } g_meta[UI_APP_COUNT] = {
-    [UI_APP_ZCODE]   = { "zcode",      "ZCode 会话", false },
     [UI_APP_CHAT]    = { "bigfish",    "AstrBot",    true  },
     [UI_APP_MUSE]    = { "muse",       "Muse",       true  },
     [UI_APP_XIAOZHI] = { "xiaozhi",    "小智",       true  },

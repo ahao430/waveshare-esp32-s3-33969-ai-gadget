@@ -21,10 +21,6 @@ static gadget_state_t g_state = {
     .sub_count = 0, /* subs 未列出 = 零填充（designated init 语义，
                        显式 {{0}} 反触发新 GCC missing-braces 告警） */
 
-    /* servers 零初值：mock 演示数据由 mock 实现首刷填充——真机 bridge
-     * 模式首屏（未联网/未配置）读到「空」→ UI 空态提示，不冒充数据 */
-    .server_count = 0,
-
     .battery_pct  = 82,
     .wifi_ok      = true,
     .updated_unix = 0,
@@ -131,19 +127,31 @@ void ds_init(const char *source, const char *bridge_url, const char *provider)
     const char *url  = bridge_url ? bridge_url : getenv("GADGET_BRIDGE_URL");
     const char *prov = provider ? provider : getenv("GADGET_BRIDGE_PROVIDER");
 
+    bool is_bridge = false;
     if (src && strcmp(src, "bridge") == 0) {
+        is_bridge = true;
         g_impl = ds_bridge_impl(url ? url : "http://127.0.0.1:8081",
                                 prov ? prov : "mock");
     } else {
         g_impl = ds_mock_impl();
     }
     if (g_impl->init) g_impl->init();
+    /* mock（本地数据）init 后立即填一次缓存——ds_state 不再惰性刷新，
+     * 模拟器首屏要有演示数据。bridge 模式不在此拉网络（真机此时 Wi-Fi
+     * 还没起；数据由各页 worker 显式刷新）。 */
+    if (!is_bridge && g_impl->refresh) {
+        (void)g_impl->refresh(&g_state);
+    }
     demo_battery_apply();
 }
 
 const gadget_state_t *ds_state(void)
 {
-    if (g_state.updated_unix == 0) ds_refresh(); /* 首次访问惰性刷新 */
+    /* 只读缓存——绝不在调用方上下文里发起网络（2026-11-16 栈扫描定位）：
+     * 旧实现的"首次访问惰性刷新"在 Bridge 不可达时 updated_unix 恒为 0，
+     * 状态栏（5s）/倒计时（1s）等 LVGL 回调每次 ds_state 都同步发 HTTP
+     * （connect 5s 超时）→ LVGL 任务持显示锁冻屏。首屏数据由各页 worker
+     * 显式 ds_refresh；mock 在 ds_init 时预填。 */
     return &g_state;
 }
 

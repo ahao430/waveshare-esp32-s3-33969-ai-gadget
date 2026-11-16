@@ -13,9 +13,8 @@ const nav = [
   { to: '/voice', label: '语音设置' },
   { to: '/muse', label: 'Muse' },
   { to: '/xiaozhi', label: '小智' },
-  { to: '/zcode', label: 'ZCode 远程' },
-  { to: '/monitor', label: '服务器监控' },
   { to: '/weather', label: '天气' },
+  { to: '/files', label: '设备文件' },
 ]
 </script>
 

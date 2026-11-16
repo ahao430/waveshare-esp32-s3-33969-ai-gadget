@@ -307,118 +307,28 @@ func TestKeysConfig(t *testing.T) {
 	}
 }
 
-// ---- monitor ----
-
-func TestMonitorConfigDynamicSource(t *testing.T) {
-	mk := newTestMasterKey(t)
-	srv, _ := newConfigServer(t, mk)
-
-	// 未配置 → mock 源（nodes 端点走 Deps.Komari；这里直接构造动态源验证）
-	nodes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/nodes" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(`[{"uuid":"n1","name":"vps-1","cpu":23.5,"online":true}]`))
-	}))
-	t.Cleanup(nodes.Close)
-
-	// 配置保存 + token 不回显
-	code, out := doJSON(t, "POST", srv.URL+"/api/v1/monitor/config",
-		`{"base_url":"`+nodes.URL+`","token":"sec-token"}`)
-	if code != 200 {
-		t.Fatalf("save monitor: %d %v", code, out)
-	}
-	code, out = doJSON(t, "GET", srv.URL+"/api/v1/monitor/config", "")
-	if code != 200 || out["base_url"] != nodes.URL || out["has_token"] != true {
-		t.Fatalf("monitor view: %v", out)
-	}
-	if _, leaked := out["token"]; leaked {
-		t.Fatal("token 不得回显")
-	}
-
-	// 删除 → 回到未配置
-	code, _ = doJSON(t, "DELETE", srv.URL+"/api/v1/monitor/config", "")
-	if code != 200 {
-		t.Fatalf("delete monitor: %d", code)
-	}
-	_, out = doJSON(t, "GET", srv.URL+"/api/v1/monitor/config", "")
-	if out["base_url"] != "" {
-		t.Fatalf("want empty after delete: %v", out)
-	}
-}
-
-// ---- zcode ----
-
-func TestZcodeConfigAndSessions(t *testing.T) {
-	mk := newTestMasterKey(t)
-	srv, _ := newConfigServer(t, mk)
-
-	// 未配置 → mock 会话
-	code, out := doJSON(t, "GET", srv.URL+"/api/v1/zcode/sessions", "")
-	if code != 200 || out["source"] != "mock" {
-		t.Fatalf("mock sessions: %d %v", code, out)
-	}
-	if n := len(out["sessions"].([]any)); n == 0 {
-		t.Fatal("mock sessions empty")
-	}
-
-	// 配置远端 → 透传
-	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer zk-1" {
-			http.Error(w, "unauthorized", 401)
-			return
-		}
-		_, _ = w.Write([]byte(`{"sessions":[{"id":"s1","agent":"GLM","project":"demo",
-			"status":"running","pending_confirm":0,"completed":3,"failed":0}]}`))
-	}))
-	t.Cleanup(remote.Close)
-
-	if code, _ = doJSON(t, "POST", srv.URL+"/api/v1/zcode/config",
-		`{"base_url":"`+remote.URL+`","token":"zk-1"}`); code != 200 {
-		t.Fatalf("save zcode: %d", code)
-	}
-	code, out = doJSON(t, "GET", srv.URL+"/api/v1/zcode/sessions", "")
-	if code != 200 || out["source"] != "zcode" {
-		t.Fatalf("remote sessions: %d %v", code, out)
-	}
-	sessions := out["sessions"].([]any)
-	if len(sessions) != 1 || sessions[0].(map[string]any)["project"] != "demo" {
-		t.Fatalf("sessions wrong: %v", sessions)
-	}
-
-	// token 不回显
-	_, out = doJSON(t, "GET", srv.URL+"/api/v1/zcode/config", "")
-	if out["has_token"] != true {
-		t.Fatalf("zcode config view: %v", out)
-	}
-	if _, leaked := out["token"]; leaked {
-		t.Fatal("token 不得回显")
-	}
-}
-
 // ---- launcher 布局 ----
 
 func TestLauncherLayout(t *testing.T) {
 	mk := newTestMasterKey(t)
 	srv, _ := newConfigServer(t, mk)
 
-	// 默认 = 出厂顺序（9 个全可见）
+	// 默认 = 出厂顺序（7 个全可见）
 	code, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	if code != 200 {
 		t.Fatalf("get: %d", code)
 	}
 	order, _ := out["order"].([]any)
-	if len(order) != 9 || order[0] != "chat" || order[8] != "music" {
+	if len(order) != 7 || order[0] != "chat" || order[6] != "music" {
 		t.Fatalf("default order wrong: %v", order)
 	}
-	if cat, _ := out["catalog"].([]any); len(cat) != 9 {
+	if cat, _ := out["catalog"].([]any); len(cat) != 7 {
 		t.Fatalf("catalog wrong: %v", cat)
 	}
 
 	// 重排 + 隐藏（只留 5 个，settings 提前）
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/launcher",
-		`{"order":["settings","weather","chat","sub","monitor"]}`)
+		`{"order":["settings","weather","chat","sub","music"]}`)
 	if code != 200 {
 		t.Fatalf("post: %d %v", code, out)
 	}
@@ -445,8 +355,24 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, out = doJSON(t, "GET", srv2.URL+"/api/v1/launcher", "")
-	if order, _ = out["order"].([]any); len(order) != 9 || order[0] != "chat" {
+	if order, _ = out["order"].([]any); len(order) != 7 || order[0] != "chat" {
 		t.Fatalf("corrupt setting should fall back to default, got %v", order)
+	}
+}
+
+// 2026-11-16 删 zcode/monitor 后：旧排布里的已下线 key 应被过滤生效，
+// 而不是整单回落出厂重置用户自定义（设备端 defs 匹配本来就跳过未知 key）。
+func TestLauncherFiltersRetiredKeys(t *testing.T) {
+	mk := newTestMasterKey(t)
+	srv, db := newConfigServer(t, mk)
+	if err := db.SaveSetting(storage.SettingKeyLauncher,
+		`{"order":["chat","zcode","settings","monitor"]}`); err != nil {
+		t.Fatal(err)
+	}
+	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
+	order, _ := out["order"].([]any)
+	if len(order) != 2 || order[0] != "chat" || order[1] != "settings" {
+		t.Fatalf("retired keys should be filtered, got %v", order)
 	}
 }
 

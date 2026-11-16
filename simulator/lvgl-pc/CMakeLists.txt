@@ -46,7 +46,6 @@ add_executable(gadget_sim
   src/ui/ui_theme.c
   src/ui/ui_launcher.c
   src/ui/ui_app_pages.c
-  src/ui/ui_monitor.c
   src/ui/ui_weather.c
   src/ui/ui_conversation.c
   src/ui/companion.c

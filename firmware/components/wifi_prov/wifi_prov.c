@@ -165,11 +165,9 @@ static void bh_write(const char *list)
     nvs_write_str("bh_list", list);
 }
 
-void wifi_prov_bridge_save(const char *url)
+/* 地址簿 upsert：已在簿中不重复追加（不改当前激活地址）。 */
+static void bh_upsert(const char *url)
 {
-    if (!url || url[0] == '\0') return;
-    nvs_write_str("bh", url);
-    /* 地址簿 upsert：已在簿中不重复追加 */
     char list[BH_MAX * (BH_LEN + 1) + 1] = "";
     size_t n = bh_read(list, sizeof(list));
     if (strstr(list, url) != NULL) {
@@ -189,6 +187,23 @@ void wifi_prov_bridge_save(const char *url)
     }
     strlcpy(list + off, url, sizeof(list) - off);
     bh_write(list);
+}
+
+void wifi_prov_bridge_save(const char *url)
+{
+    if (!url || url[0] == '\0') return;
+    nvs_write_str("bh", url);
+    bh_upsert(url);
+}
+
+void wifi_prov_bridge_seed(const char *url)
+{
+    if (!url || url[0] == '\0') return;
+    char cur[BH_LEN] = "";
+    if (!wifi_prov_bridge_get(cur, sizeof(cur))) {
+        nvs_write_str("bh", url); /* 从未配置过：预置项即默认 */
+    }
+    bh_upsert(url);
 }
 
 int wifi_prov_bridge_list(char *out, size_t cap)
@@ -244,18 +259,30 @@ int wifi_prov_scan(wifi_prov_ap_t *out, int max, int *n)
 {
     wifi_scan_config_t cfg = { .show_hidden = false };
 
-    /* 关键：STA 处于"正在连接"（自动重连已保存旧网）时 esp_wifi_scan_start
-     * 直接返回 ESP_ERR_WIFI_STATE —— 真机现象就是"列表永远空"。扫描前
-     * 先停掉连接尝试并让状态机落定；扫完（有凭据时）恢复自动重连。 */
-    char ssid[33], pass[WIFI_PROV_PASS_MAX];
-    bool had_creds = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
-    s_busy = true;                 /* wifi_evt 的自动重连在此窗口内避让 */
-    esp_wifi_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(150));
-
+    /* 扫描路径（2026-11-16 真机对比实验定位"列表永远空"）：
+     * - 连接态直接扫：不打断连接，实测 46~63 个 AP；
+     * - "正在连接"时 esp_wifi_scan_start 返回 ESP_ERR_WIFI_STATE（旧坑）：
+     *   先断开中止，等 DISCONNECTED 事件落定（BIT_DROP，800ms 兜底）再扫，
+     *   扫完恢复自动重连。曾用固定 150ms——从已连接态 deauth 要 300ms+，
+     *   150ms 后的扫描被驱动静默吞掉（返回 OK 但 0 结果）。 */
     esp_err_t err = esp_wifi_scan_start(&cfg, true); /* block ~1.5-3s */
-    s_busy = false;
-    if (had_creds) esp_wifi_connect(); /* 恢复连接已保存网络（扫描会打断它） */
+    if (err == ESP_ERR_WIFI_STATE) {
+        char ssid[33], pass[WIFI_PROV_PASS_MAX];
+        bool had_creds = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
+        s_busy = true;             /* wifi_evt 的自动重连在此窗口内避让 */
+        esp_wifi_disconnect();     /* 中止进行中的连接尝试 */
+        if (s_ev) {
+            xEventGroupClearBits(s_ev, BIT_DROP);
+            xEventGroupWaitBits(s_ev, BIT_DROP, pdTRUE, pdFALSE,
+                                pdMS_TO_TICKS(800));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(800));
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+        err = esp_wifi_scan_start(&cfg, true);
+        s_busy = false;
+        if (had_creds) esp_wifi_connect();
+    }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "scan failed: %s", esp_err_to_name(err));
         return err == ESP_ERR_WIFI_STATE ? -1 : -2;
@@ -294,6 +321,7 @@ int wifi_prov_scan(wifi_prov_ap_t *out, int max, int *n)
     }
     free(recs);
     *n = cnt;
+    ESP_LOGI(TAG, "scan done: raw=%u cnt=%d", (unsigned)total, cnt);
     return 0;
 }
 

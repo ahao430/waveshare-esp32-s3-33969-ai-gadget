@@ -19,8 +19,7 @@ var launcherCatalog = []struct {
 	Name string `json:"name"`
 }{
 	{"chat", "AstrBot"}, {"xiaozhi", "小智"}, {"muse", "Muse"}, {"sub", "订阅"},
-	{"zcode", "ZCode"}, {"weather", "天气"}, {"monitor", "服务器"},
-	{"settings", "设置"}, {"music", "音乐"},
+	{"weather", "天气"}, {"settings", "设置"}, {"music", "音乐"},
 }
 
 func defaultLauncherOrder() []string {
@@ -48,9 +47,21 @@ func serveLauncher(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			var saved struct {
 				Order []string `json:"order"`
 			}
-			if json.Unmarshal([]byte(raw), &saved) == nil && len(saved.Order) > 0 &&
-				launcherOrderValid(saved.Order) == "" {
-				return saved.Order
+			if json.Unmarshal([]byte(raw), &saved) == nil && len(saved.Order) > 0 {
+				// 过滤已下线/未知 key（2026-11-16 删 zcode/monitor 后：
+				// 旧排布仍按过滤结果生效，不整单回落出厂重置用户自定义）。
+				filtered := make([]string, 0, len(saved.Order))
+				seen := map[string]bool{}
+				for _, k := range saved.Order {
+					if !validLauncherKey(k) || seen[k] {
+						continue
+					}
+					seen[k] = true
+					filtered = append(filtered, k)
+				}
+				if len(filtered) > 0 {
+					return filtered
+				}
 			}
 		}
 		return defaultLauncherOrder() // 未配置/损坏回落出厂排布

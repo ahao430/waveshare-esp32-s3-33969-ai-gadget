@@ -11,7 +11,6 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_gesture.c
     ${SIM_SRC_DIR}/ui/ui_keys.c
     ${SIM_SRC_DIR}/ui/ui_launcher.c
-    ${SIM_SRC_DIR}/ui/ui_monitor.c
     ${SIM_SRC_DIR}/ui/icons/icon_embed.c
     ${SIM_SRC_DIR}/ui/ui_settings.c
     ${SIM_SRC_DIR}/ui/ui_wifi_panel.c

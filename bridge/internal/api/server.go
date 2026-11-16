@@ -15,7 +15,6 @@ import (
 
 	"gadget-bridge/internal/ai"
 	"gadget-bridge/internal/events"
-	"gadget-bridge/internal/komari"
 	"gadget-bridge/internal/quota"
 	"gadget-bridge/internal/quota/zhipu"
 	"gadget-bridge/internal/storage"
@@ -31,8 +30,6 @@ type Deps struct {
 	Logger   *slog.Logger
 	// Token 非空时启用 Bearer 认证（PLAN §19 Web 管理 API 认证）。
 	Token string
-	// Komari 为 nil 时不挂监控路由。
-	Komari *komari.Service
 	// PrewarmZhipu 为 nil（未配 ZHIPU_API_KEY）时预热接口返回 503。
 	PrewarmZhipu func(ctx context.Context, idemKey string) (*zhipu.PrewarmResult, error)
 	// Events 为 nil 时不挂 /api/v1/events（PLAN §15.2 WebSocket）。
@@ -49,6 +46,8 @@ type Deps struct {
 	// AppearanceDir 非空时挂外观路由（自定义背景，用户 2026-11-14 需求：
 	// Web 上传自定义背景图片）。背景存 AppearanceDir/appearance_bg.bin。
 	AppearanceDir string
+	// FilesDir 非空时挂设备文件互通路由（TF 文件管理器，ADR-010）。
+	FilesDir string
 	// SubscriptionsDB 非 nil（且 MasterKey 非 nil）时挂订阅配置路由：
 	// Web 后台动态配置订阅实例（zhipu/kimi/opencode/newapi/mock）。
 	SubscriptionsDB *storage.DB
@@ -111,17 +110,6 @@ func NewHandler(d Deps) http.Handler {
 		writeJSON(w, logger, http.StatusOK, fetchAndStore(r.Context(), d, p))
 	})
 
-	if d.Komari != nil {
-		mux.HandleFunc("GET /api/v1/komari/nodes", func(w http.ResponseWriter, r *http.Request) {
-			force := r.URL.Query().Get("refresh") == "1"
-			view := d.Komari.Nodes(r.Context(), force)
-			writeJSON(w, logger, http.StatusOK, view)
-			if d.Events != nil {
-				d.Events.Publish("komari.updated", view)
-			}
-		})
-	}
-
 	if d.Events != nil {
 		mux.HandleFunc("GET /api/v1/events", serveEventsWS(logger, d.Events))
 	}
@@ -131,11 +119,9 @@ func NewHandler(d Deps) http.Handler {
 		serveSubscriptions(mux, d, logger)
 		serveDeviceConfig(mux, d, logger) // 设备运行配置下发（订阅刷新间隔）
 		// 大肥鱼机器人（AstrBot 实例，独立于订阅）+ 应用配置 KV
-		// （ZCode 远程 / Komari 监控 / 按键映射）——同一 storage.DB。
+		// （按键映射 / 外观等）——同一 storage.DB。
 		serveBots(mux, d, logger)
 		serveVoiceApps(mux, d, logger)
-		serveZcode(mux, d, logger)
-		serveMonitorConfig(mux, d, logger)
 		serveMuseConfig(mux, d, logger)
 		serveKeys(mux, d, logger)
 		serveWeather(mux, d, logger)
@@ -153,6 +139,11 @@ func NewHandler(d Deps) http.Handler {
 		mux.Handle("GET /api/v1/appearance/background", appearanceGetBG(d, logger))
 		mux.Handle("POST /api/v1/appearance/background", appearancePutBG(d, logger))
 		mux.Handle("DELETE /api/v1/appearance/background", appearanceDelBG(d, logger))
+	}
+
+	// 设备文件互通（TF 文件管理器 ↔ Web「文件」页，ADR-010）。
+	if d.FilesDir != "" {
+		serveFiles(mux, d, logger)
 	}
 
 	// 语音试听（Web 后台音色选择旁「试听」）：只依赖语音引擎，

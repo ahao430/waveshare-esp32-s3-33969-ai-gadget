@@ -135,15 +135,18 @@ Bridge 地址」是一个**地址簿**——可保存多个地址、点一下即
   手机访问 `http://<Bridge 主机>:8081`——设备管理后台二维码就是这个地址。
   产物目录自动探测（`webdist/` 或 `../web/dist`，也可 `-webdir` 指定）。
 - **开发形态**：Vite 开发服务器 `http://<Mac 局域网 IP>:5173`（热更新）。
-- **只在可信局域网/加鉴权使用**：后台可以改凭据；公网部署设 `BRIDGE_TOKEN` 并配 TLS，
-  浏览器端 `localStorage.setItem('bridge_token','<token>')`。
+- **公网部署注意**：设备端 HTTP 客户端**只支持明文 `http://`（无 TLS）**，
+  也不发 `Authorization`——公网 Bridge 必须开 **80 或 8081 明文端口**
+  （只开 HTTPS，或反代默认的 http→https 强跳，设备都连不上），且
+  **不要设 `BRIDGE_TOKEN`**（设备会 401）。接口无鉴权时请用非默认端口 +
+  防火墙/IP 白名单收窄暴露面。详见 [docs/DEPLOY.md §5](docs/DEPLOY.md)。
 
 ### 常见问题
 
 | 现象 | 处理 |
 |------|------|
 | 设备订阅页是空的 | Web「订阅中心」添加订阅实例（类型+名称+API Key）——实例才是设备显示的卡片 |
-| 设备连不上 Bridge | 设置→网络与连接：确认 Wi-Fi 已连接、Bridge 地址正确（改完立即生效）；`curl http://<BridgeIP>:8081/api/v1/device/status` 验证服务在跑 |
+| 设备连不上 Bridge | 设置→网络与连接：确认 Wi-Fi 已连接、Bridge 地址正确（改完立即生效）；串口看 `net probe: ... stage=3` = TCP 被网络挡住（访客网/企业网隔离，换能出网的 Wi-Fi/热点）；`curl http://<BridgeIP>:8081/api/v1/device/status` 验证服务在跑 |
 | 设备对话一直失败 | Bridge 没起或不可达；换过网络就在设备地址簿里切换 Bridge 地址 |
 | AstrBot 提示「模型暂不可用」 | Web「AstrBot」页点「测试」看真实错误；检查 AstrBot 服务与实例配置 |
 | 有文字没声音 | 设备音量/静音；或 TTS Key 没配（Web 语音设置看「当前生效」）|

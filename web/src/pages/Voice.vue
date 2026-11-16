@@ -47,15 +47,14 @@ const providerConsole: Record<string, string> = {
   mimo: 'https://mimo.mi.com',
 }
 
-/* ---- 各 App 音色（Muse / 小智 / ZCode；AstrBot 用实例设置；大肥鱼=首个 AstrBot 实例）---- */
+/* ---- 各 App 音色（Muse / 小智；AstrBot 用实例设置；大肥鱼=首个 AstrBot 实例）---- */
 type VoicePref = { provider?: string; voice?: string }
-const appVoice = ref<Record<string, VoicePref>>({ muse: {}, xiaozhi: {}, zcode: {} })
+const appVoice = ref<Record<string, VoicePref>>({ muse: {}, xiaozhi: {} })
 const appVoiceMsg = ref('')
 const appVoiceSaving = ref(false)
 const appRows = [
   { key: 'muse', label: 'Muse' },
   { key: 'xiaozhi', label: '小智' },
-  { key: 'zcode', label: 'ZCode' },
 ] as const
 
 /* 音色试听：用当前选择的引擎/音色合成一句（不保存配置）。 */
@@ -140,7 +139,7 @@ onMounted(async () => {
 async function loadAppVoice() {
   try {
     const r = await request<{ apps: Record<string, VoicePref> }>('/api/v1/voice/apps')
-    const m: Record<string, VoicePref> = { muse: {}, xiaozhi: {}, zcode: {} }
+    const m: Record<string, VoicePref> = { muse: {}, xiaozhi: {} }
     for (const k of Object.keys(m)) {
       const got = r.apps?.[k]
       m[k] = { provider: got?.provider ?? '', voice: got?.voice ?? '' }

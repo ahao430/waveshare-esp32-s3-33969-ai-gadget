@@ -64,38 +64,6 @@ static bool mock_ds_refresh(gadget_state_t *st)
     snprintf(st->subs[2].plan, sizeof(st->subs[2].plan), "Kimi Coding Pro");
     st->subs[2].valid = true;
 
-    /* 演示服务器首刷填充（g_state 零初值——真机 bridge 无配置显示空态，
-     * 演示数据只属于 mock 数据源） */
-    if (st->server_count == 0) {
-        st->server_count = 4;
-        st->servers[0] = (gadget_server_t){ "hk-01", true,  23, 55, 38,  540, 1560, 120 };
-        st->servers[1] = (gadget_server_t){ "hk-02", true,  48, 66, 41,  890, 2450, 730 };
-        st->servers[2] = (gadget_server_t){ "jp-01", false,  0,  0,  0,    0,    0,   0 };
-        st->servers[3] = (gadget_server_t){ "us-01", true,  71, 82, 77, 1320, 3980, 240 };
-    }
-
-    /* 服务器队列伪随机波动 */
-    for (int i = 0; i < st->server_count && i < DS_SERVER_MAX; i++) {
-        gadget_server_t *s = &st->servers[i];
-        if (!s->online) {
-            if (rand() % 10 == 0) { /* 偶尔复活 */
-                s->online = true;
-                s->cpu_pct = 10 + rand() % 30;
-                s->mem_pct = 30 + rand() % 40;
-            }
-            continue;
-        }
-        s->cpu_pct += rand() % 15 - 7;
-        s->mem_pct += rand() % 9 - 4;
-        if (s->cpu_pct < 1) s->cpu_pct = 1;
-        if (s->cpu_pct > 99) s->cpu_pct = 99;
-        if (s->mem_pct < 5) s->mem_pct = 5;
-        if (s->mem_pct > 99) s->mem_pct = 99;
-        if (rand() % 25 == 0) { /* 偶尔掉线 */
-            s->online = false;
-            s->cpu_pct = s->mem_pct = 0;
-        }
-    }
     return true;
 }
 

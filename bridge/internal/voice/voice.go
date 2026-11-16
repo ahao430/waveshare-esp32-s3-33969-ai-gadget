@@ -273,7 +273,7 @@ func writePreviewErr(w http.ResponseWriter, code int, kind, msg string) {
 }
 
 // ServeInteract 处理 POST /api/v1/voice/interact。
-// ctxKeyVoiceApp 承载调用方 App 标识（chat/xiaozhi/muse/zcode），供 TTS
+// ctxKeyVoiceApp 承载调用方 App 标识（chat/xiaozhi/muse），供 TTS
 // 选择音色时使用。
 type ctxKeyVoiceApp struct{}
 
