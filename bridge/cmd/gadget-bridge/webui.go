@@ -16,6 +16,18 @@ import (
 	"strings"
 )
 
+// detectWebDir 自动探测 Web 构建产物目录（零配置托管）：
+//   部署目录：./webdist（包内同级）；开发目录：../web/dist（cwd=bridge）
+// 都没命中返回空串 = 不托管（-webdir / BRIDGE_WEBDIR 可显式指定）。
+func detectWebDir() string {
+	for _, cand := range []string{"webdist", "../web/dist", "web/dist"} {
+		if st, err := os.Stat(cand); err == nil && st.IsDir() {
+			return cand
+		}
+	}
+	return ""
+}
+
 func withWebUI(next http.Handler, dir string, logger *slog.Logger) http.Handler {
 	if dir == "" {
 		return next

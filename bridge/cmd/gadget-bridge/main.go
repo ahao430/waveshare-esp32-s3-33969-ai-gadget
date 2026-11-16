@@ -44,7 +44,8 @@ import (
 func main() {
 	addr := flag.String("addr", envOr("BRIDGE_ADDR", ":8081"), "HTTP 监听地址")
 	dbPath := flag.String("db", envOr("BRIDGE_DB", "data/gadget.db"), "SQLite 快照缓存路径（空=纯内存）")
-	webDir := flag.String("webdir", envOr("BRIDGE_WEBDIR", ""), "Web 后台静态目录（web/dist 构建产物；空=不托管）")
+	webDir := flag.String("webdir", envOr("BRIDGE_WEBDIR", detectWebDir()),
+		"Web 后台静态目录（默认自动探测 webdist/ 或 ../web/dist；空=不托管）")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))

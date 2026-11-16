@@ -105,9 +105,11 @@ ESP-IDF 环境见 [DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
 两种形态：
 
-- **部署形态（推荐）**：Bridge 用 `-webdir` 直接托管 Web 后台（一个进程
-  一个端口），手机访问 `http://<Bridge 主机>:8081`——设备「设置 →
-  网络与连接 → 管理后台」二维码就是这个地址。部署见
+- **部署形态（推荐）**：Bridge 直接托管 Web 后台（一个进程一个端口），
+  手机访问 `http://<Bridge 主机>:8081`——设备「设置 → 网络与连接 →
+  管理后台」二维码就是这个地址。产物目录自动探测（`webdist/` 或
+  `../web/dist`，也可 `-webdir` 显式指定）；开发时 Web 改动需
+  `npm run build` 后才反映到 :8081（Vite :5173 不受影响）。部署见
   [docs/DEPLOY.md](docs/DEPLOY.md)。
 - **开发形态**：Mac 上 Vite 开发服务器（`host: true`）：
 

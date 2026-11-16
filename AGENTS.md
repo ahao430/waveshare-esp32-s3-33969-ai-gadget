@@ -162,6 +162,6 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 
 - Bridge `:8081`（监听全部网卡；master key 在 `bridge/bridge.env`，日志 `/tmp/bridge.log`；
   重启必须带同一个 `BRIDGE_MASTER_KEY`，否则加密凭据读不出来；
-  `-webdir <dir>` 可托管 Web 后台静态文件——API+管理页同端口）
+  `-webdir <dir>` 可托管 Web 后台静态文件（缺省自动探测 webdist/ 或 ../web/dist）——API+管理页同端口）
 - Web `:5173`（Vite `host: true`，局域网 `http://<MacIP>:5173`；`/api` 服务端代理到 127.0.0.1:8081）
 - 模拟器 GUI 可常开（bridge 模式实时连）
