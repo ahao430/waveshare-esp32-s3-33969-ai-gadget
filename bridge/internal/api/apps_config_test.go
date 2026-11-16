@@ -313,16 +313,16 @@ func TestLauncherLayout(t *testing.T) {
 	mk := newTestMasterKey(t)
 	srv, _ := newConfigServer(t, mk)
 
-	// 默认 = 出厂顺序（7 个全可见）
+	// 默认 = 出厂顺序（8 个全可见）
 	code, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	if code != 200 {
 		t.Fatalf("get: %d", code)
 	}
 	order, _ := out["order"].([]any)
-	if len(order) != 7 || order[0] != "chat" || order[6] != "music" {
+	if len(order) != 8 || order[0] != "chat" || order[7] != "music" {
 		t.Fatalf("default order wrong: %v", order)
 	}
-	if cat, _ := out["catalog"].([]any); len(cat) != 7 {
+	if cat, _ := out["catalog"].([]any); len(cat) != 8 {
 		t.Fatalf("catalog wrong: %v", cat)
 	}
 
@@ -355,7 +355,7 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, out = doJSON(t, "GET", srv2.URL+"/api/v1/launcher", "")
-	if order, _ = out["order"].([]any); len(order) != 7 || order[0] != "chat" {
+	if order, _ = out["order"].([]any); len(order) != 8 || order[0] != "chat" {
 		t.Fatalf("corrupt setting should fall back to default, got %v", order)
 	}
 }

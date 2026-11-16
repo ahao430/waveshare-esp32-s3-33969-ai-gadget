@@ -142,6 +142,7 @@ void ds_init(const char *source, const char *bridge_url, const char *provider)
     if (!is_bridge && g_impl->refresh) {
         (void)g_impl->refresh(&g_state);
     }
+    ds_files_ensure_dirs(); /* TF 子目录（未插卡/无权限静默） */
     demo_battery_apply();
 }
 

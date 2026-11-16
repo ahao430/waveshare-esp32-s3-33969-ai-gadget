@@ -52,6 +52,13 @@ int wifi_prov_bridge_list(char *out, size_t cap);
 /* 从地址簿删除；当前激活地址不可删（返回 -1），未找到返回 -1。 */
 int wifi_prov_bridge_remove(const char *url);
 
+/* ---- TF 自动备份/恢复（ADR-010，2026-11-16）----
+ * save/remove 后自动写 /sdcard/backup/provision.json（未插卡静默跳过）；
+ * 开机时若 NVS 无凭据可调 restore 恢复（刷机/擦 NVS 免重配）。
+ * 备份含 Wi-Fi 明文密码——TF 卡勿外借（README/DEPLOY 注明）。 */
+bool wifi_prov_restore_from_backup(void); /* true=已恢复 */
+void wifi_prov_backup_now(void);          /* 手动触发备份（一般不需要） */
+
 /* 阻塞扫描（约 1.5~3s，内部 block 模式）。
  * 返回 0=成功（*n 条，按信号强度降序、同名 SSID 去重）/
  * -1=Wi-Fi 忙（正在连接中，稍后再试）/ -2=驱动失败。 */

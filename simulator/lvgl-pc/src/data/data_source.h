@@ -241,4 +241,43 @@ void ds_bridge_rebind(const char *url);
 int ds_bridge_host_list(char *out, int cap); /* 0=已写 / -1=空 */
 int ds_bridge_host_remove(const char *url);  /* 0=已删 / -1=当前或未找到 */
 
+/* 自定义背景落盘路径（Web 上传 → Bridge → 设备拉取缓存）：
+ * 固件写 TF（屏显解码需 LV_USE_PNG，本期只落盘，见 ADR-010）；
+ * 模拟器沿用仓库相对路径。 */
+#ifdef ESP_PLATFORM
+#define DS_CUSTOM_BG_PATH "/sdcard/appearance/custom-bg.png"
+#else
+#define DS_CUSTOM_BG_PATH "simulator/lvgl-pc/assets/custom-bg.png"
+#endif
+
+/* ---- TF 卡文件（ADR-010；实现 data_source_files.c，单文件双平台：
+ * 固件=FATFS(/sdcard)+Bridge HTTP；模拟器=GADGET_SD_DIR 目录+同一 HTTP）。
+ * 全部阻塞（目录扫描/整包 HTTP/文件读写）——只能在后台 worker 线程调用
+ * （16KB 栈），LVGL 线程禁直接调用（AGENTS 踩坑 #11）。 ---- */
+#define DS_FILE_NAME_MAX 96
+typedef struct {
+    char name[DS_FILE_NAME_MAX];
+    long size;
+    long mtime; /* unix 秒 */
+    bool is_dir;
+} ds_file_entry_t;
+
+/* TF 根目录（固件 "/sdcard"；模拟器 GADGET_SD_DIR，默认 "sdcard"） */
+const char *ds_sd_root(void);
+/* rel（如 "cache/weather.json"）→ 绝对路径；0=OK / -1=缓冲不足 */
+int ds_sd_resolve(char *out, int cap, const char *rel);
+/* 建齐 backup/cache/appearance/downloads 子目录（幂等，启动调用） */
+void ds_files_ensure_dirs(void);
+
+/* 列目录（目录优先+名称排序）：0=成功（*n 条）/ -1=打不开（未插卡等） */
+int ds_files_list(const char *dir, ds_file_entry_t *out, int max, int *n);
+/* 删除文件（不递归删目录）：0/-1 */
+int ds_files_delete(const char *path);
+/* TF → Bridge 上传（≤2MB；msg 回显结果文案）：0/-1 */
+int ds_files_upload(const char *path, char *msg, int msg_cap);
+/* Bridge 文件列表 → out 每行 "name\tsize"（"\n" 分隔）：0=成功 */
+int ds_files_remote_list(char *out, int cap);
+/* Bridge → TF downloads/<name>（≤2MB；msg 回显结果文案）：0/-1 */
+int ds_files_download(const char *name, char *msg, int msg_cap);
+
 #endif /* DATA_SOURCE_H */

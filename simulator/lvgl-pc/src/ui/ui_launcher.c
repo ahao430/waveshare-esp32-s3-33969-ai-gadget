@@ -110,7 +110,7 @@ static void tile_release_cb(lv_event_t *e);
 #define BG_W 480
 #define BG_H 480
 
-#define CUSTOM_BG_PATH "simulator/lvgl-pc/assets/custom-bg.png"
+#define CUSTOM_BG_PATH DS_CUSTOM_BG_PATH /* 固件=/sdcard/appearance/…（ADR-010） */
 
 static uint16_t rgb565_pack(int r, int g, int b)
 {

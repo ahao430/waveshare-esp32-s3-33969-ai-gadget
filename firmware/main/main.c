@@ -215,7 +215,7 @@ static void hang_probe_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(5000));
         if (!net_done && i >= 3) {
             net_done = true;
-            xTaskCreate(net_probe_task, "net_probe", 12288, NULL, 3, NULL);
+            xTaskCreate(net_probe_task, "net_probe", 8192, NULL, 3, NULL);
         }
         /* 非阻塞 try-lock：带超时的锁在楔死时会把探针自己挂住
          * （200ms 那次实测连 probe#3 都出不来），try-lock 才能持续探测 */
@@ -352,6 +352,7 @@ static void probe_sdcard(void)
         return;
     }
     ESP_LOGI(TAG, "sdcard: mounted, cid.name=%s", bsp_sdcard->cid.name);
+    ds_files_ensure_dirs(); /* backup/cache/appearance/downloads（ADR-010） */
 }
 
 /* ---- 自建显示管线（复刻 bsp_display_start，两处真机调优） ----
@@ -794,6 +795,17 @@ static void seed_bridge_hosts(void)
             strcmp(cur, BRIDGE_ACTIVATE_HOST) != 0) {
             wifi_prov_bridge_save(BRIDGE_ACTIVATE_HOST);
             ESP_LOGW(TAG, "bridge host activated: %s", BRIDGE_ACTIVATE_HOST);
+        }
+    }
+
+    /* 配网 TF 恢复（ADR-010）：NVS 无凭据（刷机/擦除）且 TF 有
+     * backup/provision.json → 自动恢复，无需重配。 */
+    {
+        char s0[33], p0[WIFI_PROV_PASS_MAX];
+        if (!wifi_prov_load(s0, sizeof(s0), p0, sizeof(p0))) {
+            (void)wifi_prov_restore_from_backup();
+        } else {
+            wifi_prov_backup_now(); /* 确保 TF 上有最新备份（幂等重写） */
         }
     }
 

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -17,6 +18,8 @@
 #include "nvs_flash.h"
 #include "esp_log.h"
 
+#include "cJSON.h"
+
 static const char *TAG = "wifi_prov";
 
 #define WIFI_PROV_NS "wifi"
@@ -26,6 +29,9 @@ static const char *TAG = "wifi_prov";
 static EventGroupHandle_t s_ev;
 static volatile bool s_busy;
 static volatile int s_drop_reason; /* 最近一次断开 reason（等待循环判密码错用） */
+
+/* TF 自动备份（定义在文件末尾；save/remove 里调用） */
+static void prov_backup_write(void);
 
 /* ---------------- NVS ---------------- */
 
@@ -130,6 +136,7 @@ void wifi_prov_save(const char *ssid, const char *pass)
     strlcpy(ssids[idx], ssid, 33);
     strlcpy(passes[idx], pass ? pass : "", WIFI_PROV_PASS_MAX);
     wl_store(ssids, passes, n);
+    prov_backup_write(); /* TF 自动备份（未插卡静默跳过） */
 }
 
 bool wifi_prov_has_multi(void)
@@ -194,6 +201,7 @@ void wifi_prov_bridge_save(const char *url)
     if (!url || url[0] == '\0') return;
     nvs_write_str("bh", url);
     bh_upsert(url);
+    prov_backup_write();
 }
 
 void wifi_prov_bridge_seed(const char *url)
@@ -250,6 +258,7 @@ int wifi_prov_bridge_remove(const char *url)
     }
     if (off > 0 && out[off - 1] == '\n') out[off - 1] = '\0';
     bh_write(out);
+    if (removed) prov_backup_write();
     return removed ? 0 : -1;
 }
 
@@ -483,4 +492,90 @@ bool wifi_prov_status(char *ssid, size_t ssid_cap, char *ip, size_t ip_cap)
         }
     }
     return true;
+}
+
+/* ---------------- TF 自动备份 / 恢复（ADR-010，2026-11-16） ----------------
+ * 每次配网/地址簿变更后把 NVS 配网数据写 /sdcard/backup/provision.json；
+ * 开机 NVS 无凭据但备份存在 → 自动恢复（刷机/擦 NVS 免重配；解决过
+ * "擦 NVS 丢家里 Wi-Fi"的痛点）。备份含 Wi-Fi 明文密码——TF 卡属于
+ * 设备本体，勿外借（README/DEPLOY 已注明）。
+ * 未插卡/写失败全部静默：TF 是增强项，不是依赖项。 */
+#define PROV_BACKUP_DIR  "/sdcard/backup"
+#define PROV_BACKUP_PATH PROV_BACKUP_DIR "/provision.json"
+
+static void prov_backup_write(void)
+{
+    char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
+    bool has_wifi = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
+    char bh[BH_LEN] = "";
+    bool has_bh = wifi_prov_bridge_get(bh, sizeof(bh));
+    char list[BH_MAX * (BH_LEN + 1) + 1] = "";
+    (void)bh_read(list, sizeof(list));
+    char wl[WL_BUF] = "";
+    (void)nvs_read_str("wl", wl, sizeof(wl));
+    if (!has_wifi && !has_bh && list[0] == '\0') return; /* 无可备份 */
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) return;
+    cJSON_AddNumberToObject(root, "v", 1);
+    if (has_wifi) {
+        cJSON_AddStringToObject(root, "ssid", ssid);
+        cJSON_AddStringToObject(root, "pass", pass);
+    }
+    if (has_bh) cJSON_AddStringToObject(root, "bh", bh);
+    if (list[0]) cJSON_AddStringToObject(root, "bh_list", list);
+    if (wl[0]) cJSON_AddStringToObject(root, "wl", wl);
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) return;
+
+    (void)mkdir(PROV_BACKUP_DIR, 0777); /* 已存在返回 -1，忽略 */
+    FILE *f = fopen(PROV_BACKUP_PATH, "wb");
+    if (f) {
+        size_t wr = fwrite(json, 1, strlen(json), f);
+        fclose(f);
+        if (wr == strlen(json)) ESP_LOGI(TAG, "provision backed up to TF");
+    }
+    free(json);
+}
+
+void wifi_prov_backup_now(void) { prov_backup_write(); }
+
+bool wifi_prov_restore_from_backup(void)
+{
+    FILE *f = fopen(PROV_BACKUP_PATH, "rb");
+    if (!f) return false;
+    char buf[2048];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    if (n == 0) return false;
+    buf[n] = '\0';
+
+    cJSON *root = cJSON_Parse(buf);
+    if (!root) return false;
+    bool restored = false;
+    const cJSON *j = cJSON_GetObjectItem(root, "ssid");
+    if (cJSON_IsString(j) && j->valuestring[0]) {
+        const cJSON *p = cJSON_GetObjectItem(root, "pass");
+        /* 直接写 NVS（不调 wifi_prov_save，避免再次触发备份写入） */
+        nvs_write_str("ssid", j->valuestring);
+        nvs_write_str("pass", cJSON_IsString(p) ? p->valuestring : "");
+        restored = true;
+    }
+    j = cJSON_GetObjectItem(root, "wl");
+    if (cJSON_IsString(j)) {
+        nvs_write_str("wl", j->valuestring);
+    }
+    j = cJSON_GetObjectItem(root, "bh");
+    if (cJSON_IsString(j)) {
+        nvs_write_str("bh", j->valuestring);
+        restored = true;
+    }
+    j = cJSON_GetObjectItem(root, "bh_list");
+    if (cJSON_IsString(j)) {
+        bh_write(j->valuestring);
+    }
+    cJSON_Delete(root);
+    if (restored) ESP_LOGW(TAG, "provision restored from TF backup");
+    return restored;
 }

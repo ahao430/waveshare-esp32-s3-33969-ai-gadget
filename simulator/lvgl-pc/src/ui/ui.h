@@ -30,6 +30,7 @@ enum ui_app_id {
     UI_APP_MUSE,
     UI_APP_XIAOZHI,
     UI_APP_MUSIC,
+    UI_APP_FILES, /* 文件管理器（TF 卡，ADR-010） */
     UI_APP_SETTINGS,
     UI_APP_WEATHER, /* 天气（ADR-005 清单，Phase 5+） */
     UI_APP_COUNT,
@@ -56,6 +57,8 @@ void ui_conversation_build(lv_obj_t *screen, int app_id);
 /* 自检：打开 AstrBot 页的选择机器人面板（无需触摸） */
 void ui_conversation_debug_bot_picker(void);
 void ui_conversation_on_exit(void);
+void ui_files_build(lv_obj_t *screen, int app_id);
+void ui_files_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);
 void ui_settings_build_page(lv_obj_t *screen); /* 分类子页重建（nav 用） */

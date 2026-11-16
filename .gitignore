@@ -65,3 +65,6 @@ firmware/main/wifi_secret.h
 
 # ZCode CLI 工作目录
 /.zcode/
+
+# 模拟器 TF 卡演示目录（GADGET_SD_DIR 默认）
+/sdcard/

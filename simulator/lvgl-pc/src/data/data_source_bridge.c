@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include "cJSON.h" /* FetchContent 引入的 DaveGamble/cJSON */
@@ -28,6 +29,37 @@
 /* Komari 聚合要等 Bridge 先去抓上游（实测 1.3~1.5s），给足余量；
  * 1500ms 会让监控页永远是空的（2026-11-15 用户反馈）。 */
 #define BRIDGE_BUF_SIZE   (64 * 1024)
+
+
+/* ---------------- TF 离线缓存（ADR-010，2026-11-16） ----------------
+ * 抓取成功后整包 JSON 落 <SD>/cache/<file>；网络失败时回读缓存解析——
+ * 断网也能显示最后一次数据（订阅的 updated 时间用文件 mtime）。
+ * 未插卡/读写失败全程静默：缓存是增强项，不是依赖项。 */
+static void cache_write(const char *file, const char *body)
+{
+    char path[192];
+    if (ds_sd_resolve(path, (int)sizeof(path), file) != 0) return;
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    size_t n = strlen(body);
+    (void)fwrite(body, 1, n, f);
+    fclose(f);
+}
+
+/* 读缓存到 buf（NUL 结尾）；返回 0=无缓存 / >0=文件 mtime（unix 秒） */
+static long cache_read(const char *file, char *buf, size_t cap)
+{
+    char path[192];
+    if (ds_sd_resolve(path, (int)sizeof(path), file) != 0) return 0;
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
+    size_t n = fread(buf, 1, cap - 1, f);
+    fclose(f);
+    if (n == 0) return 0;
+    buf[n] = '\0';
+    struct stat st;
+    return stat(path, &st) == 0 ? (long)st.st_mtime : (long)time(NULL);
+}
 
 static char g_base[160];
 static char g_url[256];       /* 主 provider（GADGET_BRIDGE_PROVIDER） */
@@ -166,7 +198,16 @@ static void fetch_subscriptions(gadget_state_t *st)
     char *buf = malloc(BRIDGE_BUF_SIZE); /* 栈上 64KB 会炸穿 worker 栈 */
     if (!buf) return;
     int status = http_get(g_subs_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS * 4);
-    cJSON *root = (status == 200) ? cJSON_Parse(buf) : NULL;
+    long cache_mt = 0;
+    cJSON *root = NULL;
+    if (status == 200) {
+        root = cJSON_Parse(buf);
+        if (root) cache_write("cache/subscriptions.json", buf);
+    }
+    if (!root) { /* 断网/解析失败：回读 TF 离线缓存（ADR-010） */
+        cache_mt = cache_read("cache/subscriptions.json", buf, BRIDGE_BUF_SIZE);
+        if (cache_mt) root = cJSON_Parse(buf);
+    }
     free(buf);
     if (!root) return;
     do {
@@ -239,7 +280,7 @@ static void fetch_subscriptions(gadget_state_t *st)
         }
         if (n > 0) st->sub_count = n;
         else st->sub_count = 0; /* 明确空列表 → 设备空态 */
-        st->updated_unix = (long)time(NULL);
+        st->updated_unix = cache_mt ? cache_mt : (long)time(NULL);
     } while (0);
     cJSON_Delete(root);
 }
@@ -640,6 +681,11 @@ static int bridge_fetch_weather(ds_weather_t *out)
         return -1;
     }
     int status = http_get(wx_url, buf, 8192, BRIDGE_TIMEOUT_MS);
+    if (status == 200) {
+        cache_write("cache/weather.json", buf);
+    } else { /* 断网：回读 TF 离线缓存（ADR-010） */
+        if (cache_read("cache/weather.json", buf, 8192) > 0) status = 200;
+    }
     if (status != 200) {
         free(buf);
         if (out) out->valid = false;

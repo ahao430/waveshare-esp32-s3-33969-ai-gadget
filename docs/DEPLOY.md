@@ -129,6 +129,13 @@ curl http://127.0.0.1:8081/api/v1/device/status   # 验证
 凭据优先级：NVS（配网页保存）> `firmware/main/wifi_secret.h`（编译期
 兜底，刷开发固件时仍可用）。
 
+### 设备文件互通（ADR-010）
+
+Web「设备文件」页与设备「文件」App 双向同步，文件落在 Bridge 的
+`data/device_files/`（env `BRIDGE_FILES_DIR` 可改）：浏览器上传 ≤8MB，
+设备端下载到 TF `downloads/`（≤2MB，PSRAM 缓冲）；设备上传的备份文件
+同样出现在该目录。文件名允许中文，禁路径分隔符。
+
 ## 6. 日常
 
 - Web 改配置（机器人/音色/订阅/排布）即时生效，设备不用动。

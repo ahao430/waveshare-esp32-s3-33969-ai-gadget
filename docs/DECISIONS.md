@@ -328,3 +328,42 @@ Mac 上验证；人设/音色仍由用户在官方控制台配置，Bridge 不�
 - 官方 TTS 音频直通后，Voice 页的「小智音色」只在回落链路生效
 - 实施结论（2026-11-16）：`hraban/opus` + `-tags nolibopusfile` 构建链
   （CI 装 libopus-dev）；probe 与设备 PTT 直通均真网验证通过
+
+---
+
+## ADR-010 设备存储：TF 卡备份/缓存 + 文件管理器；删 ZCode/服务器监控
+
+**背景**（2026-11-16 用户需求）：app 分区只剩 5%、运行期 internal RAM
+峰值紧；设备插着 TF 卡但固件挂载后零使用；ZCode 远程与服务器监控两个
+App 无实际数据源（Bridge 侧配置页也常年空置）。
+
+**决策**：
+1. **删除 ZCode 远程 + 服务器监控全链路**：设备端枚举/defs/ui_monitor.c/
+   图标位图/servers+Komari 数据链；Web 页面/路由/导航/音色项；Bridge
+   zcode.go/monitor.go/internal/komari/设置键/音色白名单。launcher
+   `readOrder()` 改为**过滤已下线 key**（旧排布不整单回落出厂重置用户
+   自定义；设备端 defs 匹配本来就跳过未知 key）。收益：flash 5%→6%，
+   运行期少 servers 抓取与一类 worker。
+2. **TF 卡三件套**（`/sdcard`，FATFS 1-bit SDMMC）：
+   - 配网自动备份/恢复：save/remove 后写 `backup/provision.json`
+     （Wi-Fi+地址簿，JSON/cJSON）；开机 NVS 无凭据自动恢复（刷机/擦
+     NVS 免重配）。**备份含 Wi-Fi 明文密码——TF 勿外借**（文档注明）。
+   - 订阅/天气离线缓存：成功抓取整包 JSON 落 `cache/`；失败回读解析，
+     订阅的"更新于"用文件 mtime——断网可见最后一次数据。
+   - 自定义背景落盘改 `appearance/custom-bg.png`（修掉真机写相对路径
+     必失败的 bug）。真机屏显需 LV_USE_PNG（约 +50KB flash），本期只
+     落盘，屏显列后续。
+3. **文件管理器 App（key `files`）**：浏览/进目录/上级/删除（两击确认）/
+   上传到 Bridge/从 Bridge 下载（≤2MB，PSRAM 整包缓冲）。目录扫描与
+   传输全在 16KB worker + lv_async_call，LVGL 线程零阻塞 IO（踩坑#11）。
+   Bridge 新增 `/api/v1/files` 四端点（≤8MB、文件名清洗、显式
+   Content-Length），Web 新增「设备文件」页——TF 与后台双向同步。
+4. 内存：net_probe 栈 12→8KB；TF 相关 HTTP 缓冲统一 PSRAM 分配。
+
+**后果**：
+- localStorage 语义未变；旧 DB 的 launcher order 首次读取即被过滤，
+  保存一次后彻底干净（zcode/monitor 的 app_settings 行成为孤儿，无害）
+- TF 是增强项不是依赖：未插卡时文件页空态、备份/缓存静默跳过，其余
+  功能不受影响
+- 1-bit SDMMC 吞吐未实测（HARDWARE §2.5 TODO）；上传/下载上限 2MB
+  即由此保守设定，实测后可放宽

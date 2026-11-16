@@ -13,6 +13,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_launcher.c
     ${SIM_SRC_DIR}/ui/icons/icon_embed.c
     ${SIM_SRC_DIR}/ui/ui_settings.c
+    ${SIM_SRC_DIR}/ui/ui_files.c
     ${SIM_SRC_DIR}/ui/ui_wifi_panel.c
     ${SIM_SRC_DIR}/ui/ui_statusbar.c
     ${SIM_SRC_DIR}/ui/ui_theme.c
@@ -27,6 +28,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/data/data_source_mock.c
     ${SIM_SRC_DIR}/data/data_source_bridge.c
     ${SIM_SRC_DIR}/data/data_source_wifi.c
+    ${SIM_SRC_DIR}/data/data_source_files.c
     ${SIM_SRC_DIR}/data/http_client.c
     ${SIM_SRC_DIR}/data/mock_data.c
     # 语音会话：voice_session 状态机 + mock（模拟器双端兼容）+ esp32 真机 ops

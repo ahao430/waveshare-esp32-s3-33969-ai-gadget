@@ -65,7 +65,7 @@ void ui_remote_config_prefetch(void)
     s_rcfg.have_theme =
         ds_appearance_fetch_theme(&s_rcfg.theme) == 0 && s_rcfg.theme >= 0;
     /* 背景图：HTTP 下载落文件（文件路径仅 UI 消费，无 LVGL 调用） */
-    (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+    (void)ds_appearance_fetch(DS_CUSTOM_BG_PATH);
     s_rcfg.have_keys = ds_keys_fetch(s_rcfg.kp, s_rcfg.kb, s_rcfg.k3s, s_rcfg.k3l,
                                      (int)sizeof(s_rcfg.kp)) == 0;
     s_rcfg.have_devcfg = ds_device_config_fetch(&s_rcfg.sub_interval) == 0;
@@ -113,6 +113,7 @@ static void quota_on_exit(void);
 static void quota_countdown_cb(lv_timer_t *t);
 static void quota_auto_refresh_cb(lv_timer_t *t);
 static void quota_update_all(void);
+static void quota_fetch_start(int app_id);
 static void quota_tile_scroll_cb(lv_event_t *e);
 static void quota_refresh_cb(lv_event_t *e);
 
@@ -133,7 +134,7 @@ void ui_init(void)
         if (ds_appearance_fetch_theme(&web_theme) == 0 && web_theme >= 0) {
             ds_config_set_theme(web_theme);
         }
-        (void)ds_appearance_fetch("simulator/lvgl-pc/assets/custom-bg.png");
+        (void)ds_appearance_fetch(DS_CUSTOM_BG_PATH);
         char kp[8], kb[8], k3s[8], k3l[8];
         if (ds_keys_fetch(kp, kb, k3s, k3l, (int)sizeof(kp)) == 0) {
             ui_keys_apply_config(kp, kb, k3s, k3l);
@@ -448,6 +449,11 @@ static void quota_build(lv_obj_t *scr, int app_id)
     g_q_app_id = app_id;
     ui_gesture_back_add(scr); /* 上滑返回（无返回按钮） */
 
+    /* 进页即异步拉一次（ds_state 不再惰性刷新后这里保证首屏不空；
+     * 必须在空态分支之前——否则空 → 不拉 → 永远空）。
+     * worker+lv_async_call：网络不通只影响本次数据，不冻 UI。 */
+    quota_fetch_start(app_id);
+
     const gadget_state_t *s = ds_state();
     if (s->sub_count == 0) {
         lv_obj_t *card = lv_obj_create(scr);
@@ -699,6 +705,7 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
         { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
         { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },
+        { UI_APP_FILES,    "files",    "文件",    LV_SYMBOL_DIRECTORY, 0xE0A030, "A:simulator/lvgl-pc/assets/icons/files.png",    true,  ui_files_build,        ui_files_on_exit },
         { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit },
         { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL },
     };

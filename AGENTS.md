@@ -17,6 +17,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 设备 UI（Launcher/App 页面） | `simulator/lvgl-pc/src/ui/` | **模拟器与真机共用源**；新增 .c 要手改 ui CMakeLists（两处） |
 | UI 公共件（页点/手势） | `simulator/lvgl-pc/src/ui/ui_gesture.*` | 页点定位用 `ui_page_of_scroll`（实测宽+四舍五入，勿硬编码 480） |
 | 数据源抽象 | `simulator/lvgl-pc/src/data_source.*` | mock / bridge 两实现；新字段三处同步（.h/两 .c） |
+| TF 卡文件 | `simulator/lvgl-pc/src/data/data_source_files.c`、`sd_paths.h`、`ui/ui_files.c` | 单文件双平台（固件 /sdcard，模拟器 `GADGET_SD_DIR` 默认 `sdcard/`）；阻塞 IO 只能在 16KB worker 线程 |
 | Bridge API | `bridge/internal/api/` | 标准库 net/http，Go 1.22+ 路由模式 `GET /api/v1/...` |
 | Bridge 配置存储 | `bridge/internal/storage/` | bots/app_settings 表；密钥字段 Encrypt 后存 JSON |
 | AI 上游（AstrBot/OpenAI 兼容） | `bridge/internal/ai/` | astrbot payload 契约见 astrbot.go 头注释；会话身份 per-bot（`gadget-<botID>`，「新对话」=轮换代，持久化于 app_settings.astrbot_sessions） |
@@ -124,6 +125,9 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
   软键盘输密码（存 NVS，NVS 优先于 `wifi_secret.h` 编译兜底）、热改
   Bridge 地址（`ds_bridge_rebind` 立即生效）。`wifi_secret.h` 只在
   NVS 从未配置过时生效（启动日志 `creds=` 可辨认来源）。
+- **TF 卡（ADR-010）**：`/sdcard` FATFS 挂载后用于配网备份/离线缓存/
+  文件管理；未插卡全部功能静默降级。备份含 Wi-Fi 明文密码（勿外借）。
+  上传/下载单文件 ≤2MB（1-bit SDMMC 吞吐未实测，见 HARDWARE §2.5）。
 - 设备只连 Bridge（默认 `http://<主机>:8081`），不连 Web。Bridge 可
   部署在任意常驻主机（`-webdir` 托管 Web 后台，部署链见
   `docs/DEPLOY.md`）；开发期在 Mac 上跑则 Mac 睡眠/关机对话失败。
