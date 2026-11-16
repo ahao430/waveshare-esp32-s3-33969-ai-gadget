@@ -58,7 +58,6 @@ static void bright_apply(int v)
 
 static void vol_close_cb(lv_timer_t *t)
 {
-    (void)t;
     if (g_vol_pop) {
         lv_obj_delete(g_vol_pop);
         g_vol_pop = NULL;
@@ -66,6 +65,10 @@ static void vol_close_cb(lv_timer_t *t)
         g_bri_lbl = NULL;
     }
     g_vol_close = NULL;
+    /* 自动关闭是一次性语义，必须删掉自己——原实现留成重复 timer，
+     * 每开一次面板就攒一个 3s 僵尸；重开的新面板会被旧 timer 到期
+     * 误关（用户反复使用后表现为"一打开就自动关闭"，2026-11-16）。 */
+    lv_timer_delete(t);
 }
 
 static void vol_changed_cb(lv_event_t *e)

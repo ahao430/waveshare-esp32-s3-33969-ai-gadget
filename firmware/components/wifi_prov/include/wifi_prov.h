@@ -77,6 +77,12 @@ bool wifi_prov_status(char *ssid, size_t ssid_cap, char *ip, size_t ip_cap);
  * 否则旧凭据的 connect 会和试连新网互相打断。 */
 bool wifi_prov_busy(void);
 
+/* 手动模式（Wi-Fi 设置面板打开期间）：暂停自动重连，避免开机重连循环
+ * 每 1.5s 抢驱动导致扫描被吞（返回 OK 但 0 结果，2026-11-16 真机）；
+ * on=false 时若有凭据且未连接立即重连。 */
+void wifi_prov_manual_mode(bool on);
+bool wifi_prov_manual(void);
+
 #ifdef __cplusplus
 }
 #endif

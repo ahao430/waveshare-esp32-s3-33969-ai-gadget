@@ -71,8 +71,12 @@ static atomic_bool g_tts_stream;    /* 流式：写完不代表结束（等 stre
 static void play_task(void *arg);   /* 前置声明：流式写入要边收边起播 */
 static atomic_bool g_tts_eof;       /* 写侧结束（流式） */
 
-/* 流式播放阈值：攒够 0.5s 音频就开播，剩余边收边播 */
-#define TTS_START_BYTES (16000 / 2 * 2 * 1) /* 0.5s @16k/16bit ≈ 16000B */
+/* 流式播放阈值：攒够 1.5s 音频才开播，剩余边收边播。原 0.5s 对公网
+ * Bridge（270ms RTT + 晚高峰抖动）不够——TCP 重传停顿超过已缓冲量就
+ * 欠载卡顿（2026-11-16 用户反馈"声音好卡"）。1.5s 只推迟首声，内存
+ * （同一 PSRAM 缓冲）与 CPU 零增加；小智直连（ADR-014）延迟低，届时
+ * 可再调小。 */
+#define TTS_START_BYTES (16000 * 3 / 2 * 2) /* 1.5s @16k/16bit/mono ≈ 48000B */
 
 void audio_esp32_tts_reset(void)
 {

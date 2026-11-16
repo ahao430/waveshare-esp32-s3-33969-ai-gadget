@@ -48,13 +48,23 @@ static bool nvs_read_str(const char *key, char *out, size_t cap)
 static void nvs_write_str(const char *key, const char *val)
 {
     nvs_handle_t h;
-    if (nvs_open(WIFI_PROV_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    if (val && val[0] != '\0') {
-        (void)nvs_set_str(h, key, val);
-    } else {
-        (void)nvs_erase_key(h, key);
+    esp_err_t err = nvs_open(WIFI_PROV_NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs open(%s) fail: %s", key, esp_err_to_name(err));
+        return;
     }
-    (void)nvs_commit(h);
+    if (val && val[0] != '\0') {
+        err = nvs_set_str(h, key, val);
+    } else {
+        err = nvs_erase_key(h, key);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs write %s fail: %s", key, esp_err_to_name(err));
+    }
+    err = nvs_commit(h);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "nvs commit %s fail: %s", key, esp_err_to_name(err));
+    }
     nvs_close(h);
 }
 
@@ -274,31 +284,42 @@ int wifi_prov_scan(wifi_prov_ap_t *out, int max, int *n)
      *   先断开中止，等 DISCONNECTED 事件落定（BIT_DROP，800ms 兜底）再扫，
      *   扫完恢复自动重连。曾用固定 150ms——从已连接态 deauth 要 300ms+，
      *   150ms 后的扫描被驱动静默吞掉（返回 OK 但 0 结果）。 */
-    esp_err_t err = esp_wifi_scan_start(&cfg, true); /* block ~1.5-3s */
-    if (err == ESP_ERR_WIFI_STATE) {
-        char ssid[33], pass[WIFI_PROV_PASS_MAX];
-        bool had_creds = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
-        s_busy = true;             /* wifi_evt 的自动重连在此窗口内避让 */
-        esp_wifi_disconnect();     /* 中止进行中的连接尝试 */
-        if (s_ev) {
-            xEventGroupClearBits(s_ev, BIT_DROP);
-            xEventGroupWaitBits(s_ev, BIT_DROP, pdTRUE, pdFALSE,
-                                pdMS_TO_TICKS(800));
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(800));
-        }
-        vTaskDelay(pdMS_TO_TICKS(50));
-        err = esp_wifi_scan_start(&cfg, true);
-        s_busy = false;
-        if (had_creds) esp_wifi_connect();
-    }
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "scan failed: %s", esp_err_to_name(err));
-        return err == ESP_ERR_WIFI_STATE ? -1 : -2;
-    }
-
+    /* 扫描重试（2026-11-16 真机）：开机重连循环期，"连接中→断开"要
+     * 300ms+ 才落定，固定等待后首扫常被驱动静默吞掉（返回 OK 但 0
+     * 结果）。空结果重试 3 次，每次间隔 300ms。 */
+    esp_err_t err = ESP_FAIL;
     uint16_t total = 0;
-    if (esp_wifi_scan_get_ap_num(&total) != ESP_OK || total == 0) {
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (attempt) vTaskDelay(pdMS_TO_TICKS(300));
+        err = esp_wifi_scan_start(&cfg, true); /* block ~1.5-3s */
+        if (err == ESP_ERR_WIFI_STATE) {
+            char ssid[33], pass[WIFI_PROV_PASS_MAX];
+            bool had_creds = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
+            s_busy = true;         /* wifi_evt 的自动重连在此窗口内避让 */
+            esp_wifi_disconnect(); /* 中止进行中的连接尝试 */
+            if (s_ev) {
+                xEventGroupClearBits(s_ev, BIT_DROP);
+                xEventGroupWaitBits(s_ev, BIT_DROP, pdTRUE, pdFALSE,
+                                    pdMS_TO_TICKS(800));
+            } else {
+                vTaskDelay(pdMS_TO_TICKS(800));
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            err = esp_wifi_scan_start(&cfg, true);
+            s_busy = false;
+            if (had_creds) esp_wifi_connect();
+        }
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "scan failed: %s (attempt %d)",
+                     esp_err_to_name(err), attempt + 1);
+            return err == ESP_ERR_WIFI_STATE ? -1 : -2;
+        }
+        total = 0;
+        (void)esp_wifi_scan_get_ap_num(&total);
+        if (total > 0) break;
+        ESP_LOGW(TAG, "scan empty (attempt %d)", attempt + 1);
+    }
+    if (total == 0) {
         *n = 0;
         return 0;
     }
@@ -452,29 +473,71 @@ int wifi_prov_autoconnect_others(void)
 {
     /* 等 3s：同环境开机时当前网络很快连上，不必扫描打断 */
     wifi_ap_record_t ap;
+    ESP_LOGI(TAG, "autoconnect: start (wait 3s)");
     vTaskDelay(pdMS_TO_TICKS(3000));
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) return 0;
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+        ESP_LOGI(TAG, "autoconnect: already connected");
+        return 0;
+    }
 
     char ssids[WL_MAX][33];
     char passes[WL_MAX][WIFI_PROV_PASS_MAX];
     int n = wl_load(ssids, passes, WL_MAX);
+    ESP_LOGI(TAG, "autoconnect: wl n=%d", n);
     if (n < 2) return 0;
 
+    /* 扫描期停自动重连（同面板手动模式）：开机重连循环每 1.5s 抢驱动，
+     * 扫描必被吞成 0 结果（2026-11-16 真机：三连空）。 */
+    wifi_prov_manual_mode(true);
+    ESP_LOGI(TAG, "autoconnect: manual on, scanning");
+
+    int ret = 0; /* 0=名单内网络不在场 */
     wifi_prov_ap_t aps[24];
     int cnt = 0;
-    if (wifi_prov_scan(aps, 24, &cnt) != 0) return -1;
+    int src = wifi_prov_scan(aps, 24, &cnt);
+    if (src != 0) {
+        ret = -1;
+        goto out;
+    }
     /* scan 已按信号降序：按序找已保存且在场的网络，逐个试连 */
     for (int i = 0; i < cnt; i++) {
         for (int j = 0; j < n; j++) {
             if (strcmp(aps[i].ssid, ssids[j]) != 0) continue;
             ESP_LOGI(TAG, "auto switch to saved network \"%s\"", ssids[j]);
-            if (wifi_prov_connect(ssids[j], passes[j]) == 0) return 1;
+            if (wifi_prov_connect(ssids[j], passes[j]) == 0) {
+                ret = 1;
+                goto out;
+            }
         }
     }
-    return 0;
+out:
+    wifi_prov_manual_mode(false); /* 恢复自动重连（已连上则 no-op） */
+    return ret;
 }
 
 bool wifi_prov_busy(void) { return s_busy; }
+
+/* 手动模式（Wi-Fi 面板打开期间）：main.c 自动重连避让；关闭时恢复连接 */
+static volatile bool s_manual;
+
+void wifi_prov_manual_mode(bool on)
+{
+    s_manual = on;
+    if (on) {
+        /* 中止进行中的连接尝试，让驱动尽快回到 idle 以便扫描 */
+        (void)esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(250));
+    } else {
+        char ssid[33], pass[WIFI_PROV_PASS_MAX];
+        wifi_ap_record_t ap;
+        if (wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass)) &&
+            ssid[0] && esp_wifi_sta_get_ap_info(&ap) != ESP_OK) {
+            (void)esp_wifi_connect();
+        }
+    }
+}
+
+bool wifi_prov_manual(void) { return s_manual; }
 
 bool wifi_prov_status(char *ssid, size_t ssid_cap, char *ip, size_t ip_cap)
 {
@@ -503,20 +566,36 @@ bool wifi_prov_status(char *ssid, size_t ssid_cap, char *ip, size_t ip_cap)
 #define PROV_BACKUP_DIR  "/sdcard/backup"
 #define PROV_BACKUP_PATH PROV_BACKUP_DIR "/provision.json"
 
+/* 备份写 TF。大缓冲走堆：本函数在配网/自动切网任务的**小栈**上下文
+ * 调用（曾因 ~2.6KB 栈上缓冲让 6KB 任务栈溢出重启，2026-11-16 真机）。 */
 static void prov_backup_write(void)
 {
     char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
     bool has_wifi = wifi_prov_load(ssid, sizeof(ssid), pass, sizeof(pass));
     char bh[BH_LEN] = "";
     bool has_bh = wifi_prov_bridge_get(bh, sizeof(bh));
-    char list[BH_MAX * (BH_LEN + 1) + 1] = "";
-    (void)bh_read(list, sizeof(list));
-    char wl[WL_BUF] = "";
-    (void)nvs_read_str("wl", wl, sizeof(wl));
-    if (!has_wifi && !has_bh && list[0] == '\0') return; /* 无可备份 */
+    size_t list_cap = BH_MAX * (BH_LEN + 1) + 1;
+    char *list = calloc(1, list_cap);
+    char *wl = calloc(1, WL_BUF);
+    if (!list || !wl) {
+        free(list);
+        free(wl);
+        return;
+    }
+    (void)bh_read(list, list_cap);
+    (void)nvs_read_str("wl", wl, WL_BUF);
+    if (!has_wifi && !has_bh && list[0] == '\0') { /* 无可备份 */
+        free(list);
+        free(wl);
+        return;
+    }
 
     cJSON *root = cJSON_CreateObject();
-    if (!root) return;
+    if (!root) {
+        free(list);
+        free(wl);
+        return;
+    }
     cJSON_AddNumberToObject(root, "v", 1);
     if (has_wifi) {
         cJSON_AddStringToObject(root, "ssid", ssid);
@@ -527,6 +606,8 @@ static void prov_backup_write(void)
     if (wl[0]) cJSON_AddStringToObject(root, "wl", wl);
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    free(list);
+    free(wl);
     if (!json) return;
 
     (void)mkdir(PROV_BACKUP_DIR, 0777); /* 已存在返回 -1，忽略 */

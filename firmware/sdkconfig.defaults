@@ -72,3 +72,14 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 
 # 任务看门狗 panic 重启：显示管线楔死时自愈（HARDWARE §2.10）
 CONFIG_ESP_TASK_WDT_PANIC=y
+
+# 小智直连（ADR-014）TLS：mbedtls 分配走 PSRAM（官方 xiaozhi-esp32 的
+# S3 配置同款）。曾误判 EXTERNAL 破坏加密——-0x008D 实为
+# PSA_ERROR_INSUFFICIENT_MEMORY（内部 RAM 碎片化分配失败），2026-11-16。
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
+# 小智直连（ADR-014）TLS 记录缓冲：默认 16KB in_buf 在页面期内部 RAM
+# （largest ~12KB）永远分不下（mbedtls alloc(16717) failed → 伪装成
+# -0x008D，2026-11-16 真机实证）。4096 足够：证书链会分片跨记录，
+# 我们的消息都是小包（OTA JSON/WS hello/opus 帧）。
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096

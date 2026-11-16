@@ -19,6 +19,11 @@
 #include "data_source.h"
 #include "ui.h"
 #include "ui_theme.h"
+#include "ui_worker.h"
+
+#ifdef ESP_PLATFORM
+#include "wifi_prov.h" /* 手动模式：面板打开期间暂停自动重连 */
+#endif
 
 #define WIFI_AP_MAX 24
 #define PANEL_BG 0x0B1020
@@ -38,15 +43,27 @@ static lv_obj_t *g_pass_eye_sym;    /* 眼睛图标（切换状态反馈） */
 
 /* ---- 工具 ---- */
 
-static void panel_thread_start(void *(*fn)(void *), void *arg)
+/* 扫描/试连 worker：三档栈（16KB→12KB→8KB）。与 HTTP worker 不同，
+ * 这里只做 esp_wifi 扫描/试连（实测栈用量 2-3KB），8KB 兜底安全；
+ * 2026-11-16 实测对话/设置页稳态 largest_int 仅 ~12.2KB，12KB 档
+ * 因 TCB 开销差 200B 落不下。原实现直接 pthread 且忽略 rc，线程起
+ * 不来就永远"扫描中"（真机事故根因）。 */
+static int panel_thread_start(void *(*fn)(void *), void *arg)
 {
+    static const size_t tiers[] = { 16 * 1024, 12 * 1024, 8 * 1024 };
     pthread_t t;
     pthread_attr_t a;
-    pthread_attr_init(&a);
-    pthread_attr_setstacksize(&a, 16 * 1024); /* bot picker 同款：HTTP/扫描 4KB+ */
-    pthread_create(&t, &a, fn, arg);
-    pthread_attr_destroy(&a);
-    pthread_detach(t);
+    for (int i = 0; i < 3; i++) {
+        pthread_attr_init(&a);
+        pthread_attr_setstacksize(&a, tiers[i]);
+        int rc = pthread_create(&t, &a, fn, arg);
+        pthread_attr_destroy(&a);
+        if (rc == 0) {
+            pthread_detach(t);
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static lv_obj_t *panel_label(lv_obj_t *parent, const char *text,
@@ -71,6 +88,9 @@ static void mask_close_cb(lv_event_t *e)
         g_pass_eye_sym = NULL;
     }
     s_worker_busy = false;
+#ifdef ESP_PLATFORM
+    wifi_prov_manual_mode(false); /* 关面板：恢复自动重连 */
+#endif
 }
 
 static lv_obj_t *mask_create(const char *title)
@@ -128,7 +148,11 @@ static void wifi_connect_cb(lv_event_t *e)
     lv_obj_t *lbl = lv_obj_get_child(g_view, 0);
     lv_label_set_text(lbl, "连接中…（最长 15 秒）");
     lv_obj_set_style_text_color(lbl, UI_TEXT_DIM, 0);
-    panel_thread_start(wifi_connect_worker, NULL);
+    if (panel_thread_start(wifi_connect_worker, NULL) != 0) {
+        s_worker_busy = false;
+        lv_label_set_text(lbl, "设备内存紧张，请重试");
+        lv_obj_set_style_text_color(lbl, UI_ERR, 0);
+    }
 }
 
 static void wifi_item_cb(lv_event_t *e)
@@ -193,7 +217,11 @@ static void wifi_rescan_cb(lv_event_t *e)
     lv_obj_t *st = panel_label(g_view, "扫描中…（约 3 秒）", &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(st, LV_ALIGN_TOP_MID, 0, 56);
     s_worker_busy = true;
-    panel_thread_start(wifi_scan_worker, (void *)wifi_scan_done_async);
+    if (panel_thread_start(wifi_scan_worker, (void *)wifi_scan_done_async) != 0) {
+        s_worker_busy = false;
+        lv_label_set_text(st, "设备内存紧张，请重试");
+        lv_obj_set_style_text_color(st, UI_ERR, 0);
+    }
 }
 
 /* 列表视图：状态行 + AP 列表 + 底部按钮 */
@@ -263,6 +291,9 @@ static void wifi_list_fill(void)
 void ui_wifi_panel_open(void)
 {
     if (g_mask) mask_close_cb(NULL);
+#ifdef ESP_PLATFORM
+    wifi_prov_manual_mode(true); /* 暂停自动重连，扫描不再被抢驱动 */
+#endif
     mask_create("选择 Wi-Fi");
     wifi_rescan_cb(NULL); /* 复用：建"扫描中"视图并启动 worker */
 }

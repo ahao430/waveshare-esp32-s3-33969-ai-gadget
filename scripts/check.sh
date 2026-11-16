@@ -23,7 +23,10 @@ echo "simulator binary: $(ls simulator/lvgl-pc/build/gadget_sim)"
 
 echo "=== Firmware (ESP-IDF) ==="
 IDF_DIR="$HOME/esp/esp-idf-v6.0.3"
-APP_PART_BYTES=$((4 * 1024 * 1024)) # factory 分区 4MB（partitions.csv）
+# factory 分区大小从 partitions.csv 现读（ADR-013 起 12M；曾因写死 4MB
+# 在重分区后误报预算）。列序：name,type,subtype,offset,size → $5
+FACTORY_SIZE=$(awk -F, '$1=="factory"{print $5}' firmware/partitions.csv | tr -d ' ')
+APP_PART_BYTES=$(( $(echo "$FACTORY_SIZE" | sed 's/K/*1024/;s/M/*1024*1024/') ))
 if [ -d "$IDF_DIR" ]; then
   (
     export PATH="$HOME/esp/idf-buildenv/bin:/opt/homebrew/bin:$PATH"

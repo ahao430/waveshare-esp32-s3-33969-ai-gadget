@@ -63,30 +63,56 @@ static struct {
     ds_device_config_t devcfg; /* 订阅间隔 + 亮度/音量（设备回写值回放） */
 } s_rcfg;
 
-/* 联网后预热订阅数据：此前只在打开订阅页时才拉——开机后前几十秒
- * （Wi-Fi 还没拿到 IP）打开必空，且失败路径无日志。预热在远程配置
- * 拉完之后（此时网络已验证可用）后台跑一次 ds_refresh：填充
- * st->subs[] + 写 TF 离线缓存；用户之后任意时刻进订阅页都有数据。 */
-static void *subs_warm_worker(void *arg)
+/* 开机请求纪律（用户 2026-11-16 拍板）：进主页只做 Wi-Fi 连接 + 远程
+ * 配置（主题/按键/设备配置/排布），**不做任何业务数据预热**——订阅
+ * 数据打开订阅页时才拉（quota_fetch_start），小智直连 OTA 打开小智
+ * App 时才发起（xz_probe_start，Stage 2 接入）。曾试过"联网后预热
+ * 订阅+写 TF 缓存"，因用户不希望开机有多余请求而移除。 */
+
+#ifdef ESP_PLATFORM
+/* 小智直连探测（ADR-014 Stage 1）：OTA 注册拿激活码；身份/端点持久化
+ * NVS。由小智 App 打开时调用（Stage 2 接入 UI：激活码上屏 + 轮询）。 */
+#include "xz_ota.h"
+
+static void *xz_probe_worker(void *arg)
 {
     (void)arg;
-    UILOG("subs warm: start");
-    ds_refresh();
-#ifdef ESP_PLATFORM
-    UILOG("subs warm: done (n=%d) stack_free=%u", ds_state()->sub_count,
-          (unsigned)uxTaskGetStackHighWaterMark(NULL));
-#else
-    UILOG("subs warm: done (n=%d)", ds_state()->sub_count);
-#endif
+    xz_ota_result_t r;
+    char err[96];
+    if (xz_ota_request(&r, err, sizeof(err)) == 0) {
+        UILOG("xz probe: bound=%d code=%s stack_free=%u", r.bound,
+              r.activation_code, (unsigned)uxTaskGetStackHighWaterMark(NULL));
+    } else {
+        UILOG("xz probe: fail %s", err);
+    }
     return NULL;
 }
 
-static void subs_warm_start(void)
+static void xz_probe_start(void);
+
+/* 启动失败（rc=12 ENOMEM）重试：内部 RAM 被并发 worker 挤满时错峰
+ * 10s 再试（一次性 timer，LVGL 线程安全）。 */
+static void xz_probe_retry_cb(lv_timer_t *t)
 {
-    /* 16KB 请求 + 12KB 回落（真机内部 RAM 碎片化时 16KB 会 ENOMEM） */
-    int rc = ui_worker_start(subs_warm_worker, NULL, 16 * 1024);
-    UILOG("subs warm: worker rc=%d", rc);
+    lv_timer_delete(t);
+    xz_probe_start();
 }
+
+static void xz_probe_start(void)
+{
+    static int tries;
+    int rc = ui_worker_start(xz_probe_worker, NULL, 16 * 1024);
+    UILOG("xz probe: worker rc=%d (try %d)", rc, tries + 1);
+    if (rc != 0 && ++tries < 6) {
+        lv_timer_t *t = lv_timer_create(xz_probe_retry_cb, 10000, NULL);
+        if (t) lv_timer_set_repeat_count(t, 1);
+    }
+}
+#else
+static void xz_probe_start(void)
+{
+}
+#endif
 
 void ui_remote_config_prefetch(void)
 {
@@ -102,8 +128,7 @@ void ui_remote_config_prefetch(void)
     s_rcfg.have_layout =
         ds_launcher_fetch(s_rcfg.layout, sizeof(s_rcfg.layout), &s_rcfg.lay_n) == 0 &&
         s_rcfg.lay_n > 0;
-    /* 网络刚被上面几个请求验证过：顺手预热订阅（写 TF 缓存，失败有日志） */
-    subs_warm_start();
+    /* 开机请求纪律：到此为止——业务数据（订阅/小智）打开对应 App 才拉 */
 #else
     s_rcfg.have_layout = false; /* 模拟器 ui_init 已就地应用排布 */
 #endif

@@ -737,7 +737,10 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
             ESP_LOGW(TAG, "wifi started, 未配网（设置→网络与连接→Wi-Fi 设置）");
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (wifi_prov_busy()) return; /* 配网试连期间避让，由 wifi_prov 驱动 */
+        /* 配网试连期间避让（wifi_prov 驱动）；Wi-Fi 面板打开期间暂停
+         * 自动重连——否则重连循环每 1.5s 抢驱动，扫描被吞成 0 结果
+         *（2026-11-16 真机："扫描不到网络"根因） */
+        if (wifi_prov_busy() || wifi_prov_manual()) return;
         ESP_LOGW(TAG, "wifi disconnected, retry");
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
@@ -852,7 +855,10 @@ static void net_stack_init(void)
     done = true;
 }
 
-/* 多网络磋商任务：阻塞扫描 + 试连，独立 6KB 栈（http 无关） */
+/* 多网络磋商任务：阻塞扫描 + 试连 + 成功后的保存/TF 备份。
+ * 栈 8KB：原 6KB 在 connect→save→备份链上溢出重启（2026-11-16 实证），
+ * 备份大缓冲已移堆后 8KB 足够；12KB 在开机期反而建不起来（free 12.9KB）。 */
+#define PROV_AUTO_STACK 8192
 static void prov_autoconnect_task(void *arg)
 {
     (void)arg;
@@ -861,6 +867,8 @@ static void prov_autoconnect_task(void *arg)
         ESP_LOGI(TAG, "auto network switch: connected to saved network");
     } else if (rc < 0) {
         ESP_LOGW(TAG, "auto network switch: scan failed");
+    } else {
+        ESP_LOGW(TAG, "auto network switch: no saved network in range");
     }
     vTaskDelete(NULL);
 }
@@ -870,6 +878,11 @@ static void wifi_start(void)
     net_stack_init();
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
+    /* 驱动配置只存 RAM（我们自己管 NVS 凭据，每次开机显式 apply）：
+     * 默认 FLASH 存储会让每次 set_config/重连都翻写 NVS，把 24KB 分区
+     * 磨成 164 条垃圾后所有写入静默失败——凭据保存不上（2026-11-16
+     * 真机：连上后重启又回旧网）。 */
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -906,8 +919,15 @@ static void wifi_start(void)
 
     /* 多网络自动连接（家庭/公司多环境）：已保存 ≥2 个网络时，开机
      * 3s 内没连上当前网络就在列表里找一个在场的切过去 */
-    if (wifi_prov_has_multi()) {
-        xTaskCreate(prov_autoconnect_task, "prov_auto", 6144, NULL, 3, NULL);
+    bool multi = wifi_prov_has_multi();
+    ESP_LOGI(TAG, "multi-net: %s", multi ? "yes" : "no");
+    if (multi) {
+        TaskHandle_t th = NULL;
+        if (xTaskCreate(prov_autoconnect_task, "prov_auto", PROV_AUTO_STACK, NULL, 3,
+                        &th) != pdPASS) {
+            ESP_LOGW(TAG, "prov_auto task create FAILED (heap=%u)",
+                     (unsigned)esp_get_free_internal_heap_size());
+        }
     }
 }
 

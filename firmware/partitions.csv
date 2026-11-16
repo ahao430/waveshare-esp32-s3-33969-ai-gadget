@@ -1,10 +1,14 @@
 # AI Gadget 分区表（16MB Flash）
 # assets：伴宠帧动画资源包（gen_companion_bin.sh 生成、flash_companion.sh 烧写）
+# factory 11.94M（ADR-013）：原 4M+ota_0 4M+ota_1 4M 三槽——OTA 从未实现且
+# 不再做（设备明文无鉴权 HTTP），2026-11-16 合并为单大 app 槽给
+# 小智直连（TLS+WS+Opus）腾空间。
+# nvs 88K（2026-11-16）：原 24K 被配网/驱动翻写磨满后 set_str 静默失败
+# （凭据保存不上、重启回旧网）；扩容 + esp_wifi_set_storage(RAM) 减翻写。
+# nvs 起始偏移不变，存量数据原地保留。app 分区须 64K 对齐 → factory 0x20000。
 # Name,   Type, SubType, Offset,   Size,    Flags
-nvs,      data, nvs,     0x9000,   0x6000,
-phy_init, data, phy,     0xf000,   0x1000,
-factory,  app,  factory, 0x10000,  4M,
-ota_0,    app,  ota_0,   0x410000, 4M,
-ota_1,    app,  ota_1,   0x810000, 4M,
+nvs,      data, nvs,     0x9000,   0x16000,
+phy_init, data, phy,     0x1F000,  0x1000,
+factory,  app,  factory, 0x20000,  0xBF0000,
 assets,   data, undefined, 0xC10000, 3584K,
-storage,  data, fat,     0xF90000, 448K,
+storage,  data, fat,     0xF90000,  448K,
