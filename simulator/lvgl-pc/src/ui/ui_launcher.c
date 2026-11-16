@@ -222,8 +222,15 @@ static void *g_custom_bg_buf;
 
 static bool custom_bg_canvas(lv_obj_t *parent)
 {
+#ifdef ESP_PLATFORM
+    /* 真机 DS_CUSTOM_BG_PATH 是绝对路径（/sdcard/...），A: 是模拟器
+     * LV_FS 盘符——硬拼会得到 "A:/sdcard/..." 这种不存在的路径 */
+    const char *bg_uri = CUSTOM_BG_PATH;
+#else
+    const char *bg_uri = "A:" CUSTOM_BG_PATH;
+#endif
     lv_image_decoder_dsc_t dsc;
-    if (lv_image_decoder_open(&dsc, "A:" CUSTOM_BG_PATH, NULL) != LV_RESULT_OK) {
+    if (lv_image_decoder_open(&dsc, bg_uri, NULL) != LV_RESULT_OK) {
         return false;
     }
     const lv_draw_buf_t *db = dsc.decoded;
