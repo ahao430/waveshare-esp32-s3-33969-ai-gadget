@@ -25,9 +25,17 @@ typedef struct {
     bool enterprise; /* true=企业认证（EAP），ESP32 默认不支持，UI 应标注 */
 } wifi_prov_ap_t;
 
-/* NVS Wi-Fi 凭据：返回 false = 从未配过（ssid[0]='\0'） */
+/* NVS Wi-Fi 凭据（"当前"网络，最近一次成功/配置的）：返回 false=从未配过。
+ * save 同时把网络 upsert 进多网络列表（最多 6 个）。 */
 bool wifi_prov_load(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap);
 void wifi_prov_save(const char *ssid, const char *pass);
+
+/* 多网络自动连接（家庭/公司多环境）：列表 ≥2 个才需要开机磋商。 */
+bool wifi_prov_has_multi(void);
+/* 开机磋商（独立任务调用）：3s 内没连上当前网络 → 扫描 → 按信号从
+ * 已保存列表里挑在场的网络试连（成功即切换并记为当前）。
+ * 返回 1=切换成功 / 0=无需切换或没找到 / -1=扫描失败。 */
+int wifi_prov_autoconnect_others(void);
 
 /* Bridge 地址（"http://host:port"）：返回 false = 未配置（调用方用
  * 编译期 BRIDGE_HOST 兜底）。存了就完全替代宏。 */

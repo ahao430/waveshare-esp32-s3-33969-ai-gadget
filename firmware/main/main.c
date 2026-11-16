@@ -710,6 +710,19 @@ static void net_stack_init(void)
     done = true;
 }
 
+/* 多网络磋商任务：阻塞扫描 + 试连，独立 6KB 栈（http 无关） */
+static void prov_autoconnect_task(void *arg)
+{
+    (void)arg;
+    int rc = wifi_prov_autoconnect_others();
+    if (rc == 1) {
+        ESP_LOGI(TAG, "auto network switch: connected to saved network");
+    } else if (rc < 0) {
+        ESP_LOGW(TAG, "auto network switch: scan failed");
+    }
+    vTaskDelete(NULL);
+}
+
 static void wifi_start(void)
 {
     net_stack_init();
@@ -740,8 +753,19 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_wifi_start());
     if (ssid[0] != '\0') {
         ESP_LOGI(TAG, "wifi connecting to \"%s\" (creds=%s) ...", ssid, src);
+        if (strcmp(src, "wifi_secret.h") == 0) {
+            /* 宏兜底首次生效即落 NVS（并进入多网络列表）：宏从此只是
+             * 出厂值，后续以设备内配置为准 */
+            wifi_prov_save(WIFI_SSID, WIFI_PASS);
+        }
     } else {
         ESP_LOGW(TAG, "wifi 未配网，等待设置页配置（扫描可用）");
+    }
+
+    /* 多网络自动连接（家庭/公司多环境）：已保存 ≥2 个网络时，开机
+     * 3s 内没连上当前网络就在列表里找一个在场的切过去 */
+    if (wifi_prov_has_multi()) {
+        xTaskCreate(prov_autoconnect_task, "prov_auto", 6144, NULL, 3, NULL);
     }
 }
 

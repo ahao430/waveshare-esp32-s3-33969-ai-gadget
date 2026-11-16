@@ -63,10 +63,80 @@ bool wifi_prov_load(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap)
     return true;
 }
 
+/* ---------------- 多网络列表（自动切换） ----------------
+ * NVS 键 "wl"：每两条一组 "\n" 分隔（ssid/pass）。Wi-Fi 密码不含换行。 */
+#define WL_MAX 6
+#define WL_BUF 1024
+
+static int wl_load(char ssids[][33], char passes[][WIFI_PROV_PASS_MAX], int max)
+{
+    char buf[WL_BUF] = "";
+    if (!nvs_read_str("wl", buf, sizeof(buf))) return 0;
+    int n = 0;
+    char *p = buf;
+    while (*p && n < max) {
+        char *nl = strchr(p, '\n');
+        if (!nl) break;
+        *nl = '\0';
+        strlcpy(ssids[n], p, 33);
+        p = nl + 1;
+        nl = strchr(p, '\n');
+        if (!nl) break;
+        *nl = '\0';
+        strlcpy(passes[n], p, WIFI_PROV_PASS_MAX);
+        p = nl + 1;
+        n++;
+    }
+    return n;
+}
+
+static void wl_store(char ssids[][33], char passes[][WIFI_PROV_PASS_MAX], int n)
+{
+    char buf[WL_BUF];
+    size_t off = 0;
+    buf[0] = '\0';
+    for (int i = 0; i < n; i++) {
+        int w = snprintf(buf + off, sizeof(buf) - off, "%s\n%s\n",
+                         ssids[i], passes[i]);
+        if (w < 0 || (size_t)w >= sizeof(buf) - off) break;
+        off += (size_t)w;
+    }
+    nvs_write_str("wl", buf);
+}
+
 void wifi_prov_save(const char *ssid, const char *pass)
 {
-    nvs_write_str("ssid", ssid);
-    nvs_write_str("pass", pass);
+    if (!ssid || ssid[0] == '\0') return;
+    nvs_write_str("ssid", ssid); /* 当前网络（下次开机快速路径） */
+    nvs_write_str("pass", pass ? pass : "");
+
+    char ssids[WL_MAX][33];
+    char passes[WL_MAX][WIFI_PROV_PASS_MAX];
+    int n = wl_load(ssids, passes, WL_MAX);
+    int idx = -1;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(ssids[i], ssid) == 0) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) {
+        if (n < WL_MAX) {
+            idx = n++;
+        } else {
+            idx = WL_MAX - 1; /* 满了：替换最后一条（最近使用优先保留） */
+        }
+    }
+    strlcpy(ssids[idx], ssid, 33);
+    strlcpy(passes[idx], pass ? pass : "", WIFI_PROV_PASS_MAX);
+    wl_store(ssids, passes, n);
+}
+
+bool wifi_prov_has_multi(void)
+{
+    char ssids[WL_MAX][33];
+    char passes[WL_MAX][WIFI_PROV_PASS_MAX];
+    return wl_load(ssids, passes, WL_MAX) >= 2;
 }
 
 bool wifi_prov_bridge_get(char *out, size_t cap)
@@ -339,6 +409,32 @@ int wifi_prov_connect(const char *ssid, const char *pass)
     }
     s_busy = false;
     return rc;
+}
+
+int wifi_prov_autoconnect_others(void)
+{
+    /* 等 3s：同环境开机时当前网络很快连上，不必扫描打断 */
+    wifi_ap_record_t ap;
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) return 0;
+
+    char ssids[WL_MAX][33];
+    char passes[WL_MAX][WIFI_PROV_PASS_MAX];
+    int n = wl_load(ssids, passes, WL_MAX);
+    if (n < 2) return 0;
+
+    wifi_prov_ap_t aps[24];
+    int cnt = 0;
+    if (wifi_prov_scan(aps, 24, &cnt) != 0) return -1;
+    /* scan 已按信号降序：按序找已保存且在场的网络，逐个试连 */
+    for (int i = 0; i < cnt; i++) {
+        for (int j = 0; j < n; j++) {
+            if (strcmp(aps[i].ssid, ssids[j]) != 0) continue;
+            ESP_LOGI(TAG, "auto switch to saved network \"%s\"", ssids[j]);
+            if (wifi_prov_connect(ssids[j], passes[j]) == 0) return 1;
+        }
+    }
+    return 0;
 }
 
 bool wifi_prov_busy(void) { return s_busy; }
