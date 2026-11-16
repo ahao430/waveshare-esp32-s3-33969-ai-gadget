@@ -7,6 +7,7 @@
  * 约定子目录（首次使用前调 ds_files_ensure_dirs()，固件在挂卡后调用）：
  *   backup/    配网自动备份（provision.json，含 Wi-Fi 明文密码，勿外借 TF）
  *   cache/     订阅/天气离线缓存（断网回读）
+ *   data/      应用数据（番茄钟统计等；ADR-011 存储约定）
  *   appearance/ Web 自定义背景落盘（真机屏显需 LV_USE_PNG，暂只落盘）
  *   downloads/ 从 Bridge 下载的设备文件
  */

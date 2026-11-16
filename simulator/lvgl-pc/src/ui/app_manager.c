@@ -2,6 +2,26 @@
 
 #include <stddef.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#include "esp_log.h"
+#include "esp_system.h"
+
+/* 内存观测（ADR-011）：进/出 App 各打一条，实测各 App 的 RAM 成本。
+ * 指标：总空闲 / 历史最低 / PSRAM 空闲 / 内部 RAM 最大连续块。 */
+static void appmem_log(const char *evt, const app_def_t *def)
+{
+    ESP_LOGI("appmem", "%s %s heap=%u min=%u psram=%u largest_int=%u",
+             evt, (def && def->key) ? def->key : "?",
+             (unsigned)esp_get_free_heap_size(),
+             (unsigned)esp_get_minimum_free_heap_size(),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+}
+#else
+#define appmem_log(evt, def) ((void)0)
+#endif
+
 #define APP_MAX 16
 
 static app_def_t g_apps[APP_MAX];
@@ -61,6 +81,7 @@ void app_manager_open(int app_id)
 
     bool in_app = (g_current_screen != NULL);
     exit_current_app_logic();
+    appmem_log("open-before", def);
 
     lv_obj_t *scr = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(scr, lv_color_hex(0x0B1020), 0);
@@ -75,11 +96,13 @@ void app_manager_open(int app_id)
     lv_screen_load_anim(scr, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, in_app);
     g_current_screen = scr;
     g_current_def = def;
+    appmem_log("open-after", def);
 }
 
 void app_manager_back(void)
 {
     if (!g_current_screen) return;
+    appmem_log("back", g_current_def);
     exit_current_app_logic();
     g_current_screen = NULL;
     g_current_def = NULL;

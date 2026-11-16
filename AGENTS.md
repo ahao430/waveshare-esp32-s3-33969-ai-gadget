@@ -125,9 +125,11 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
   软键盘输密码（存 NVS，NVS 优先于 `wifi_secret.h` 编译兜底）、热改
   Bridge 地址（`ds_bridge_rebind` 立即生效）。`wifi_secret.h` 只在
   NVS 从未配置过时生效（启动日志 `creds=` 可辨认来源）。
-- **TF 卡（ADR-010）**：`/sdcard` FATFS 挂载后用于配网备份/离线缓存/
-  文件管理；未插卡全部功能静默降级。备份含 Wi-Fi 明文密码（勿外借）。
-  上传/下载单文件 ≤2MB（1-bit SDMMC 吞吐未实测，见 HARDWARE §2.5）。
+- **TF 卡（ADR-010/011）**：`/sdcard` FATFS 挂载后用于配网备份/离线缓存/
+  文件管理；目录契约见 `sd_paths.h`（backup/cache/data/appearance/
+  downloads，统一经 `sd_root/sd_resolve` 访问）。未插卡全部功能静默降级。
+  备份含 Wi-Fi 明文密码（勿外借）。上传/下载单文件 ≤2MB（1-bit SDMMC
+  吞吐未实测，见 HARDWARE §2.5）。
 - 设备只连 Bridge（默认 `http://<主机>:8081`），不连 Web。Bridge 可
   部署在任意常驻主机（`-webdir` 托管 Web 后台，部署链见
   `docs/DEPLOY.md`）；开发期在 Mac 上跑则 Mac 睡眠/关机对话失败。
@@ -149,6 +151,25 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
   0x11000 0xC000` 导出 NVS 凭据 → 刷回本项目固件 + 重烧伴宠 assets →
   Web Muse 页填凭据。官方固件会覆盖伴宠资源分区。
 - **USB 线**：只负责供电/串口日志；接了电池可拔线独立运行，没接电池拔线即断电。
+
+### 后台运行规则（ADR-011，新增 App 必须遵守）
+
+| App | 退出前台后 |
+|-----|-----------|
+| AstrBot / 小智 / Muse | on_exit 停 worker/音频，保存会话状态 |
+| 订阅 / 天气 | 停自动刷新 timer，保留 TF 缓存 |
+| 文件 | 关闭句柄，worker 结果按页面代际丢弃 |
+| 设置 | 保存配置，释放页面 |
+| 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer） |
+
+- App 级后台任务（如番茄钟）的 timer 不能随屏幕销毁；回调必须用
+  `g_root==NULL` 守卫跳过所有 LVGL 调用（屏幕已被 app_manager 删除）。
+- 新增 App 默认"退出即停"；要做后台任务先补本表 + ADR。
+- **内存观测**：固件 `app_manager` 在 open/back 打 `appmem` 日志
+  （heap/min/PSRAM free/内部 RAM 最大连续块），评估新 App 成本看实测
+  delta，不靠估算；模拟器无 ESP heap，不打印。
+- TF 应用数据写 `data/`（如 `data/pomodoro.json`），缓存写 `cache/`；
+  都要 worker 线程做 IO（踩坑 #11），统计类文件用 temp+rename 原子替换。
 
 ### LVGL 版本差异（移植期主要摩擦）
 - 模拟器 LVGL 9.2.2 / 固件更新：`lv_obj_add_flag/clear_flag` 在固件是
