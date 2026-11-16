@@ -73,10 +73,27 @@ void ui_fmt_hhmm(long unix_ts, char *buf, int buflen)
     strftime(buf, (size_t)buflen, "%H:%M", &tmv);
 }
 
+void ui_font_cn24_anchor(void); /* 文件尾定义：24px 字库引用链锚 */
+
 void ui_fmt_md_hhmm(long unix_ts, char *buf, int buflen)
 {
+    ui_font_cn24_anchor(); /* 字库引用链锚（见文件尾注释） */
     time_t t = (time_t)unix_ts;
     struct tm tmv;
     localtime_r(&t, &tmv);
     strftime(buf, (size_t)buflen, "%m-%d %H:%M", &tmv);
+}
+
+/* ---- 24px 全字库锚点（2026-11-17）----
+ * lv_font_cn_24 是 GB2312-L1 全字库（bpp4，~660KB），已编入 CMake 但
+ * 尚无 UI 使用点——无引用会被 --gc-sections 从 binary 剔除，const
+ * 锚点/used/retain 都防不住链接器 GC。用「必然被调用的函数里对
+ * volatile 变量赋值」建立真实引用链（赋值副作用不被优化）。
+ * 第一个 UI 使用点落地后整段可删。 */
+extern const lv_font_t lv_font_cn_24;
+static const void * volatile s_font24_keep; /* volatile 修饰指针本身（const void* 的 volatile 语义陷阱） */
+
+void ui_font_cn24_anchor(void)
+{
+    s_font24_keep = &lv_font_cn_24;
 }

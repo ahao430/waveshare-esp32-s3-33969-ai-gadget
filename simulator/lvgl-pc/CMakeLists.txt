@@ -65,6 +65,7 @@ add_executable(gadget_sim
   src/ui/fonts/font_cn_14.c
   src/ui/fonts/font_cn_16.c
   src/ui/fonts/font_cn_20.c
+  src/ui/fonts/font_cn_24.c
   src/ui/fonts/font_digits_84.c
   src/ui/fonts/font_pomo_20.c
 )

@@ -19,7 +19,7 @@ cd "$(dirname "$0")/.."
 FONT_TTF="${FONT_TTF:-/tmp/cnfont/NotoSansSC.ttf}"
 FA_WOFF="simulator/lvgl-pc/build/_deps/lvgl-src/scripts/built_in_font/FontAwesome5-Solid+Brands+Regular.woff"
 OUT_DIR="${OUT_DIR:-simulator/lvgl-pc/src/ui/fonts}"
-SIZES="12 14 16 20"
+SIZES="12 14 16 20 24"
 
 if [ ! -f "$FONT_TTF" ]; then
   echo "== 下载 Noto Sans SC（google/fonts，OFL）"
@@ -91,6 +91,9 @@ echo "   CJK/全角 ${#SYMBOLS} 个 · symbol ${#FA_SYMBOLS} 个"
 mkdir -p "$OUT_DIR"
 for sz in $SIZES; do
   echo "== 生成 ${sz}px"
+  # npx 不锁版本：lv_font_conv 新版会重写全部 .c（生成器格式漂移，几万行
+  # diff、渲染行为未知）——重跑后必须 git diff fonts/ 逐个比对，只保留
+  # 真正新增的字号，旧字号一律 checkout 恢复（2026-11-17 踩坑实证）。
   npx --yes lv_font_conv \
     --font "$FONT_TTF" \
     --range "0x20-0x7F" \
@@ -120,7 +123,7 @@ if [ "${DYN:-0}" != "1" ]; then
   python3 - "$OUT_DIR" <<'PYEOF2'
 import sys, pathlib, re
 out = pathlib.Path(sys.argv[1])
-for size in ("16", "20"):
+for size in ("16", "20", "24"):
     p = out / f"font_cn_{size}.c"
     if not p.exists():
         continue
@@ -160,7 +163,7 @@ echo "== 给 16/20px 挂 fallback"
 python3 - "$OUT_DIR" <<'PYEOF'
 import sys, pathlib
 out = pathlib.Path(sys.argv[1])
-for size in ("16", "20"):
+for size in ("16", "20", "24"):
     p = out / f"font_cn_{size}.c"
     s = p.read_text(encoding="utf-8")
     if "lv_font_cn_dyn_14" in s:
