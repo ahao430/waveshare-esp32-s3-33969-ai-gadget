@@ -886,6 +886,11 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    /* 关 modem 省电：默认 PM（type:1）下每个包最多等一个 beacon 周期，
+     * 局域网 RTT 实测 82~198ms（ping 设备 139ms 均值），probe/语音/
+     * 远程配置全被拖慢——曾经的"remote cfg 偶发卡顿疑 DNS"实为它。
+     * 设备常供电，省电是纯负资产；WIFI_PS_NONE 后 RTT 应 ~2ms。 */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     /* 凭据优先级：NVS（配网页保存，ADR-009）→ wifi_secret.h 编译兜底 */
     char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
