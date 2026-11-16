@@ -25,6 +25,11 @@ static const char *TAG = "axp2101";
 
 static i2c_master_bus_handle_t g_bus;
 static bool g_present;
+/* 常驻设备句柄：此前每次读写都 add/rm device——传输超时（等待 -1）后
+ * 立即 rm 会报 "Wrong I2C status, cannot delete device" 且句柄泄漏
+ * （PTT 期间与 codec 抢总线时必现，2026-11-17 串口日志实证），长期
+ * 运行累积。init 时挂一次复用；传输出错后 rm 重挂自愈。 */
+static i2c_master_dev_handle_t g_dev;
 
 esp_err_t battery_init(void *i2c_bus)
 {
@@ -33,24 +38,50 @@ esp_err_t battery_init(void *i2c_bus)
 
     esp_err_t err = i2c_master_probe(g_bus, AXP2101_I2C_ADDR, 50);
     g_present = (err == ESP_OK);
+    if (g_present) {
+        i2c_device_config_t dev = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = AXP2101_I2C_ADDR,
+            .scl_speed_hz = 100000,
+        };
+        /* 挂失败不阻塞 init：read_regs/write_reg 的 g_dev==NULL 分支兜底 */
+        (void)i2c_master_bus_add_device(g_bus, &dev, &g_dev);
+    }
     ESP_LOGI(TAG, "AXP2101 @0x%02X probe: %s", AXP2101_I2C_ADDR,
              g_present ? "ACK" : esp_err_to_name(err));
     return g_present ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
-static esp_err_t read_regs(uint8_t reg, uint8_t *val, size_t len)
+/* 传输出错后句柄状态不可靠：rm 重挂，避免永久泄漏 */
+static void dev_recover(void)
 {
+    if (g_dev) {
+        (void)i2c_master_bus_rm_device(g_dev);
+        g_dev = NULL;
+    }
     i2c_device_config_t dev = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = AXP2101_I2C_ADDR, /* IDF v6：dev_addr → device_address */
+        .device_address = AXP2101_I2C_ADDR,
         .scl_speed_hz = 100000,
     };
-    i2c_master_dev_handle_t handle;
-    esp_err_t err = i2c_master_bus_add_device(g_bus, &dev, &handle);
-    if (err != ESP_OK) return err;
+    (void)i2c_master_bus_add_device(g_bus, &dev, &g_dev);
+}
 
-    err = i2c_master_transmit_receive(handle, &reg, 1, val, len, -1);
-    i2c_master_bus_rm_device(handle);
+static esp_err_t read_regs(uint8_t reg, uint8_t *val, size_t len)
+{
+    if (!g_dev) { /* init 时 probe 失败的兜底：按需挂（旧语义） */
+        i2c_device_config_t dev = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = AXP2101_I2C_ADDR,
+            .scl_speed_hz = 100000,
+        };
+        if (i2c_master_bus_add_device(g_bus, &dev, &g_dev) != ESP_OK) {
+            g_dev = NULL;
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+    esp_err_t err = i2c_master_transmit_receive(g_dev, &reg, 1, val, len, -1);
+    if (err != ESP_OK) dev_recover();
     return err;
 }
 
@@ -102,18 +133,20 @@ esp_err_t battery_get_status(battery_status_t *status)
 
 static esp_err_t write_reg(uint8_t reg, uint8_t val)
 {
-    i2c_device_config_t dev = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = AXP2101_I2C_ADDR,
-        .scl_speed_hz = 100000,
-    };
-    i2c_master_dev_handle_t handle;
-    esp_err_t err = i2c_master_bus_add_device(g_bus, &dev, &handle);
-    if (err != ESP_OK) return err;
-
+    if (!g_dev) { /* 同 read_regs 的按需挂兜底 */
+        i2c_device_config_t dev = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = AXP2101_I2C_ADDR,
+            .scl_speed_hz = 100000,
+        };
+        if (i2c_master_bus_add_device(g_bus, &dev, &g_dev) != ESP_OK) {
+            g_dev = NULL;
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
     uint8_t buf[2] = { reg, val };
-    err = i2c_master_transmit(handle, buf, sizeof(buf), -1);
-    i2c_master_bus_rm_device(handle);
+    esp_err_t err = i2c_master_transmit(g_dev, buf, sizeof(buf), -1);
+    if (err != ESP_OK) dev_recover();
     return err;
 }
 

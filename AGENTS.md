@@ -279,7 +279,10 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 2. Bridge：`go test ./...`（api/storage 层有契约测试）
 3. 模拟器像素验证：`GADGET_SNAP=/path.ppm` 截帧 + PPM 直读/差分脚本
    （页点位置、颜色值、标签 span 都可断言）；headless 钩子
-   `DEMO_APP=<key>` / `DEMO_PAGE=<n>` / `DEMO_KEYS="pw@2000,key3long@6000"`
+   `GADGET_DEMO_APP=<枚举号>`（ui.h enum 序号：0=智谱 1=对话 2=Muse
+   3=小智 5=文件 6=设置 7=天气 8=番茄钟） / `GADGET_DEMO_KEYS="..."` /
+   `GADGET_DEMO_VOICE=1`（2026-11-17 勘误：AGENTS 曾写 DEMO_APP=<key>
+   字符串，代码实读 GADGET_DEMO_APP 数字枚举）
 4. 真机：idf.py monitor 收日志 + 用户目视验收（屏幕/声音/触摸是主观项，别替用户确认）
 
 ## 文档同步纪律

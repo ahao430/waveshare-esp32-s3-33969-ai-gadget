@@ -34,6 +34,7 @@
 #include "ui_keys.h"
 #include "ui_statusbar.h"
 #include "ui_theme.h"
+#include "icons/icon_embed.h" /* 真机头像：预解码嵌入图（ui_icon_find） */
 
 /* PTT 事件留痕：按下/抬起/丢失任何一个没到，表现都是"按住说话没反应"
  *（无 HTTP 请求、无报错），日志是唯一判据。 */
@@ -934,7 +935,24 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         return;
     }
 
-    /* 顶栏：头像 + 标题 + 在线状态（定稿图对齐） */
+    /* 顶栏：头像 + 标题 + 在线状态（定稿图对齐）。真机用预解码嵌入图
+     * （ui_icon_find；A: 盘符是模拟器 LV_FS 专属，真机走这分支会静默
+     * "File open failed: 3"，头像从未显示过——2026-11-17 实证修复）。 */
+#ifdef ESP_PLATFORM
+    static const char *avatar_keys[UI_APP_COUNT] = {
+        [UI_APP_CHAT] = "chat", [UI_APP_MUSE] = "muse", [UI_APP_XIAOZHI] = "xiaozhi",
+    };
+    const lv_image_dsc_t *adsc =
+        avatar_keys[app_id] ? ui_icon_find(avatar_keys[app_id]) : NULL;
+    if (adsc) {
+        lv_obj_t *avatar = lv_image_create(scr);
+        lv_image_set_src(avatar, adsc);
+        lv_obj_set_size(avatar, 44, 44);
+        lv_obj_align(avatar, LV_ALIGN_TOP_LEFT, 64, 0);
+        lv_obj_set_style_radius(avatar, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_clip_corner(avatar, true, 0);
+    }
+#else
     static const char *avatar_paths[UI_APP_COUNT] = {
         [UI_APP_CHAT]    = "A:simulator/lvgl-pc/assets/avatars/chat.png",
         [UI_APP_MUSE]    = "A:simulator/lvgl-pc/assets/avatars/muse.png",
@@ -948,6 +966,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         lv_obj_set_style_radius(avatar, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_clip_corner(avatar, true, 0);
     }
+#endif
 
     lv_obj_t *online_dot = lv_obj_create(scr);
     lv_obj_set_size(online_dot, 8, 8);
