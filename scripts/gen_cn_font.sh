@@ -179,21 +179,21 @@ for size in ("16", "20"):
     print(f"  patched font_cn_{size}.c")
 PYEOF
 
-# ---- 番茄钟大号倒计时数字（Montserrat 96px，仅数字+冒号）----
-# 独立于中文子集：只含 " " 与 0-9/:，压缩后体积很小；96px 在 480 圆屏上
-# 是主视觉（LVGL 内置最大 48px，故单独生成）。
+# ---- 番茄钟大号倒计时数字（Montserrat 84px，仅数字+冒号）----
+# 独立于中文子集：只含 " " 与 0-9/:，压缩后体积很小；84px 在 480 圆屏的
+# 340px 圆环内不压线（LVGL 内置最大 48px，故单独生成）。
 MONT_TTF="simulator/lvgl-pc/build/_deps/lvgl-src/scripts/built_in_font/Montserrat-Medium.ttf"
 if [ -f "$MONT_TTF" ]; then
-  echo "== 生成 96px 倒计时数字字体"
+  echo "== 生成 84px 倒计时数字字体"
   npx --yes lv_font_conv \
     --font "$MONT_TTF" \
     --range "0x20,0x30-0x3A" \
-    --size 96 --bpp 4 --no-kerning \
+    --size 84 --bpp 4 --no-kerning \
     --format lvgl --lv-include "lvgl.h" \
-    --lv-font-name "font_digits_96" \
-    -o "$OUT_DIR/font_digits_96.c"
+    --lv-font-name "font_digits_84" \
+    -o "$OUT_DIR/font_digits_84.c"
 else
   echo "SKIP: 未找到 Montserrat（$MONT_TTF），番茄钟数字字体不重新生成" >&2
 fi
 
-echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c + font_cn_dyn_14.c + font_digits_96.c（请重编模拟器）"
+echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c + font_cn_dyn_14.c + font_digits_84.c（请重编模拟器）"

@@ -14,8 +14,14 @@ LV_FONT_DECLARE(lv_font_cn_14);
 LV_FONT_DECLARE(lv_font_cn_16);
 LV_FONT_DECLARE(lv_font_cn_20);
 
-/* 番茄钟大号倒计时（96px，仅 ASCII 空格+数字+冒号；Montserrat Medium，
- * 用 lv_font_conv 单独生成，见 scripts/gen_cn_font.sh 末尾） */
-LV_FONT_DECLARE(font_digits_96);
+/* 番茄钟大号倒计时（84px，仅 ASCII 空格+数字+冒号；Montserrat Medium，
+ * 用 lv_font_conv 单独生成，见 scripts/gen_cn_font.sh 末尾。84px 保证
+ * 四位数字 + 冒号在 340px 圆环内不压线） */
+LV_FONT_DECLARE(font_digits_84);
+
+/* 番茄钟界面加粗字体（Noto Sans SC wght=700，只含该页字符串；见
+ * scripts/gen_pomo_font.sh。用户反馈"文字要大、亮、粗"） */
+LV_FONT_DECLARE(font_pomo_20);
+LV_FONT_DECLARE(font_pomo_16);
 
 #endif /* UI_FONT_CN_H */

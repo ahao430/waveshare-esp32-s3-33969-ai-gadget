@@ -47,14 +47,16 @@ enum { PH_FOCUS = 0, PH_SHORT = 1, PH_LONG = 2 };
 static int g_phase = PH_FOCUS;
 static int g_remaining = FOCUS_SEC; /* 剩余秒数（页面退出/重建不丢） */
 static int g_streak;                /* 本轮已完成专注数（0..CYCLE_LEN-1） */
+static int g_total_override;        /* 回归钩子：短时长演示覆盖阶段总长 */
 static bool g_running;
 static uint32_t g_deadline;         /* 运行中：剩余归零的 lv_tick */
 static int g_shown_sec = -1;
 
 static lv_timer_t *g_timer; /* 后台常驻（不随页面销毁，ADR-011） */
-static lv_obj_t *g_root, *g_phase_lbl, *g_time_lbl, *g_done_lbl, *g_hint_lbl;
-static lv_obj_t *g_progress, *g_btn_start, *g_lbl_start;
-static bool g_demo_used; /* 回归钩子只在首次进入时生效 */
+static lv_obj_t *g_root, *g_phase_lbl, *g_stats_lbl, *g_arc;
+static lv_obj_t *g_btn_play, *g_lbl_play;
+static lv_obj_t *g_digits[4]; /* 固定宽度逐位渲染：比例字体倒计时不抖 */
+static bool g_demo_used;      /* 回归钩子只在首次进入时生效 */
 
 /* ---------------- 统计（TF: data/pomodoro.json） ---------------- */
 typedef struct {
@@ -69,6 +71,7 @@ static pthread_mutex_t g_stats_mu = PTHREAD_MUTEX_INITIALIZER;
 
 static int phase_total(void)
 {
+    if (g_total_override > 0) return g_total_override;
     if (g_phase == PH_SHORT) return SHORT_SEC;
     if (g_phase == PH_LONG) return LONG_SEC;
     return FOCUS_SEC;
@@ -93,13 +96,6 @@ static const char *phase_title(void)
     if (g_phase == PH_SHORT) return "短休息 · 5 分钟";
     if (g_phase == PH_LONG) return "长休息 · 15 分钟";
     return "专注时间 · 25 分钟";
-}
-
-static const char *phase_hint(void)
-{
-    if (g_phase == PH_SHORT) return "起身活动一下，喝口水";
-    if (g_phase == PH_LONG) return "完成 4 轮专注，好好放松一下";
-    return "保持专注，暂时离开消息";
 }
 
 static void today_str(char out[11])
@@ -297,6 +293,15 @@ static int remaining_now(void)
     return left > 0 ? (left + 999) / 1000 : 0;
 }
 
+static void set_digit(int i, char c)
+{
+    char s[2] = { c, '\0' };
+    if (!g_digits[i]) return;
+    if (strcmp(lv_label_get_text(g_digits[i]), s) != 0) {
+        lv_label_set_text(g_digits[i], s);
+    }
+}
+
 static void update_ui(bool phase_changed)
 {
     /* 后台计时：页面已退出，只记录渲染进度，不碰任何 LVGL 对象 */
@@ -305,29 +310,32 @@ static void update_ui(bool phase_changed)
         return;
     }
 
-    char buf[64];
     if (phase_changed) {
         lv_obj_set_style_bg_color(g_root, lv_color_hex(phase_bg()), 0);
-        lv_obj_set_style_bg_color(g_btn_start, lv_color_hex(0xFFF7F2), 0);
-        lv_obj_set_style_text_color(g_lbl_start, lv_color_hex(phase_ink()), 0);
+        lv_obj_set_style_text_color(g_lbl_play, lv_color_hex(phase_ink()), 0);
         lv_label_set_text(g_phase_lbl, phase_title());
-        lv_label_set_text(g_hint_lbl, phase_hint());
-        lv_bar_set_range(g_progress, 0, phase_total());
     }
 
-    snprintf(buf, sizeof(buf), "%02d:%02d", g_remaining / 60, g_remaining % 60);
-    lv_label_set_text(g_time_lbl, buf);
-    lv_bar_set_value(g_progress, g_remaining, LV_ANIM_OFF);
+    /* 逐位固定宽度渲染：Montserrat 数字是比例字宽，整串刷新会左右抖动 */
+    int mm = g_remaining / 60;
+    int ss = g_remaining % 60;
+    set_digit(0, (char)('0' + mm / 10));
+    set_digit(1, (char)('0' + mm % 10));
+    set_digit(2, (char)('0' + ss / 10));
+    set_digit(3, (char)('0' + ss % 10));
 
-    int today, total;
-    stats_read(&today, &total);
+    /* 环形进度 = 剩余比例（满圈开始，随倒计时收短） */
+    int total = phase_total();
+    lv_arc_set_angles(g_arc, 0, total > 0 ? 360 * g_remaining / total : 0);
+
+    int today, total_n;
+    stats_read(&today, &total_n);
+    char buf[64];
     snprintf(buf, sizeof(buf), "本轮 %d/%d · 今日 %d · 累计 %d",
-             g_streak, CYCLE_LEN, today, total);
-    lv_label_set_text(g_done_lbl, buf);
+             g_streak, CYCLE_LEN, today, total_n);
+    lv_label_set_text(g_stats_lbl, buf);
 
-    lv_label_set_text(g_lbl_start,
-                      g_running ? "暂停"
-                                : (g_remaining == phase_total() ? "开始" : "继续"));
+    lv_label_set_text(g_lbl_play, g_running ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
     g_shown_sec = g_remaining;
 }
 
@@ -401,14 +409,14 @@ static void skip_cb(lv_event_t *e)
 static lv_obj_t *ghost_btn(lv_obj_t *scr, const char *txt, lv_coord_t x)
 {
     lv_obj_t *b = lv_button_create(scr);
-    lv_obj_set_size(b, 110, 42);
-    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, x, -18);
+    lv_obj_set_size(b, 80, 40);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, x, -16);
     lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(b, 1, 0);
     lv_obj_set_style_border_color(b, lv_color_white(), 0);
-    lv_obj_set_style_border_opa(b, LV_OPA_40, 0);
-    lv_obj_set_style_radius(b, 21, 0);
-    ui_label(b, txt, &lv_font_cn_14, UI_TEXT);
+    lv_obj_set_style_border_opa(b, LV_OPA_50, 0);
+    lv_obj_set_style_radius(b, 20, 0);
+    ui_label(b, txt, &font_pomo_16, UI_TEXT);
     return b;
 }
 
@@ -429,58 +437,77 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
 {
     (void)app_id;
     g_root = scr;
-    g_phase_lbl = g_time_lbl = g_done_lbl = g_hint_lbl = NULL;
-    g_progress = g_btn_start = g_lbl_start = NULL;
+    g_phase_lbl = g_stats_lbl = g_arc = NULL;
+    g_btn_play = g_lbl_play = NULL;
+    memset(g_digits, 0, sizeof(g_digits));
 
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_set_style_bg_color(scr, lv_color_hex(phase_bg()), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     ui_gesture_back_add(scr);
 
-    g_phase_lbl = ui_label(scr, "", &lv_font_cn_16, UI_TEXT);
-    lv_obj_set_style_text_opa(g_phase_lbl, LV_OPA_80, 0);
-    lv_obj_align(g_phase_lbl, LV_ALIGN_TOP_MID, 0, 66);
+    /* 大圆环进度：从 12 点方向顺时针，满圈开始随剩余时间收短 */
+    g_arc = lv_arc_create(scr);
+    lv_obj_set_size(g_arc, 340, 340);
+    lv_obj_center(g_arc);
+    lv_obj_clear_flag(g_arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(g_arc, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(g_arc, 0, 0);
+    lv_obj_set_style_bg_opa(g_arc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_border_width(g_arc, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(g_arc, 16, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(g_arc, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(g_arc, LV_OPA_20, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(g_arc, 16, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(g_arc, lv_color_white(), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(g_arc, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(g_arc, true, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(g_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_set_style_pad_all(g_arc, 0, LV_PART_KNOB);
+    lv_arc_set_rotation(g_arc, 270);
+    lv_arc_set_bg_angles(g_arc, 0, 360);
+    lv_arc_set_angles(g_arc, 0, 360);
 
-    /* 大屏倒计时：96px 数字专用字体（仅 0-9 与冒号，体积很小） */
-    g_time_lbl = ui_label(scr, "25:00", &font_digits_96, UI_TEXT);
-    lv_obj_set_style_text_letter_space(g_time_lbl, 2, 0);
-    lv_obj_align(g_time_lbl, LV_ALIGN_TOP_MID, 0, 112);
+    /* 环内上方：阶段（加粗 20px，纯白） */
+    g_phase_lbl = ui_label(scr, phase_title(), &font_pomo_20, UI_TEXT);
+    lv_obj_align(g_phase_lbl, LV_ALIGN_TOP_MID, 0, 94);
 
-    g_progress = lv_bar_create(scr);
-    lv_obj_set_size(g_progress, 300, 6);
-    lv_obj_align(g_progress, LV_ALIGN_TOP_MID, 0, 240);
-    lv_obj_set_style_radius(g_progress, 3, 0);
-    lv_obj_set_style_bg_color(g_progress, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(g_progress, LV_OPA_20, 0);
-    lv_obj_set_style_border_width(g_progress, 0, 0);
-    lv_bar_set_range(g_progress, 0, phase_total());
-    lv_obj_set_style_bg_color(g_progress, lv_color_white(), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(g_progress, LV_OPA_90, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(g_progress, 3, LV_PART_INDICATOR);
+    /* 逐位固定宽度倒计时（每格 60px，冒号 28px）：Montserrat 数字是
+     * 比例字宽，整串刷新会左右抖；分格后位置绝对稳定。84px 字号保证
+     * 数字不压到 340px 圆环（96px 实测压线）。 */
+    static const lv_coord_t DXS[4] = { -104, -44, 44, 104 };
+    for (int i = 0; i < 4; i++) {
+        g_digits[i] = ui_label(scr, "0", &font_digits_84, UI_TEXT);
+        lv_obj_set_width(g_digits[i], 60);
+        lv_obj_set_style_text_align(g_digits[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 150);
+    }
+    lv_obj_t *colon = ui_label(scr, ":", &font_digits_84, UI_TEXT);
+    lv_obj_set_width(colon, 28);
+    lv_obj_set_style_text_align(colon, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 150);
 
-    g_done_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT);
-    lv_obj_set_style_text_opa(g_done_lbl, LV_OPA_70, 0);
-    lv_obj_align(g_done_lbl, LV_ALIGN_TOP_MID, 0, 262);
+    /* 环内中部：统计（加粗 16px，纯白） */
+    g_stats_lbl = ui_label(scr, "", &font_pomo_16, UI_TEXT);
+    lv_obj_align(g_stats_lbl, LV_ALIGN_TOP_MID, 0, 220);
 
-    g_hint_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT);
-    lv_obj_set_style_text_opa(g_hint_lbl, LV_OPA_70, 0);
-    lv_obj_align(g_hint_lbl, LV_ALIGN_TOP_MID, 0, 292);
+    /* 环内下方：大号播放/暂停圆钮（白色实心，图标用阶段深色） */
+    g_btn_play = lv_button_create(scr);
+    lv_obj_set_size(g_btn_play, 120, 120);
+    lv_obj_align(g_btn_play, LV_ALIGN_CENTER, 0, 72);
+    lv_obj_set_style_radius(g_btn_play, 60, 0);
+    lv_obj_set_style_bg_color(g_btn_play, lv_color_hex(0xFFF7F2), 0);
+    lv_obj_set_style_border_width(g_btn_play, 0, 0);
+    g_lbl_play = ui_label(g_btn_play, LV_SYMBOL_PLAY, &lv_font_montserrat_48,
+                          lv_color_hex(phase_ink()));
+    lv_obj_center(g_lbl_play);
 
-    /* 主按钮：开始/暂停（白色实心，文字用阶段深色保证对比度） */
-    g_btn_start = lv_button_create(scr);
-    lv_obj_set_size(g_btn_start, 200, 56);
-    lv_obj_align(g_btn_start, LV_ALIGN_BOTTOM_MID, 0, -84);
-    lv_obj_set_style_radius(g_btn_start, 28, 0);
-    lv_obj_set_style_bg_color(g_btn_start, lv_color_hex(0xFFF7F2), 0);
-    lv_obj_set_style_border_width(g_btn_start, 0, 0);
-    g_lbl_start = ui_label(g_btn_start, "开始", &lv_font_cn_20, lv_color_hex(phase_ink()));
-    lv_obj_center(g_lbl_start);
-
-    lv_obj_t *b_reset = ghost_btn(scr, "重置", -62);
+    /* 环外底部：重置 / 跳过（圆屏安全区内，见布局注释） */
+    lv_obj_t *b_reset = ghost_btn(scr, "重置", -45);
     lv_obj_add_event_cb(b_reset, reset_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *b_skip = ghost_btn(scr, "跳过", 62);
+    lv_obj_t *b_skip = ghost_btn(scr, "跳过", 45);
     lv_obj_add_event_cb(b_skip, skip_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_add_event_cb(g_btn_start, start_pause_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(g_btn_play, start_pause_cb, LV_EVENT_CLICKED, NULL);
 
     /* 后台计时器只建一次（退出页面不销毁，ADR-011） */
     if (!g_timer) g_timer = lv_timer_create(tick_cb, TICK_MS, NULL);
@@ -511,7 +538,10 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
         }
         if (demo) {
             int s = atoi(demo);
-            if (s > 0 && s < 60) g_remaining = s;
+            if (s > 0 && s < 60) {
+                g_remaining = s;
+                g_total_override = s; /* 环形进度与阶段时长同步缩短 */
+            }
             g_deadline = lv_tick_get() + (uint32_t)g_remaining * 1000;
             g_running = true;
             update_ui(false);
@@ -533,7 +563,8 @@ void ui_pomodoro_on_exit(void)
 {
     /* 后台计时：不清计时器、不改运行状态；只断 UI 引用（在途异步回调
      * 靠 g_root==NULL 丢弃，不触碰已销毁控件）。统计 worker 同理。 */
-    g_root = g_phase_lbl = g_time_lbl = g_done_lbl = g_hint_lbl = NULL;
-    g_progress = g_btn_start = g_lbl_start = NULL;
+    g_root = g_phase_lbl = g_stats_lbl = g_arc = NULL;
+    g_btn_play = g_lbl_play = NULL;
+    memset(g_digits, 0, sizeof(g_digits));
     g_shown_sec = -1;
 }

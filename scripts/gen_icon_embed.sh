@@ -20,9 +20,13 @@ src_dirs = ["simulator/lvgl-pc/assets/icons",
 W = H = 108  # 与磁贴显示尺寸一致（1:1，运行时零缩放）
 
 names = []
+# 未使用的占位 App 图标不嵌入固件（省 ~23KB flash/张）：
+# music App 目前是符号磁贴（app_defs 里 avatar=false），等接入播放器
+# 并启用真实图标时把 "music" 从这里删掉即可。
+SKIP = {"music"}
 for d in src_dirs:
     for f in sorted(os.listdir(d)):
-        if f.endswith(".png"):
+        if f.endswith(".png") and f[:-4] not in SKIP:
             names.append((os.path.join(d, f), f[:-4]))
 
 with open(os.path.join(out_dir, "icon_embed.c"), "w") as c:
