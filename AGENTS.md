@@ -36,6 +36,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 
 ```bash
 scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cmake / firmware: idf.py build
+scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归（PASS 基线 8/8 唯一画面）
 ```
 
 全绿才提交。只改 docs 可以豁免。
@@ -98,8 +99,12 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
    当前**不压缩、无 L2 回退**（用户决策），app 分区 12M 余 68%（ADR-013
    重分区后），加功能不再需要裁字体/素材（分区表见 partitions.csv，
    OTA 双槽已砍）。
-8. 启动期约 50% 概率显示管线楔死仍是已知问题（HARDWARE §2.10），
-   由 TWDT 自动重启自愈；不要再用「加看门狗」重复治疗。
+8. ~~启动期 50% 概率显示管线楔死~~（2026-11-17 降级：**已消失，疑似
+   被坑 #11 顺带治好**）——坑 #11（LVGL 线程禁一切阻塞调用）落地后
+   连续 6+ 次开机零复发（原 50% 概率下概率仅 ~1.6%）；启动期楔死与
+   §2.10「公司网冻屏」同根因（启动期状态栏/倒计时首个 tick 即撞
+   ds_state() 惰性刷新 → Bridge 不可达时 lwip 阻塞）。TWDT 自愈机制
+   保留作兜底；若复发按 §2.10 的取证方法抓 lvgl 任务栈。
 9. **ES7210 采集任务必须常驻**（`audio_esp32.c`，别按轮启停）：SPEAKING
    期间无人读 mic → RX DMA 溢出后 `esp_codec_dev_read` 永远返回零数据
    （rc=0 无报错），表现为"下一轮起转写永远是同一句"。现在 capture

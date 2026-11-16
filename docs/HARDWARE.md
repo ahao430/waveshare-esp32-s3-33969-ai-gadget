@@ -414,3 +414,11 @@ RAM 分配同尺寸 bounce buffer**（`spicommon_dma_setup_priv_buffer`）。
 回归（设备自检 `GADGET_SELFTEST_VOICE`，默认关）：**连续 6 轮完整 PTT
 回合 LISTENING→THINKING→SPEAKING→IDLE 全通**，零 NO_MEM、零 panic，
 语音任务栈余 4748 字节。
+
+
+**2026-11-17 后记：启动期楔死消失（坑 #11 顺带治愈）**：坑 #11（LVGL
+线程禁一切阻塞调用）落地后，回滚 Bridge 版连续 6+ 次开机零楔死（直连
+实验期那些 rst:0xc 是 panic 自愈，非楔死）。启动期楔死即本节「公司网
+冻屏」家族的开机表现：状态栏/倒计时的首个 tick 在 Bridge 不可达窗口
+撞上 ds_state() 惰性刷新。TWDT 自愈保留为兜底。**再遇冻屏/楔死：先查
+LVGL 线程是否有新增的阻塞调用（踩坑 #11），再谈显示管线硬件问题。**
