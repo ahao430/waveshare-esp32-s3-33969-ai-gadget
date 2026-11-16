@@ -36,6 +36,7 @@
 #include "wifi_prov.h"
 #include "ui.h"
 #include "ui_keys.h"
+#include "app_manager.h" /* app_manager_current_id：Wi-Fi 省电自动档用 */
 #include "data_source.h"
 #include "voice_session.h"
 
@@ -873,6 +874,45 @@ static void prov_autoconnect_task(void *arg)
     vTaskDelete(NULL);
 }
 
+/* ---- Wi-Fi 省电自动档（2026-11-17 与用户对齐的策略表）----
+ * 通电（USB/充电）        → 永远全速（续航无所谓，响应优先）
+ * 电池 + 息屏             → 省电（收益主力：待机期 Wi-Fi 功耗降 ~85%）
+ * 电池 + 开机 60s 内      → 全速（连 Wi-Fi/拉配置/订阅首拉不受拖累）
+ * 电池 + 亮屏 + 低频 App  → 省电（订阅/天气/番茄钟：单包延迟无感）
+ * 电池 + 亮屏 + 其余（桌面/聊天/设置/文件）→ 全速（聊天多包流对省电的
+ *   每包唤醒延迟敏感，44KB 上传/音频下行会被拖成秒级；文件有 2MB 级
+ *   传输；桌面停留短）。
+ * 1s 粒度热切（esp_wifi_set_ps 不断连、无感知）；状态变化才调用。
+ * PMU 不可用时保守保持全速。 */
+static int s_wifi_ps_cur = -1; /* -1=未设；WIFI_PS_NONE / WIFI_PS_MIN_MODEM */
+static bool s_pm_ok;
+
+static void wifi_ps_update(void *arg)
+{
+    (void)arg;
+    bool fast = true;
+    if (s_pm_ok) { /* 无电源信息（PMU 不可用）时保守保持全速 */
+        battery_status_t st = power_manager_snapshot();
+        if (!st.usb_connected && !st.charging) { /* 电池供电 */
+            if (g_saver_on) {
+                fast = false; /* 息屏无条件省电 */
+            } else if (esp_timer_get_time() >= 60 * 1000000LL) {
+                int app = app_manager_current_id();
+                if (app == UI_APP_ZHIPU || app == UI_APP_WEATHER ||
+                    app == UI_APP_POMODORO) {
+                    fast = false;
+                }
+            }
+            /* 电池+亮屏 60s 内 / 其它 App → 全速（fast 保持 true） */
+        }
+    }
+    int want = fast ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM;
+    if (want != s_wifi_ps_cur) {
+        s_wifi_ps_cur = want;
+        if (esp_wifi_set_ps((wifi_ps_type_t)want) != ESP_OK) s_wifi_ps_cur = -1;
+    }
+}
+
 static void wifi_start(void)
 {
     net_stack_init();
@@ -886,11 +926,19 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_evt, NULL));
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    /* 关 modem 省电：默认 PM（type:1）下每个包最多等一个 beacon 周期，
-     * 局域网 RTT 实测 82~198ms（ping 设备 139ms 均值），probe/语音/
-     * 远程配置全被拖慢——曾经的"remote cfg 偶发卡顿疑 DNS"实为它。
-     * 设备常供电，省电是纯负资产；WIFI_PS_NONE 后 RTT 应 ~2ms。 */
+    /* Wi-Fi modem 省电自动档：默认 PM（type:1）下每包最多等一个 beacon
+     * 周期，局域网 RTT 实测 82~198ms（均值 139ms），probe 曾 5s 超时、
+     * "remote cfg 偶发卡顿疑 DNS" 的真凶即它。交互期全速（PS_NONE）
+     * 实测 RTT 6~18ms。开机先全速，之后按电源/场景 1s 粒度自动档
+     * （wifi_ps_update，策略表见其头注释）。 */
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    s_wifi_ps_cur = WIFI_PS_NONE;
+    const esp_timer_create_args_t ps_args = {
+        .callback = wifi_ps_update, .name = "wifi_ps",
+    };
+    esp_timer_handle_t ps_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&ps_args, &ps_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(ps_timer, 1000000));
 
     /* 凭据优先级：NVS（配网页保存，ADR-009）→ wifi_secret.h 编译兜底 */
     char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
@@ -941,6 +989,7 @@ void app_main(void)
     i2c_scan();
 
     esp_err_t pm_err = power_manager_init(bsp_i2c_get_handle());
+    s_pm_ok = (pm_err == ESP_OK);
     if (pm_err != ESP_OK) {
         ESP_LOGW(TAG, "power_manager unavailable: %s", esp_err_to_name(pm_err));
     } else {
