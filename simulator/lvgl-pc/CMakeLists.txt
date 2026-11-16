@@ -52,6 +52,7 @@ add_executable(gadget_sim
   src/ui/companion.c
   src/ui/ui_settings.c
   src/ui/ui_files.c
+  src/ui/ui_pomodoro.c
   src/ui/ui_wifi_panel.c
   src/ui/ui_statusbar.c
   src/ui/ui_gesture.c
@@ -62,6 +63,7 @@ add_executable(gadget_sim
   src/ui/fonts/font_cn_14.c
   src/ui/fonts/font_cn_16.c
   src/ui/fonts/font_cn_20.c
+  src/ui/fonts/font_digits_96.c
 )
 target_include_directories(gadget_sim PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}

@@ -14,4 +14,8 @@ LV_FONT_DECLARE(lv_font_cn_14);
 LV_FONT_DECLARE(lv_font_cn_16);
 LV_FONT_DECLARE(lv_font_cn_20);
 
+/* 番茄钟大号倒计时（96px，仅 ASCII 空格+数字+冒号；Montserrat Medium，
+ * 用 lv_font_conv 单独生成，见 scripts/gen_cn_font.sh 末尾） */
+LV_FONT_DECLARE(font_digits_96);
+
 #endif /* UI_FONT_CN_H */

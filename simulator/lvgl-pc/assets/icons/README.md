@@ -5,9 +5,8 @@
 | 文件名 | 应用 |
 |--------|------|
 | sub.png      | 订阅 |
-| zcode.png    | ZCode |
 | weather.png  | 天气 |
-| server.png   | 服务器 |
+| pomodoro.png | 番茄钟（gpt-image 生成） |
 | settings.png | 设置 |
 | music.png    | 音乐 |
 

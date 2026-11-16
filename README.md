@@ -119,6 +119,8 @@ Bridge 地址」是一个**地址簿**——可保存多个地址、点一下即
 - **文件**：管理 TF 卡（插卡即用）——浏览目录/进入/返回上级、删除文件
   （两击确认）、把文件上传到 Bridge 备份；「Bridge 文件」里可把 Web
   「设备文件」页上传的文件下载到 TF `downloads/`（≤2MB）。
+- **番茄钟**：25 分钟专注 + 5 分钟休息自动循环，纯色大号倒计时；
+  开始/暂停、重置、跳过。切到其他 App 会暂停并保留剩余时间（不做后台计时）。
 - **TF 备份与缓存**（自动）：配网信息每次变更后写 `backup/provision.json`
   ——刷机/擦 NVS 后插同一张卡开机自动恢复；订阅/天气数据落 `cache/`，
   断网时显示最后一次数据。**备份含 Wi-Fi 明文密码，TF 卡勿外借。**
@@ -204,16 +206,16 @@ scripts/gen_cn_font.sh
 | 模块 | 状态 |
 |------|------|
 | 真机 bring-up（Phase 6 前半） | ✅ 全外设验证通过：I2C×6 / 显示 / 触摸 / 音频双向 / TF / RTC / AXP2101 真读数 / Wi-Fi→Bridge / 充电屏保 |
-| 模拟器 UI | ✅ Launcher（多页/页点/图标）+ AstrBot 对话 / 小智 / 天气 / 额度 / 监控 / 订阅 / 外观 / 按键映射 |
-| Bridge | ✅ 额度 + 凭据 + 订阅 + AstrBot 多实例（当前实例切换）+ 天气 + Komari + 按键/排布 + 外观 + events(WS) + 语音链路（ASR/LLM/TTS、音色试听） |
-| Web 后台 | ✅ 总览 + 12 个配置页：外观/网络与配网/代理/按键/订阅中心/AstrBot/语音设置/Muse/小智/ZCode/监控/天气 |
-| 固件 UI 移植（Phase 6 后半） | ✅ 主体已在真机运行（launcher/对话/设置/订阅/天气；共享模拟器源码） |
+| 模拟器 UI | ✅ Launcher（多页/页点/图标）+ AstrBot 对话 / 小智 / 天气 / 额度 / 订阅 / 文件 / 番茄钟 / 外观 / 按键映射 |
+| Bridge | ✅ 额度 + 凭据 + 订阅 + AstrBot 多实例（当前实例切换）+ 天气 + 设备文件 + 按键/排布 + 外观 + events(WS) + 语音链路（ASR/LLM/TTS、音色试听） |
+| Web 后台 | ✅ 总览 + 12 个配置页：外观/网络与配网/代理/按键/订阅中心/AstrBot/语音设置/Muse/小智/天气/设备文件 |
+| 固件 UI 移植（Phase 6 后半） | ✅ 主体已在真机运行（launcher/对话/设置/订阅/天气/文件/番茄钟；共享模拟器源码） |
 | 稳定性（2026-11-15 收敛） | ✅ 绘制缓冲内部 RAM + 语音静态栈任务 + LVGL 心跳看门狗；连续 6 轮完整语音回合零 NO_MEM/panic |
 | 小智官方服务（xiaozhi.me） | ✅ 已接入并真网验证：Bridge 模拟设备（OTA 激活 + WebSocket + Opus，官方 TTS 直通），未绑定自动回落本机链路，见 [ADR-005](docs/DECISIONS.md) |
 | TF 文件管理（ADR-010） | ✅ 文件 App（浏览/删除/上传/下载）+ 配网自动备份/恢复 + 订阅/天气离线缓存；真机 TF 挂载与备份写入实测，下载上限 2MB（1-bit SDMMC 吞吐待测） |
 | 设备运行期配网 | ✅ 设置→网络与连接：Wi-Fi 扫描/软键盘输密码存 NVS + Bridge 地址热改（`ds_bridge_rebind` 即时生效）；`wifi_secret.h` 退为出厂兜底 |
 | Bridge 服务化部署 | ✅ `-webdir` 托管 Web 后台（API+管理页一个端口）；`scripts/build-release.sh` + [docs/DEPLOY.md](docs/DEPLOY.md)（systemd/数据迁移/设备指向） |
-| 设备端 ZCode / 音乐 | ⏳ 规划中 |
+| 设备端音乐 | ⏳ 规划中 |
 
 里程碑与详细进度见 [docs/PROGRESS.md](docs/PROGRESS.md)。
 所有未在真机验证的内容都在 docs 中以 TODO 标注，不声称已测试。

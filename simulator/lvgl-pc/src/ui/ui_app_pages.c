@@ -695,8 +695,8 @@ static void register_apps(void)
 static void register_apps_layout(const char *layout_csv, int lay_n)
 {
     /* 顺序 = 桌面分页顺序（一屏 4 个，横滑翻页）：
-     * 页1 AI 三位 + 订阅｜页2 天气/设置｜页3 音乐
-     * （2026-11-16 删 ZCode/服务器监控两 App，ADR-010） */
+     * 页1 AI 三位 + 订阅｜页2 天气/番茄钟/文件/设置｜页3 音乐
+     * （2026-11-16 删 ZCode/服务器监控两 App，ADR-010；加番茄钟） */
     const app_def_t defs[] = {
         /* 头像 App：symbol/color 是头像素材缺位时的磁贴回退（NULL symbol
          * 会被 LVGL 渲染成默认 "Text"——真机/模拟器均踩过） */
@@ -705,6 +705,7 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
         { UI_APP_MUSE,     "muse",     "Muse",    LV_SYMBOL_VIDEO,   0xFF6FA5, "A:simulator/lvgl-pc/assets/avatars/muse.png",    true,  ui_conversation_build, ui_conversation_on_exit },
         { UI_APP_ZHIPU,    "sub",      "订阅",    LV_SYMBOL_CHARGE,   0x2EC4B6, "A:simulator/lvgl-pc/assets/icons/sub.png",       true,  quota_build,           quota_on_exit },
         { UI_APP_WEATHER,  "weather",  "天气",    LV_SYMBOL_TINT,     0x4F8CFF, "A:simulator/lvgl-pc/assets/icons/weather.png",   true,  ui_weather_build,      ui_weather_on_exit },
+        { UI_APP_POMODORO, "pomodoro", "番茄钟",  LV_SYMBOL_PLAY,     0xD94B3F, "A:simulator/lvgl-pc/assets/icons/pomodoro.png",  true,  ui_pomodoro_build,     ui_pomodoro_on_exit },
         { UI_APP_FILES,    "files",    "文件",    LV_SYMBOL_DIRECTORY, 0xE0A030, "A:simulator/lvgl-pc/assets/icons/files.png",    true,  ui_files_build,        ui_files_on_exit },
         { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit },
         { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL },
