@@ -135,7 +135,9 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
     线程 __stack_chk_fail。全部回滚（FETCH/RODATA=y +
     stack_in_psram=true，2026-11-16 下午组合）后稳定。**守则：这两个
     开关与 `stack_in_psram` 必须维持 f55e6a3 原值成对存在，改任何一个
-    都要先在真机跑满一晚再合入。**
+    都要先在真机跑满一晚再合入。**另一面：=n 时 PSRAM 堆池会从 4416K
+    涨到 8192K（直连版实测对照，同一块板），=y 的稳定是以 3.7MB PSRAM
+    堆为代价换来的——两头都不便宜，当前取稳定。**
 15. **对话页低频后台操作必须投静态任务，不能 pthread（2026-11-17）**：
     "选机器人"面板拉列表 pthread 16KB 在对话页稳态 largest_int
     ~8.7KB 时 ENOMEM 静默失败——点击无任何反应，用户以为按钮坏了。
@@ -189,7 +191,12 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 - .bss 大项：语音任务静态栈 16KB（16384，picker/sync/apply/reset 共用）、绘制缓冲 19.2KB（480×10×2 双缓冲）、hangprobe 8KB。
 - **改任何 .bss/保留额度前先算 Wi-Fi 底线**：post-ui free 掉到 ~56KB 以下 `esp_wifi_init` 分不到 10 个 RX 缓冲 → 开机 abort 循环（坑 #19）。
 
-**PSRAM（8MB octal @80MHz）**：开机总堆 8.53MB → **桌面稳态余 ~1.76MB（已用 ~6.8MB）**——大头是 companion 资源/LVGL/字体/图片缓存；语音回合期另有 256KB 录音缓冲（G_CAPTURE，8s@16k）+ 1.5MB TTS 缓冲（AUDIO_TTS_MAX_BYTES，惰性分配）。
+**PSRAM（8MB octal @80MHz）**：**进堆的只有 ~4.4MB**（4416K+23K 池，
+  `Adding pool of 4416K`）——FETCH/RODATA=y 的虚拟地址窗口划分代价
+  （这两开关 =n 时池可到 8192K，直连版实测，但会引爆坑 #14 崩溃，见下）。
+  桌面稳态 heap 余 ~1.76MB（开机 4.53MB 总堆）；语音回合期另有 256KB
+  录音缓冲（G_CAPTURE，8s@16k）+ 1.5MB TTS 缓冲（AUDIO_TTS_MAX_BYTES，
+  惰性分配）。**给 PSRAM 大块分配留的余量上限就是 ~1.7MB**。
 
 **Mac 侧服务**：Bridge 进程 RSS ~15MB（Go，API+Web 静态托管同进程同端口 :8081）；无独立 Web 进程。
 
