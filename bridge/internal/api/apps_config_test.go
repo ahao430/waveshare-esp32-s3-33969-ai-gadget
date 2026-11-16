@@ -326,7 +326,7 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatalf("catalog wrong: %v", cat)
 	}
 
-	// 重排 + 隐藏（只留 5 个，settings 提前）
+	// 重排：5 个提到前面；其余内置 App 自动追加到末尾（不隐藏）
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/launcher",
 		`{"order":["settings","weather","chat","sub","music"]}`)
 	if code != 200 {
@@ -334,8 +334,8 @@ func TestLauncherLayout(t *testing.T) {
 	}
 	_, out = doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	order, _ = out["order"].([]any)
-	if len(order) != 5 || order[0] != "settings" {
-		t.Fatalf("order not persisted: %v", order)
+	if len(order) != 8 || order[0] != "settings" || order[4] != "music" {
+		t.Fatalf("order not persisted/normalized: %v", order)
 	}
 
 	// 非法：未知 key / 重复 / 空
@@ -360,9 +360,12 @@ func TestLauncherLayout(t *testing.T) {
 	}
 }
 
-// 2026-11-16 删 zcode/monitor 后：旧排布里的已下线 key 应被过滤生效，
+// 2026-11-16 删 zcode/monitor 后：旧排布里的已下线 key 被过滤，
 // 而不是整单回落出厂重置用户自定义（设备端 defs 匹配本来就跳过未知 key）。
-func TestLauncherFiltersRetiredKeys(t *testing.T) {
+// 同批新增的 files 不在旧排布里：排布只决定顺序，缺的内置 App 追加到
+// 末尾——否则设备开机先全量注册（文件出现一下）、联网拉到旧排布重建后
+// 消失（真机反馈回归）。
+func TestLauncherLegacyOrderMigrates(t *testing.T) {
 	mk := newTestMasterKey(t)
 	srv, db := newConfigServer(t, mk)
 	if err := db.SaveSetting(storage.SettingKeyLauncher,
@@ -371,8 +374,69 @@ func TestLauncherFiltersRetiredKeys(t *testing.T) {
 	}
 	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	order, _ := out["order"].([]any)
-	if len(order) != 2 || order[0] != "chat" || order[1] != "settings" {
-		t.Fatalf("retired keys should be filtered, got %v", order)
+	if len(order) != 8 || order[0] != "chat" || order[1] != "settings" {
+		t.Fatalf("legacy order should filter retired keys then append new, got %v", order)
+	}
+	has := map[string]bool{}
+	for _, k := range order {
+		has[k.(string)] = true
+	}
+	if has["zcode"] || has["monitor"] {
+		t.Fatalf("retired keys should be gone, got %v", order)
+	}
+	if !has["files"] {
+		t.Fatalf("files (new since saved layout) should be appended, got %v", order)
+	}
+}
+
+// 旧版 v2 配置里的 hidden 字段已废弃：内置 App 一律显示，只取 order。
+func TestLauncherIgnoresLegacyHidden(t *testing.T) {
+	mk := newTestMasterKey(t)
+	srv, db := newConfigServer(t, mk)
+	if err := db.SaveSetting(storage.SettingKeyLauncher,
+		`{"version":2,"order":["settings","chat"],"hidden":["weather","music"]}`); err != nil {
+		t.Fatal(err)
+	}
+	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
+	order, _ := out["order"].([]any)
+	// settings/chat 原序 → 其余内置 App（含曾标记 hidden 的）全部追加
+	if len(order) != 8 || order[0] != "settings" || order[1] != "chat" {
+		t.Fatalf("builtin apps must all be visible, got %v", order)
+	}
+	has := map[string]bool{}
+	for _, k := range order {
+		has[k.(string)] = true
+	}
+	if !has["weather"] || !has["music"] || !has["files"] {
+		t.Fatalf("legacy hidden must be ignored, got %v", order)
+	}
+}
+
+// POST 保存归一化为完整排布（内置 App 全部在列、未排的补末尾），
+// 与设备端「排布只排序不隐藏」的行为一致。
+func TestLauncherSaveNormalizesOrder(t *testing.T) {
+	mk := newTestMasterKey(t)
+	srv, db := newConfigServer(t, mk)
+	if code, out := doJSON(t, "POST", srv.URL+"/api/v1/launcher",
+		`{"order":["chat","settings"]}`); code != 200 {
+		t.Fatalf("post: %d %v", code, out)
+	}
+	raw, err := db.GetSetting(storage.SettingKeyLauncher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Order []string `json:"order"`
+	}
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Order) != 8 || saved.Order[0] != "chat" || saved.Order[1] != "settings" {
+		t.Fatalf("save should normalize to full order, got %s", raw)
+	}
+	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
+	if order, _ := out["order"].([]any); len(order) != 8 {
+		t.Fatalf("all builtin apps should be visible after save, got %v", order)
 	}
 }
 

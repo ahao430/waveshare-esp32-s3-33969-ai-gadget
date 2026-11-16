@@ -711,15 +711,18 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
     };
     const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
 
-    /* Web 后台主页排布（/api/v1/launcher）：order=可见顺序，不在列表=
-     * 隐藏；列表外的 App（目录漂移新增）追加到末尾保证不丢。
-     * 可重复调用（清表重注册）：联网后 ui_remote_config_refresh 用预取
-     * 的 csv 重跑本函数 + ui_launcher_rebuild。 */
+    /* Web 后台主页排布（/api/v1/launcher）：order **只决定顺序**——固件
+     * 内置的 App 全部始终注册，远端没提到的追加到末尾。存在性归固件管，
+     * 远端配置不负责显示/隐藏（2026-11-16 真机反馈：旧排布不含新 App
+     * `files`，设备开机全量出现、联网拉到排布重建后却被藏掉）。
+     * 可重复调用（清表重注册）：联网后 refresh 用预取的 csv 重跑本函数
+     * + ui_launcher_rebuild。 */
     app_manager_clear();
     app_def_t ordered[16];
     int visible = 0;
     if (layout_csv && lay_n > 0) {
         bool used[16] = {false};
+        int matched = 0;
         char tmp[192];
         snprintf(tmp, sizeof(tmp), "%s", layout_csv);
         char *save = NULL;
@@ -729,16 +732,17 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
                 if (used[i] || !defs[i].key || strcmp(defs[i].key, tok) != 0) continue;
                 ordered[visible++] = defs[i];
                 used[i] = true;
+                matched++;
                 break;
             }
         }
-        /* order 之外的 App = 隐藏（Web 显式恢复）；完全无匹配（key 体系
-         * 不兼容）才回落出厂全量，防止空白桌面。 */
-        if (visible == 0) {
-            for (int i = 0; i < def_n; i++) ordered[visible++] = defs[i];
+        /* 远端排布里没提到的内置 App：追加末尾（不是隐藏）；若 key 体系
+         * 完全不兼容（一个都没匹配），追加结果即出厂全量，桌面不会空。 */
+        for (int i = 0; i < def_n; i++) {
+            if (!used[i]) ordered[visible++] = defs[i];
         }
-        fprintf(stderr, "[apps] web layout applied: %d/%d apps (hidden %d)\n",
-                visible, def_n, def_n - visible);
+        fprintf(stderr, "[apps] web layout: %d ordered, %d appended\n",
+                matched, visible - matched);
     } else {
         for (int i = 0; i < def_n; i++) ordered[visible++] = defs[i];
     }

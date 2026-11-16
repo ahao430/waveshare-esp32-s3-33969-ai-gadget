@@ -1,6 +1,8 @@
 // launcher.go — 桌面主页排布配置（用户 2026-11-14：后台设置应用排布）。
-// 模型：order = 可见 App 的 key 有序列表（一屏 4 个自动分页）；
-// 不在列表里的 App = 隐藏（设备桌面不显示，后台可恢复）。
+// 模型：order = App 排列顺序（一屏 4 个自动分页）；**固件内置 App 始终
+// 显示**——排布只决定先后，不决定存在。catalog 里有、order 里没有的 key
+// 追加到末尾。旧版「不在列表 = 隐藏」语义已废弃（2026-11-16 用户反馈：
+// 文件 App 是内置功能，不该靠远端配置才出现）。
 package api
 
 import (
@@ -39,6 +41,29 @@ func validLauncherKey(k string) bool {
 	return false
 }
 
+// visibleOrder 把保存的 order 展开为完整排布：
+//  1. 过滤未知/已下线 key 与重复项
+//  2. catalog 中缺的 key = 内置但未排布过的 App，追加到末尾（永不隐藏）
+//
+// 兼容旧格式（含已废弃的 version/hidden 字段）：只读 order，忽略其余。
+func visibleOrder(saved []string) []string {
+	seen := make(map[string]bool, len(launcherCatalog))
+	out := make([]string, 0, len(launcherCatalog))
+	for _, k := range saved {
+		if !validLauncherKey(k) || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	for _, a := range launcherCatalog {
+		if !seen[a.Key] {
+			out = append(out, a.Key)
+		}
+	}
+	return out
+}
+
 func serveLauncher(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 	db := d.SubscriptionsDB
 
@@ -48,19 +73,8 @@ func serveLauncher(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 				Order []string `json:"order"`
 			}
 			if json.Unmarshal([]byte(raw), &saved) == nil && len(saved.Order) > 0 {
-				// 过滤已下线/未知 key（2026-11-16 删 zcode/monitor 后：
-				// 旧排布仍按过滤结果生效，不整单回落出厂重置用户自定义）。
-				filtered := make([]string, 0, len(saved.Order))
-				seen := map[string]bool{}
-				for _, k := range saved.Order {
-					if !validLauncherKey(k) || seen[k] {
-						continue
-					}
-					seen[k] = true
-					filtered = append(filtered, k)
-				}
-				if len(filtered) > 0 {
-					return filtered
+				if out := visibleOrder(saved.Order); len(out) > 0 {
+					return out
 				}
 			}
 		}
@@ -87,13 +101,16 @@ func serveLauncher(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			writeErr(w, logger, http.StatusBadRequest, "bad_order", err)
 			return
 		}
-		raw, _ := json.Marshal(map[string]any{"order": body.Order})
+		// 归一化保存：完整排布（未列出的内置 App 补末尾），
+		// 旧版本遗留的 hidden/version 字段自然被丢弃。
+		full := visibleOrder(body.Order)
+		raw, _ := json.Marshal(map[string]any{"order": full})
 		if err := db.SaveSetting(storage.SettingKeyLauncher, string(raw)); err != nil {
 			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
 			return
 		}
-		logger.Info("launcher layout saved", "apps", len(body.Order))
-		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "order": body.Order})
+		logger.Info("launcher layout saved", "apps", len(full))
+		writeJSON(w, logger, http.StatusOK, map[string]any{"ok": true, "order": full})
 	})
 }
 

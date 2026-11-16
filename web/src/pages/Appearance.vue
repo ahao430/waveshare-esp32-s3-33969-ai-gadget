@@ -155,7 +155,6 @@ const layBusy = ref(false)
 const layDirty = ref(false)
 
 const nameOf = (key: string) => catalog.value.find((c) => c.key === key)?.name ?? key
-const hidden = computed(() => catalog.value.map((c) => c.key).filter((k) => !order.value.includes(k)))
 const pages = computed(() => Math.max(1, Math.ceil(order.value.length / 4)))
 const curPage = computed(() => Array.from({ length: pages.value }, (_, i) => order.value.slice(i * 4, i * 4 + 4)))
 
@@ -179,21 +178,6 @@ function move(i: number, delta: -1 | 1) {
   const j = i + delta
   if (j < 0 || j >= order.value.length) return
   ;[order.value[i], order.value[j]] = [order.value[j], order.value[i]]
-  markDirty()
-}
-
-function hide(key: string) {
-  if (order.value.length <= 1) {
-    layMsgErr.value = true
-    layMsg.value = '至少保留一个应用'
-    return
-  }
-  order.value = order.value.filter((k) => k !== key)
-  markDirty()
-}
-
-function restore(key: string) {
-  order.value.push(key)
   markDirty()
 }
 
@@ -288,7 +272,7 @@ async function saveLayout() {
     <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div class="card">
         <div class="mb-3 flex items-center justify-between">
-          <h3 class="font-semibold">显示中（{{ order.length }} 个 · {{ pages }} 页）</h3>
+          <h3 class="font-semibold">排布（{{ order.length }} 个 · {{ pages }} 页）</h3>
           <span class="text-xs text-dim">一屏 4 个、自动分页</span>
         </div>
         <div class="space-y-1.5">
@@ -300,12 +284,10 @@ async function saveLayout() {
             <div class="flex items-center gap-2">
               <span class="w-6 text-center text-xs text-dim">{{ Math.floor(i / 4) + 1 }}-{{ (i % 4) + 1 }}</span>
               <span class="font-medium">{{ nameOf(k) }}</span>
-              <span v-if="k === 'settings'" class="badge !text-warn">隐藏前请注意</span>
             </div>
             <div class="flex gap-1">
               <button class="btn-ghost !px-2 !py-1" :disabled="i === 0" @click="move(i, -1)">↑</button>
               <button class="btn-ghost !px-2 !py-1" :disabled="i === order.length - 1" @click="move(i, 1)">↓</button>
-              <button class="btn-ghost !text-err !px-2 !py-1" @click="hide(k)">隐藏</button>
             </div>
           </div>
         </div>
@@ -316,19 +298,6 @@ async function saveLayout() {
       </div>
 
       <div class="space-y-4">
-        <div v-if="hidden.length" class="card">
-          <h3 class="mb-3 font-semibold">已隐藏（{{ hidden.length }}）</h3>
-          <div class="flex flex-wrap gap-2">
-            <button
-              v-for="k in hidden"
-              :key="k"
-              class="btn-ghost !border-line"
-              @click="restore(k)"
-            >
-              {{ nameOf(k) }} ↩ 恢复
-            </button>
-          </div>
-        </div>
         <div class="card">
           <h3 class="mb-3 font-semibold">分页预览（一屏 4 个）</h3>
           <div v-for="(pg, pi) in curPage" :key="pi" class="mb-2">
@@ -348,7 +317,7 @@ async function saveLayout() {
     </div>
 
     <div class="card text-xs text-dim">
-      说明：隐藏的应用不在桌面显示（设置也可隐藏，但隐藏后将无法在设备端进设置——请谨慎）。
+      说明：固件内置的 App 始终显示，排布只决定先后顺序（一屏 4 个自动分页）。
       排布保存后，设备重启生效；开机联网时设备会自动拉取最新排布（无需再重启一次）。
     </div>
   </section>

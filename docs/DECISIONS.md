@@ -344,6 +344,15 @@ App 无实际数据源（Bridge 侧配置页也常年空置）。
    `readOrder()` 改为**过滤已下线 key**（旧排布不整单回落出厂重置用户
    自定义；设备端 defs 匹配本来就跳过未知 key）。收益：flash 5%→6%，
    运行期少 servers 抓取与一类 worker。
+   **launcher 排布只排序、不隐藏（同日修复真机"文件 App 出现一下又
+   消失"）**：旧模型 order=可见列表、缺省=隐藏，导致新内置 App（files）
+   不在旧排布里时被藏掉——设备开机全量注册可见，联网拉到旧排布重建后
+   消失；且"显示与否"错误地依赖 Bridge 配置版本（公网 Bridge 未升级就
+   消失）。用户拍板：**文件等 App 是固件内置能力，存在性归固件**。现
+   模型：设备端始终注册全部 app_def_t，远端 order 只做排序、缺的追加
+   末尾；Bridge `visibleOrder()` 同样补全 catalog 并归一化保存，旧配置
+   （含已废弃的 version/hidden 字段）只读 order、未知 key 过滤；Web 外观
+   页去掉"隐藏/恢复"，只保留 ↑↓ 排序。
 2. **TF 卡三件套**（`/sdcard`，FATFS 1-bit SDMMC）：
    - 配网自动备份/恢复：save/remove 后写 `backup/provision.json`
      （Wi-Fi+地址簿，JSON/cJSON）；开机 NVS 无凭据自动恢复（刷机/擦
