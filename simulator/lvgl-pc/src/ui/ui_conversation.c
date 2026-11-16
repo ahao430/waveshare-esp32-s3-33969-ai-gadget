@@ -268,11 +268,21 @@ static void *voice_worker(void *arg)
  * 同时 SPI 的 19.2KB DMA bounce 也分配失败 → 花屏。静态栈 + 绘制缓冲
  * 开机预分配是唯一稳的组合。 */
 #ifdef ESP_PLATFORM
-#define VOICE_TASK_STACK 14336
+#define VOICE_TASK_STACK 16384 /* picker 链实测 ~14KB+；14K 曾在深层链路余量不足 */
 static StaticTask_t s_voice_tcb;
 static StackType_t s_voice_stack[VOICE_TASK_STACK / sizeof(StackType_t)];
 static TaskHandle_t s_voice_task;
 static volatile bool s_voice_busy;
+
+/* bot picker/sync/apply 也投本任务执行：内部 RAM 碎片化后 16KB pthread
+ * 栈必 ENOMEM 且静默失败（2026-11-17 实证，"点下拉没反应"）。
+ * 与 PTT 语音回合互斥（同一任务串行），busy 时调用方给 UI 提示。 */
+static volatile int s_botw_kind; /* 0=无 1=picker 2=sync 3=apply 4=reset */
+static volatile int s_botw_arg;
+static void *bot_picker_worker(void *arg);
+static void *bot_sync_worker(void *arg);
+static void *bot_pick_apply_worker(void *arg);
+static void *chat_reset_worker(void *arg);
 
 static void voice_task_main(void *arg)
 {
@@ -280,7 +290,13 @@ static void voice_task_main(void *arg)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         s_voice_busy = true;
-        voice_work_once();
+        int k = s_botw_kind;
+        s_botw_kind = 0;
+        if (k == 1) bot_picker_worker(NULL);
+        else if (k == 2) bot_sync_worker(NULL);
+        else if (k == 3) bot_pick_apply_worker((void *)(intptr_t)s_botw_arg);
+        else if (k == 4) chat_reset_worker(NULL);
+        else voice_work_once();
         s_voice_busy = false;
     }
 }
@@ -730,6 +746,12 @@ static void bot_picker_build(const char *list, const char *cur_id)
         lv_obj_t *l = ui_label(btn, buf, &lv_font_cn_16, on ? UI_ACCENT : UI_TEXT);
         lv_obj_center(l);
     }
+    if (s_pick_n == 0) { /* 拉取失败/无实例：面板内直接提示（原只更新底部状态栏，不显眼） */
+        lv_obj_t *empty = ui_label(
+            listbox, "没有机器人实例\n（Bridge 未响应或未配置，点关闭后重试）",
+            &lv_font_cn_16, UI_TEXT);
+        lv_obj_center(empty);
+    }
 
     lv_obj_t *close = lv_button_create(mask);
     lv_obj_set_size(close, 160, 48);
@@ -764,10 +786,9 @@ static void *bot_picker_worker(void *arg)
     CLOG("picker worker stack free=%u", (unsigned)uxTaskGetStackHighWaterMark(NULL));
 #endif
     if (rc != 0 || s_pending_list[0] == '\0') {
-        ui_lock();
-        if (g_status_lbl) lv_label_set_text(g_status_lbl, "没有 AstrBot 机器人实例");
-        ui_unlock();
-        return NULL;
+        /* 失败也建面板：面板内显示空态提示（原只更新底部状态栏，用户
+         * 看不到任何反馈，以为"点击没反应"——2026-11-17 同源反馈） */
+        s_pending_list[0] = '\0';
     }
     s_pending_cur[0] = '\0';
     (void)ds_chat_active_id(s_pending_cur, sizeof(s_pending_cur));
@@ -808,9 +829,28 @@ static void *bot_sync_worker(void *arg)
 
 static void bot_thread_start(void *(*fn)(void *), void *arg)
 {
-    /* 栈需求实测：http_request 4KB + 调用方 4KB（bots）+ 1KB 请求行
-     * + cJSON；http 读缓冲已改堆分配后 16KB 足够（原 24KB） */
+#ifdef ESP_PLATFORM
+    /* 静态语音任务执行（栈在 .bss，不受内部堆碎片影响）；16KB pthread
+     * 栈在对话页稳态 largest_int ~7.6KB 时创建必失败且无任何反馈。 */
+    if (!s_voice_task) {
+        s_voice_task = xTaskCreateStatic(voice_task_main, "voice",
+                                         VOICE_TASK_STACK / sizeof(StackType_t),
+                                         NULL, 5, s_voice_stack, &s_voice_tcb);
+    }
+    if (!s_voice_task || s_voice_busy) {
+        ui_lock();
+        if (g_status_lbl) lv_label_set_text(g_status_lbl, "语音忙，稍后再试");
+        ui_unlock();
+        return;
+    }
+    if (fn == bot_picker_worker) s_botw_kind = 1;
+    else if (fn == bot_sync_worker) s_botw_kind = 2;
+    else if (fn == chat_reset_worker) s_botw_kind = 4;
+    else { s_botw_kind = 3; s_botw_arg = (int)(intptr_t)arg; }
+    xTaskNotifyGive(s_voice_task);
+#else
     (void)conv_thread_start(fn, arg, 16 * 1024);
+#endif
 }
 
 static void bot_sync_start(void) { bot_thread_start(bot_sync_worker, NULL); }
@@ -859,7 +899,7 @@ static void hist_wipe_cb(lv_event_t *e)
 
     if (is_chat) {
         snprintf(s_reset_bot, sizeof(s_reset_bot), "%s", g_active_bot_id);
-        (void)conv_thread_start(chat_reset_worker, NULL, 16 * 1024);
+        bot_thread_start(chat_reset_worker, NULL); /* 静态任务执行（pthread 16KB 曾 ENOMEM） */
     } else {
         if (g_status_lbl) lv_label_set_text(g_status_lbl, "已清空");
     }
@@ -923,11 +963,25 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     lv_obj_align(title_lbl, LV_ALIGN_TOP_MID, 0, 10);
     g_title_lbl = title_lbl;
     if (app_id == UI_APP_CHAT) {
-        /* AstrBot：标题显示当前机器人，点它弹出"选择机器人"面板
-         * （多实例显式选择；切换值落 Bridge，语音/文本都跟随，重启保持） */
-        if (g_bot_label[0]) lv_label_set_text(title_lbl, g_bot_label);
-        lv_obj_add_flag(title_lbl, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(title_lbl, title_pick_cb, LV_EVENT_CLICKED, NULL);
+        /* AstrBot：标题做成明显的下拉按钮——原为纯文字 label，点击区域
+         * 只有两个字宽，圆屏手指点不中且无视觉提示（2026-11-17 用户反馈
+         * "点击标题没反应"）。卡片按钮 220×44 + 下拉箭头，名字/箭头分开
+         * 渲染（中文字体子集无内置符号字形，箭头用 montserrat 独立 label）。 */
+        lv_obj_delete(title_lbl);
+        lv_obj_t *title_btn = lv_button_create(scr);
+        lv_obj_set_size(title_btn, 220, 44);
+        lv_obj_align(title_btn, LV_ALIGN_TOP_MID, 0, 4);
+        ui_style_card(title_btn);
+        lv_obj_set_style_radius(title_btn, 22, 0);
+        lv_obj_add_event_cb(title_btn, title_pick_cb, LV_EVENT_CLICKED, NULL);
+        lv_obj_t *tlabel =
+            ui_label(title_btn, g_bot_label[0] ? g_bot_label : g_meta[app_id].title,
+                     &lv_font_cn_20, UI_TEXT);
+        lv_obj_align(tlabel, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_set_style_pad_left(tlabel, 14, 0);
+        g_title_lbl = tlabel;
+        lv_obj_t *arrow = ui_label(title_btn, LV_SYMBOL_DOWN, &lv_font_montserrat_20, UI_TEXT);
+        lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, -14, 0);
         bot_sync_start(); /* 拉一次当前机器人名（异步，不阻塞首帧） */
     }
 
