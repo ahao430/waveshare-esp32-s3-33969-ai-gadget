@@ -95,8 +95,9 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
 7. **字体**：lv_font_conv 默认 RLE 压缩，必须开 `LV_USE_FONT_COMPRESSED`
    （固件 Kconfig + 模拟器 lv_conf.h），否则空心方块；生成 struct 自带的
    `.fallback = NULL` 会覆盖挂接；GBK 区间会混入 7000+ 繁体导致 flash 溢出。
-   当前**不压缩、无 L2 回退**（用户决策），app 分区余 5%（232KB）——
-   加功能前先裁剪字体/素材。
+   当前**不压缩、无 L2 回退**（用户决策），app 分区 12M 余 68%（ADR-013
+   重分区后），加功能不再需要裁字体/素材（分区表见 partitions.csv，
+   OTA 双槽已砍）。
 8. 启动期约 50% 概率显示管线楔死仍是已知问题（HARDWARE §2.10），
    由 TWDT 自动重启自愈；不要再用「加看门狗」重复治疗。
 9. **ES7210 采集任务必须常驻**（`audio_esp32.c`，别按轮启停）：SPEAKING
@@ -118,12 +119,81 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
     落定**再扫。曾用固定 150ms：从已连接态 deauth 要 300ms+，扫描被驱动
     静默吞掉（返回 OK 但 0 结果）——真机"配网页列表永远空"。
 13. **16KB pthread 栈在真机可能 ENOMEM（2026-11-16）**：内部 RAM
-    碎片化后 largest free block 只有 ~13.8KB，`pthread_create` 申请
+    碎片化后 largest free block 只剩 ~8.7KB，`pthread_create` 申请
     16KB 栈返回 **rc=12**，worker 静默不启动——订阅页取数 worker 因此
     永远不跑，页面一直空（天气/文件 worker 同款风险）。统一用
     `ui_worker_start(fn, arg, size)`：ENOMEM 时自动回落 12KB 重试
     （实测订阅 HTTP 链只用了 ~3.7KB 栈，余 8.5KB）。新页面的重复
     worker 不要直接 `pthread_create`。
+14. **SPIRAM_FETCH_INSTRUCTIONS / SPIRAM_RODATA 与 LVGL 栈位置是
+    成对约束，不许单独改（2026-11-17 深夜连环崩溃实证）**：把这两个
+    开关关掉（代码/常量回 flash）当晚即出现三类崩溃：①companion
+    动画读 assets 分区（LVGL 线程 esp_partition_read）时触摸中断打进
+    来 → **Cache error**；②LVGL PSRAM 栈任务做 flash 操作 → assert
+    `esp_task_stack_is_sane_cache_disabled`（cache_utils.c 只认 DRAM
+    栈）；③内核数据（xSuspendedTaskList/SPI 总线锁）被写坏 → 渲染
+    线程 __stack_chk_fail。全部回滚（FETCH/RODATA=y +
+    stack_in_psram=true，2026-11-16 下午组合）后稳定。**守则：这两个
+    开关与 `stack_in_psram` 必须维持 f55e6a3 原值成对存在，改任何一个
+    都要先在真机跑满一晚再合入。**
+15. **对话页低频后台操作必须投静态任务，不能 pthread（2026-11-17）**：
+    "选机器人"面板拉列表 pthread 16KB 在对话页稳态 largest_int
+    ~8.7KB 时 ENOMEM 静默失败——点击无任何反应，用户以为按钮坏了。
+    picker/sync/apply/reset 四个 worker 已改为投递给常驻静态栈语音
+    任务（s_botw_kind 分发，与 PTT 互斥）。新加低频后台操作照此模式。
+16. **esp_audio_codec 2.x 必须显式注册编解码器（2026-11-17）**：走
+    统一 API（esp_audio_enc_open/dec_open）前要先调
+    `esp_opus_enc_register()` / `esp_opus_dec_register()`，否则
+    `AUDIO_DEC: Decoder OPUS(1398100047) not registered`，open 静默
+    返回 NULL。（直连尝试期间发现，xz_opus.c 有现成实现）
+17. **esp_websocket_client 不适合本板 WSS（2026-11-17）**：其任务栈
+    写死 4KB 且走内部 RAM——对话页稳态建不出来
+    (`Error create websocket task`)，建出来 TLS 握手也必溢出（TLS 链
+    实测要 16KB 栈）。若重启小智直连，用 esp_tls + RFC6455 自实现
+    同步客户端跑在静态任务里（xz_session.c 有完整实现可复用）。
+18. **mbedtls 4.x 错误码 -0x008D = PSA_ERROR_INSUFFICIENT_MEMORY
+    （=-141），不是加密层损坏（2026-11-17 两次误诊修正）**：OTA TLS
+    在内部 RAM 紧张时全部内存分配失败报这个码。解法（已验证）：
+    `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y`（TLS 缓冲走 PSRAM，官方
+    xiaozhi-esp32 S3 同款）+ `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096`
+    （默认 16384 的 in_buf 在对话页必 OOM）。此配置下 OTA 已真网跑通
+    （bound=1）。
+19. **Wi-Fi 驱动初始化有内部 RAM 底线（2026-11-17 开机 abort 循环实证）**：
+    post-ui 内部 free <~56KB 时 `esp_wifi_init` 静态 RX 缓冲分配不足
+    （`Expected to init 10 rx buffer, actual is 7/8`）→ ESP_ERROR_CHECK
+    abort → 开机无限重启。改任何静态 .bss/保留额度前先算这本账：
+    RESERVE_INTERNAL 或 .bss 多吃 ~12KB 就够把 Wi-Fi 顶下线。
+
+### 内存 / flash 账本（2026-11-17 实测，Bridge 链稳定版）
+
+> 数字全部来自真机串口日志与 `idf.py size`，改内存相关配置前后对照这本账。
+
+**flash（16MB）**：
+| 区 | 大小 | 说明 |
+|----|------|------|
+| bootloader | 21.2KB / 32KB | |
+| nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
+| factory(app) | **3.79MiB 已用 / 11.94MiB（31.8%）** | code 1.24MiB + rodata 2.41MiB（`idf.py size`） |
+| assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
+| storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
+
+**DIRAM（334KB 总量）**：静态已占 235.6KB（69%，.bss 104KB + IRAM .text 102KB + .data 23.6KB）。
+**内部 heap 实测水位（关键路径）**：
+| 阶段 | internal free / 最大块 |
+|------|----------------------|
+| 开机显示前 | 143KB / 77.8KB |
+| 显示就绪 | 90.9KB / 31.7KB |
+| 桌面就绪（post-ui） | **70KB / 31.7KB（Wi-Fi init 前提，坑 #19）** |
+| 桌面稳态（tick） | **16.1KB / 8.7KB** |
+| 对话页打开 | 14.9KB / 7.7KB |
+- .bss 大项：语音任务静态栈 16KB（16384，picker/sync/apply/reset 共用）、绘制缓冲 19.2KB（480×10×2 双缓冲）、hangprobe 8KB。
+- **改任何 .bss/保留额度前先算 Wi-Fi 底线**：post-ui free 掉到 ~56KB 以下 `esp_wifi_init` 分不到 10 个 RX 缓冲 → 开机 abort 循环（坑 #19）。
+
+**PSRAM（8MB octal @80MHz）**：开机总堆 8.53MB → **桌面稳态余 ~1.76MB（已用 ~6.8MB）**——大头是 companion 资源/LVGL/字体/图片缓存；语音回合期另有 256KB 录音缓冲（G_CAPTURE，8s@16k）+ 1.5MB TTS 缓冲（AUDIO_TTS_MAX_BYTES，惰性分配）。
+
+**Mac 侧服务**：Bridge 进程 RSS ~15MB（Go，API+Web 静态托管同进程同端口 :8081）；无独立 Web 进程。
+
+**App 内存 delta 测量法**：固件 app_manager 在 App open 前后打 `appmem` 日志（heap/PSRAM/largest_int 前后值），看实测 delta 别估算。已实测：chat 打开 = PSRAM -82.8KB + 内部最大块 15.3→7.7KB；其余 App 待测，测法同。
 
 ### 当前能力边界（对外说明别说过头）
 
@@ -132,6 +202,10 @@ scripts/check.sh   # bridge: go vet+build+test / web: typecheck / simulator: cma
   App 的转写/回复/音色全走官方，人设音色在官方控制台配；未绑定或官方
   失败自动回落本机 ASR→LLM→TTS（语音设置页的音色在回落时生效）。
   一个 Bridge 身份 = 官方控制台里的一台设备。
+  设备**直连官方**的尝试（ADR-014）已跑通 OTA 激活与 WSS 握手，但与
+  本板内存约束冲突未收敛，已**暂停接线回滚 Bridge 链**（ADR-015）；
+  源码存档 firmware/main/xz_*.c/h（未编译），重启项目见
+  docs/XIAOZHI_DIRECT.md 的「证据索引」。
 - **运行期配网已实现**（ADR-009）：设备「设置→网络与连接」可扫 Wi-Fi、
   软键盘输密码（存 NVS，NVS 优先于 `wifi_secret.h` 编译兜底）、热改
   Bridge 地址（`ds_bridge_rebind` 立即生效）。`wifi_secret.h` 只在

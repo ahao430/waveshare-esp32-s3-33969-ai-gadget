@@ -471,3 +471,65 @@ TF 卡应成为统一存储；应持续观测 RAM。本期先落地与番茄钟�
 - 出厂固件仍只作恢复镜像与交互范式参考；其 App 实现不可复用。
 - 框架能力（Recents/快照/App Store/服务框架）继续以「设计参考」
   身份保留在 FACTORY_REVIEW/BROOKESIA_EVAL，不产生代码依赖。
+
+## ADR-013 分区重划：砍 OTA 双槽，factory 扩到 12M（2026-11-16）
+
+**背景**：小智直连官方（ADR-014 筹备）需要 TLS+WS+Opus 约 +350~450KB
+flash，原 app 分区只剩 ~219KB（5%）。分区表里 factory 4M + ota_0 4M +
+ota_1 4M 三槽是项目第一版固件骨架照抄 ESP-IDF 双 OTA 模板预留的——OTA
+功能从未实现（设备明文无鉴权 HTTP，不适合在线刷写），ota 槽从未写过
+一个字节，bootloader 一直只启动 factory。
+
+**决策**：合并三槽为 factory **12M**（0x10000 + 0xC00000 = 0xC10000，
+正好衔接 assets 分区）。放弃 OTA 能力（恢复手段 = USB 线刷，本来也是
+唯一途径）。nvs/assets/storage 偏移全部不变。
+
+**实测**（2026-11-16 刷机验证）：bootloader 正常读新表并从 0x10000
+启动；NVS Wi-Fi 凭据无损（启动日志 `creds=nvs`）；音频/Wi-Fi/remote
+config 全链正常。app 分区余量 219KB → **8,358,608B（68%）**，后续
+加 Opus/TLS/WS 及新功能不再受 flash 束缚，字体/图标无需裁剪。
+
+**代价**：永久放弃 OTA（若未来要做，需重新规划分区并线刷一次新表）。
+
+## ADR-014 小智设备直连官方服务（2026-11-16 立项）
+
+**背景**：小智语音现走 设备→Bridge→官方 中转。Bridge 部署在美国 VPS
+时，音频链路绕行 ~440ms 单程 + 晚高峰国际链路抖动 → 播放断续。官方
+固件本就是设备直连（OTA 激活 → WSS → Opus 16k/60ms 帧）。
+
+**决策**：设备固件增加 TLS（esp_crt_bundle）+ WebSocket
+（esp_websocket_client）+ Opus 编解码（PSRAM 放编解码器状态），小智
+App 直连官方；Bridge 中转链保留为回退。激活身份存设备 NVS（官方
+6 位码流程，设备屏幕显示码）。详细设计另行文档化。
+
+**关联**：ADR-005（Bridge 模拟设备的实现保留作协议参考与回退）。
+
+**结果（2026-11-17 补记）**：OTA 激活与 WSS 握手真网跑通；Opus 上行后出现
+概率性内核数据损坏，与坑 #14 的实验变量纠缠未收敛 → **暂停接线，回滚
+Bridge 链**（ADR-015）。源码存档 firmware/main/xz_*.c/h（未编译）。
+
+## ADR-015 小智直连暂停，维持 Bridge 中转（2026-11-17）
+
+**背景**：ADR-014 直连按官方协议全字段实现并逐级验证：OTA+激活（bound=1）、
+WSS 握手、Opus 编码上行全部跑通。此后每轮 PTT 都复现"思考完即崩"：
+内核对象被越界写坏（xSuspendedTaskList.pxIndex 清零、SPI 总线锁结构坏、
+LVGL 渲染线程 __stack_chk_fail），panic handler 二次进入。
+
+**排查结论**：崩溃窗口与内存压力强相关（对话页稳态内部最大块 7.7KB），
+且排查期间引入的实验变量（关 SPIRAM_FETCH/RODATA、LVGL 栈迁内部、内存
+策略对齐官方）各自引爆了独立的崩溃模式（Cache error / flash assert /
+Wi-Fi RX 分配不足开机循环）——真因与缓解手段纠缠，一晚无法收敛到唯一
+根因。本板与官方 xiaozhi-esp32 板的内存画像差异（DIRAM 静态占 69%、
+桌面稳态内部最大块仅 8.7KB）是结构性约束：直连所需 TLS+WS+Opus 的
+运行时内存与显示/UI/伴宠共存无裕度。
+
+**决策**：小智维持 Bridge 中转（ADR-005 链路，真网稳定）。直连源码
+（xz_identity/ota/opus/session）保留在 firmware/main/ 不参与编译，
+文档与证据索引见 docs/XIAOZHI_DIRECT.md。重启项目的前置条件：①真机
+连续一晚无崩溃的内存水位改善（App 后台策略收紧或裁剪伴宠/绘制占用）；
+②堆巡检/栈水位探针已内置（log_mem），可直接复用。
+
+**教训（写给未来的自己）**：全局性配置（内存策略/cache 开关）一次只动
+一个变量并让真机 soak 过夜；用户陪测的成本远高于多刷几轮的成本，出现
+第二类崩溃模式时立即止损回滚，不要叠实验。
+
