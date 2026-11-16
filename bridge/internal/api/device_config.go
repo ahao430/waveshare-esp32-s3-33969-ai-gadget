@@ -1,7 +1,7 @@
 // device_config.go — 设备运行配置下发（Web 配置 → 设备启动时拉取应用）。
 //
 //	GET /api/v1/device/config → {sub_refresh_interval_s}
-//	PUT /api/v1/device/config   body 同形（校验 300~3600 秒 = 5~60 分钟）
+//	PUT /api/v1/device/config   body 同形（校验 60~3600 秒 = 1~60 分钟）
 //
 // 设备侧 remote config 两段式（ui_remote_config_prefetch/refresh）拉取后
 // 调 ds_config_set_refresh_interval，订阅页据此定时自动刷新。
@@ -47,9 +47,9 @@ func serveDeviceConfig(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
 			return
 		}
-		if body.SubRefreshIntervalS < 300 || body.SubRefreshIntervalS > 3600 {
+		if body.SubRefreshIntervalS < 60 || body.SubRefreshIntervalS > 3600 {
 			writeErr(w, logger, http.StatusBadRequest, "bad_interval",
-				"sub_refresh_interval_s 须为 300~3600（5~60 分钟）")
+				"sub_refresh_interval_s 须为 60~3600（1~60 分钟）")
 			return
 		}
 		raw, _ := json.Marshal(body)

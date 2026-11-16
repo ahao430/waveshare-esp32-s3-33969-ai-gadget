@@ -93,7 +93,11 @@ async function saveOrder() {
 const devInterval = ref(900)
 const devIntervalBusy = ref(false)
 const devIntervalOptions = [
+  { v: 60, label: '1 分钟' },
+  { v: 120, label: '2 分钟' },
+  { v: 180, label: '3 分钟' },
   { v: 300, label: '5 分钟' },
+  { v: 600, label: '10 分钟' },
   { v: 900, label: '15 分钟' },
   { v: 1800, label: '30 分钟' },
   { v: 3600, label: '60 分钟' },
@@ -338,7 +342,7 @@ onMounted(() => {
   <div class="card mt-4">
     <h3 class="mb-1 font-semibold">设备订阅自动刷新</h3>
     <p class="mb-3 text-xs text-dim">
-      设备订阅页按此间隔自动拉取额度（PLAN §6.3：5~60 分钟）。设备开机时拉取本配置，改完重开设备订阅页生效。
+      设备订阅页按此间隔自动拉取额度（1~60 分钟；高频会加快额度接口消耗，按需选择）。设备开机时拉取本配置，改完重开设备订阅页生效。
     </p>
     <div class="flex flex-wrap items-center gap-2">
       <select v-model.number="devInterval" class="input !w-40">
