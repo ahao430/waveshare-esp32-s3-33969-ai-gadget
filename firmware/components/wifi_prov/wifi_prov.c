@@ -15,6 +15,9 @@
 #include "freertos/event_groups.h"
 #include "nvs.h"
 #include "nvs_flash.h"
+#include "esp_log.h"
+
+static const char *TAG = "wifi_prov";
 
 #define WIFI_PROV_NS "wifi"
 #define BIT_GOT_IP   (1 << 0)
@@ -22,6 +25,7 @@
 
 static EventGroupHandle_t s_ev;
 static volatile bool s_busy;
+static volatile int s_drop_reason; /* 最近一次断开 reason（等待循环判密码错用） */
 
 /* ---------------- NVS ---------------- */
 
@@ -198,6 +202,10 @@ int wifi_prov_scan(wifi_prov_ap_t *out, int max, int *n)
         strlcpy(out[cnt].ssid, ssid, sizeof(out[cnt].ssid));
         out[cnt].rssi = recs[i].rssi;
         out[cnt].secure = recs[i].authmode != WIFI_AUTH_OPEN;
+        out[cnt].enterprise =
+            (recs[i].authmode >= WIFI_AUTH_WPA_ENTERPRISE &&
+             recs[i].authmode <= WIFI_AUTH_WPA3_ENT_192) ||
+            recs[i].authmode == WIFI_AUTH_WAPI_PSK;
         cnt++;
     }
     free(recs);
@@ -214,6 +222,8 @@ static void prov_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
     if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(s_ev, BIT_GOT_IP);
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        const wifi_event_sta_disconnected_t *d = data;
+        s_drop_reason = d ? d->reason : 0;
         xEventGroupSetBits(s_ev, BIT_DROP);
     }
 }
@@ -236,6 +246,20 @@ static void apply_sta_config(const char *ssid, const char *pass)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
 }
 
+/* 断开原因是否属"认证/密码类"（快速失败；其余原因继续重试到超时） */
+static bool reason_is_auth_fail(int reason)
+{
+    switch (reason) {
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_MIC_FAILURE:
+        return true;
+    default:
+        return false;
+    }
+}
+
 int wifi_prov_connect(const char *ssid, const char *pass)
 {
     if (!ssid || ssid[0] == '\0') return -1;
@@ -245,28 +269,54 @@ int wifi_prov_connect(const char *ssid, const char *pass)
     bool had_old = wifi_prov_load(old_ssid, sizeof(old_ssid), old_pass, sizeof(old_pass));
 
     s_busy = true;
+    s_drop_reason = 0;
     xEventGroupClearBits(s_ev, BIT_GOT_IP | BIT_DROP);
 
-    /* 已连接时先断（复用同一 STA）；断开事件由 prov_evt 记录，无需等 */
+    /* 先断旧连接；给断开事件 ~100ms 到达窗口后清位——否则旧连接的
+     * DISCONNECTED 会被当成新连接失败（真机在公司网踩过：秒失败） */
     esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    xEventGroupClearBits(s_ev, BIT_DROP);
+    s_drop_reason = 0;
+
     apply_sta_config(ssid, pass);
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "connect(%s) call failed: %s", ssid, esp_err_to_name(err));
         s_busy = false;
         return -1;
     }
+    ESP_LOGI(TAG, "connecting to \"%s\" ...", ssid);
 
-    /* 等 GOT_IP；期间被断开（密码错）继续等一小会儿——部分路由器
-     * 会先断一次再 DHCP，GOT_IP 到了就当成功 */
-    EventBits_t bits = xEventGroupWaitBits(s_ev, BIT_GOT_IP | BIT_DROP,
-                                           pdFALSE, pdFALSE,
-                                           pdMS_TO_TICKS(15000));
+    /* 等待 GOT_IP（15s 上限）：断开事件按 reason 分流——
+     * 密码/认证类立即失败；NO_AP/关联类重试（部分 AP 首次关联会抖）。 */
     int rc = -1;
-    if (bits & BIT_GOT_IP) {
-        rc = 0;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(15000);
+    while (xTaskGetTickCount() < deadline) {
+        EventBits_t bits = xEventGroupWaitBits(
+            s_ev, BIT_GOT_IP | BIT_DROP, pdTRUE, pdFALSE, pdMS_TO_TICKS(5000));
+        if (bits & BIT_GOT_IP) {
+            rc = 0;
+            break;
+        }
+        if (bits & BIT_DROP) {
+            int reason = s_drop_reason;
+            ESP_LOGW(TAG, "disconnected during prov, reason=%d", reason);
+            if (reason_is_auth_fail(reason)) {
+                ESP_LOGW(TAG, "auth failure (wrong password or unsupported auth)");
+                break;
+            }
+            /* 其他原因：继续尝试（直到 deadline） */
+            vTaskDelay(pdMS_TO_TICKS(500));
+            (void)esp_wifi_connect();
+        }
+    }
+    if (rc == 0) {
         wifi_prov_save(ssid, pass); /* 连上才落 NVS */
+        ESP_LOGI(TAG, "connected to \"%s\"", ssid);
     } else {
         /* 失败：恢复旧凭据重连（若有），设备回到可配网/可用的已知态 */
+        ESP_LOGW(TAG, "provision failed for \"%s\"", ssid);
         esp_wifi_disconnect();
         if (had_old) {
             apply_sta_config(old_ssid, old_pass);

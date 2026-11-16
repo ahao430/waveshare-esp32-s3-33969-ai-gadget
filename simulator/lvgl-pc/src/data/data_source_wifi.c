@@ -91,12 +91,13 @@ int ds_wifi_scan(ds_wifi_ap_t *out, int max, int *n)
         *n = 0;
         return 0;
     }
-    static const struct { const char *ssid; int rssi; bool secure; } demo[] = {
-        { "Home-WiFi-5G", -42, true },
-        { "Home-WiFi-2.4G", -55, true },
-        { "Xiaomi_路由器", -63, true },
-        { "CoffeeShop-Free", -71, false },
-        { "Neighbor_5F", -80, true },
+    static const struct { const char *ssid; int rssi; bool secure; bool ent; } demo[] = {
+        { "Home-WiFi-5G", -42, true, false },
+        { "Home-WiFi-2.4G", -55, true, false },
+        { "Xiaomi_路由器", -63, true, false },
+        { "CoffeeShop-Free", -71, false, false },
+        { "Company-Corp-WiFi", -75, true, true },
+        { "Neighbor_5F", -80, true, false },
     };
     int cnt = (int)(sizeof(demo) / sizeof(demo[0]));
     if (cnt > max) cnt = max;
@@ -104,6 +105,7 @@ int ds_wifi_scan(ds_wifi_ap_t *out, int max, int *n)
         strlcpy(out[i].ssid, demo[i].ssid, sizeof(out[i].ssid));
         out[i].rssi = demo[i].rssi;
         out[i].secure = demo[i].secure;
+        out[i].enterprise = demo[i].ent;
     }
     *n = cnt;
     return 0;

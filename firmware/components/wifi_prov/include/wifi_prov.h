@@ -19,7 +19,8 @@ extern "C" {
 typedef struct {
     char ssid[33];
     int8_t rssi;
-    bool secure; /* true=需要密码 */
+    bool secure;     /* true=需要密码 */
+    bool enterprise; /* true=企业认证（EAP），ESP32 默认不支持，UI 应标注 */
 } wifi_prov_ap_t;
 
 /* NVS Wi-Fi 凭据：返回 false = 从未配过（ssid[0]='\0'） */

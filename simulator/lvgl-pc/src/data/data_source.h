@@ -227,7 +227,8 @@ int ds_chat_set_active(const char *id);
 typedef struct {
     char ssid[33];
     int rssi;
-    bool secure; /* true=需要密码 */
+    bool secure;     /* true=需要密码 */
+    bool enterprise; /* true=企业认证（EAP），设备不支持连接 */
 } ds_wifi_ap_t;
 
 /* 扫描周围 Wi-Fi（阻塞 1.5~3s，后台线程调用）。

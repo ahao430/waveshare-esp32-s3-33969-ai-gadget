@@ -32,6 +32,7 @@ static char s_pick_pass[64];    /* 密码（点击回调在 LVGL 线程拷出，
 static ds_wifi_ap_t s_aps[WIFI_AP_MAX];
 static int s_ap_n;
 static volatile bool s_worker_busy; /* 扫描/连接进行中（防重入） */
+static lv_obj_t *g_net_tip;         /* 列表底部提示行（企业网拦截等） */
 
 /* ---- 工具 ---- */
 
@@ -63,6 +64,7 @@ static void mask_close_cb(lv_event_t *e)
         lv_obj_delete(g_mask);
         g_mask = NULL;
         g_view = NULL;
+        g_net_tip = NULL;
     }
     s_worker_busy = false;
 }
@@ -128,6 +130,16 @@ static void wifi_connect_cb(lv_event_t *e)
 static void wifi_item_cb(lv_event_t *e)
 {
     int idx = (int)(uintptr_t)lv_event_get_user_data(e);
+    if (s_aps[idx].enterprise) {
+        /* 企业认证（EAP）网络：ESP32 默认不支持，直接提示不进密码页 */
+        if (g_net_tip) {
+            char buf[96];
+            snprintf(buf, sizeof(buf), "\"%s\" 需要企业认证(EAP)，设备不支持", s_aps[idx].ssid);
+            lv_label_set_text(g_net_tip, buf);
+            lv_obj_set_style_text_color(g_net_tip, UI_ERR, 0);
+        }
+        return;
+    }
     strlcpy(s_pick_ssid, s_aps[idx].ssid, sizeof(s_pick_ssid));
     wifi_pass_view_build(s_pick_ssid);
 }
@@ -205,8 +217,9 @@ static void wifi_list_fill(void)
     }
     for (int i = 0; i < s_ap_n; i++) {
         char row[80];
-        snprintf(row, sizeof(row), "%.32s  %d%s", s_aps[i].ssid, s_aps[i].rssi,
-                 s_aps[i].secure ? " " LV_SYMBOL_EYE_CLOSE : "");
+        snprintf(row, sizeof(row), "%.32s  %d%s%s", s_aps[i].ssid, s_aps[i].rssi,
+                 s_aps[i].secure ? " " LV_SYMBOL_EYE_CLOSE : "",
+                 s_aps[i].enterprise ? "  企业网" : "");
         lv_obj_t *btn = lv_button_create(g_view);
         lv_obj_set_size(btn, LV_PCT(100), 46);
         lv_obj_add_event_cb(btn, wifi_item_cb, LV_EVENT_CLICKED,
@@ -221,6 +234,13 @@ static void wifi_list_fill(void)
     }
 
     /* 底部按钮：重新扫描 / 关闭 */
+    /* 提示行（企业网点击等反馈；每次刷新列表重建） */
+    g_net_tip = panel_label(g_mask, "点击网络连接；标注\"企业网\"的 EAP 网络不支持",
+                            &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_align(g_net_tip, LV_ALIGN_BOTTOM_MID, 0, -74);
+    lv_obj_set_width(g_net_tip, 440);
+    lv_label_set_long_mode(g_net_tip, LV_LABEL_LONG_WRAP);
+
     lv_obj_t *rescan = lv_button_create(g_mask);
     lv_obj_set_size(rescan, 190, 46);
     lv_obj_align(rescan, LV_ALIGN_BOTTOM_LEFT, 20, -18);
