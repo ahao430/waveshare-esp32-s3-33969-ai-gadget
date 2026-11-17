@@ -50,40 +50,13 @@ static lv_obj_t *g_pass_eye_sym;    /* 眼睛图标（切换状态反馈） */
  * 任务（prov_auto 教训：connect→save→backup 链 6KB 溢出，8KB 实测
  * 稳），扫描/试连串行投递（面板场景天然互斥）。模拟器保留 pthread。
  */
-#ifdef ESP_PLATFORM
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-static StaticTask_t s_wifi_tcb;
-static StackType_t s_wifi_stack[8192 / sizeof(StackType_t)];
-static TaskHandle_t s_wifi_task;
-static void *(*s_wifi_fn)(void *);
-static void *s_wifi_arg;
-
-static void wifi_panel_task_main(void *arg)
-{
-    (void)arg;
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        void *(*fn)(void *) = s_wifi_fn;
-        void *a = s_wifi_arg;
-        if (fn) fn(a);
-    }
-}
-#endif /* ESP_PLATFORM */
-
 static int panel_thread_start(void *(*fn)(void *), void *arg)
 {
 #ifdef ESP_PLATFORM
-    if (!s_wifi_task) {
-        s_wifi_task = xTaskCreateStatic(wifi_panel_task_main, "wifi_panel",
-                                        8192 / sizeof(StackType_t), NULL,
-                                        5, s_wifi_stack, &s_wifi_tcb);
-        if (!s_wifi_task) return -1; /* 仅 .bss 就绪前理论失败 */
-    }
-    s_wifi_fn = fn;
-    s_wifi_arg = arg;
-    xTaskNotifyGive(s_wifi_task); /* 串行执行：忙碌中投递会排队（通知计数） */
-    return 0;
+    /* 投共享静态任务（ui_bg_task_post）：曾建独立 8KB .bss 静态栈，
+     * 把内部 RAM 压破 SPI DMA 临界点（扫描列表画不出来，Draw bitmap
+     * NO_MEM 刷屏，2026-11-17 实证）——共享语音任务的 16KB 栈零新增。 */
+    return ui_bg_task_post(fn, arg);
 #else
     /* 模拟器：直接 pthread（无内存约束） */
     static const size_t tiers[] = { 16 * 1024, 12 * 1024, 8 * 1024 };
@@ -185,7 +158,14 @@ static void wifi_connect_cb(lv_event_t *e)
     lv_obj_t *lbl = lv_obj_get_child(g_view, 0);
     lv_label_set_text(lbl, "连接中…（最长 15 秒）");
     lv_obj_set_style_text_color(lbl, UI_TEXT_DIM, 0);
-    if (panel_thread_start(wifi_connect_worker, NULL) != 0) {
+    int prc = panel_thread_start(wifi_connect_worker, NULL);
+    if (prc == -2) {
+        s_worker_busy = false;
+        lv_label_set_text(lbl, "系统忙（语音处理中），稍后再试");
+        lv_obj_set_style_text_color(lbl, UI_ERR, 0);
+        return;
+    }
+    if (prc != 0) {
         s_worker_busy = false;
         lv_label_set_text(lbl, "设备内存紧张，请重试");
         lv_obj_set_style_text_color(lbl, UI_ERR, 0);
@@ -254,7 +234,14 @@ static void wifi_rescan_cb(lv_event_t *e)
     lv_obj_t *st = panel_label(g_view, "扫描中…（约 3 秒）", &lv_font_cn_14, UI_TEXT_DIM);
     lv_obj_align(st, LV_ALIGN_TOP_MID, 0, 56);
     s_worker_busy = true;
-    if (panel_thread_start(wifi_scan_worker, (void *)wifi_scan_done_async) != 0) {
+    int prc = panel_thread_start(wifi_scan_worker, (void *)wifi_scan_done_async);
+    if (prc == -2) {
+        s_worker_busy = false;
+        lv_label_set_text(st, "系统忙（语音处理中），稍后再试");
+        lv_obj_set_style_text_color(st, UI_ERR, 0);
+        return;
+    }
+    if (prc != 0) {
         s_worker_busy = false;
         lv_label_set_text(st, "设备内存紧张，请重试");
         lv_obj_set_style_text_color(st, UI_ERR, 0);

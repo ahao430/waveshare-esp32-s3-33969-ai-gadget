@@ -38,6 +38,11 @@ enum ui_app_id {
 };
 
 /* 构建全部页面并显示 Launcher（main 里调用一次） */
+/* 低频后台 worker 投递到共享静态任务（真机；16KB 栈，零新增 .bss）。
+ * 返回 0=已排队 -1=任务创建失败 -2=忙（语音回合/其它 worker 执行中）。
+ * 模拟器无此机制（各处直接 pthread）。 */
+int ui_bg_task_post(void *(*fn)(void *), void *arg);
+
 void ui_init(void);
 
 /* 回到桌面 */

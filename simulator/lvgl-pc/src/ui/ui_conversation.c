@@ -278,8 +278,10 @@ static volatile bool s_voice_busy;
 /* bot picker/sync/apply 也投本任务执行：内部 RAM 碎片化后 16KB pthread
  * 栈必 ENOMEM 且静默失败（2026-11-17 实证，"点下拉没反应"）。
  * 与 PTT 语音回合互斥（同一任务串行），busy 时调用方给 UI 提示。 */
-static volatile int s_botw_kind; /* 0=无 1=picker 2=sync 3=apply 4=reset */
+static volatile int s_botw_kind; /* 0=无 1=picker 2=sync 3=apply 4=reset 5=通用 */
 static volatile int s_botw_arg;
+static void *(*s_botw_fn)(void *); /* kind=5 通用投递（Wi-Fi 面板等跨模块 worker） */
+static void *s_botw_fn_arg;
 static void *bot_picker_worker(void *arg);
 static void *bot_sync_worker(void *arg);
 static void *bot_pick_apply_worker(void *arg);
@@ -297,9 +299,35 @@ static void voice_task_main(void *arg)
         else if (k == 2) bot_sync_worker(NULL);
         else if (k == 3) bot_pick_apply_worker((void *)(intptr_t)s_botw_arg);
         else if (k == 4) chat_reset_worker(NULL);
+        else if (k == 5 && s_botw_fn) {
+            void *(*fn)(void *) = s_botw_fn;
+            void *a = s_botw_fn_arg;
+            s_botw_fn = NULL;
+            fn(a);
+        }
         else voice_work_once();
         s_voice_busy = false;
     }
+}
+
+/* 跨模块低频 worker 投递（Wi-Fi 面板扫描/试连等）：共享本静态任务
+ * 的 16KB 栈，零新增 .bss（2026-11-17：配网页独立 8KB 静态栈曾把
+ * 内部 RAM 压破 SPI DMA 临界点 → 列表画不出来）。
+ * 与语音回合/bot worker 互斥：busy 返回 -2（调用方提示稍后再试）。 */
+int ui_bg_task_post(void *(*fn)(void *), void *arg)
+{
+    if (!s_voice_task) {
+        s_voice_task = xTaskCreateStatic(voice_task_main, "voice",
+                                         VOICE_TASK_STACK / sizeof(StackType_t),
+                                         NULL, 5, s_voice_stack, &s_voice_tcb);
+        if (!s_voice_task) return -1;
+    }
+    if (s_voice_busy) return -2;
+    s_botw_fn = fn;
+    s_botw_fn_arg = arg;
+    s_botw_kind = 5;
+    xTaskNotifyGive(s_voice_task);
+    return 0;
 }
 
 static int voice_start(void)
