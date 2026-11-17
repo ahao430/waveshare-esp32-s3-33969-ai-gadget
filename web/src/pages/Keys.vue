@@ -116,7 +116,7 @@ const rows = [
 
   <div class="mt-4 flex items-center gap-3">
     <button class="btn" :disabled="!loaded || busy" @click="save">保存按键配置</button>
-    <span class="text-xs text-dim">默认：电源短按回首页 · BOOT 短按返回 · KEY 短按交给应用、长按语音说话</span>
+    <span class="text-xs text-dim">默认：BOOT 短按返回 · KEY 短按交给应用、长按语音说话</span>
   </div>
 
   <div class="card mt-4 text-xs text-dim">

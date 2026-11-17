@@ -290,7 +290,7 @@ scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归�
 | BOOT | 返回 | 配网页（固定） |
 | KEY3 | 交给应用（可配） | 语音说话 PTT（可配） |
 
-- 电源键两态行为在固件硬编码（main.c PWR CLICK/LONG 分支），Web 按键页只读展示；Bridge keymap 的 pwr_short 字段保留给模拟器演示，真机不消费。
+- 电源键两态行为在固件硬编码（main.c PWR CLICK/LONG 分支），Web 按键页只读展示；Bridge keymap 的 `pwr_short` 字段仅为 API 兼容保留——已移出可配置槽位（POST 一律忽略、恒返回存储值），设备与模拟器均不消费（模拟器 ui_keys.c PWR 分支为无操作）。
 - 改这两个行为 = 改固件（用户 2026-11-17 明确要求锁定）。
 
 ### 后台运行规则（ADR-011，新增 App 必须遵守）

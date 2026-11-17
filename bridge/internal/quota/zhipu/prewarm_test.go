@@ -38,7 +38,7 @@ func newPrewarmEnv(t *testing.T, weeklyUsed float64) *prewarmTestEnv {
 			]}
 		}`, 42.5, weeklyUsed)))
 	})
-	lightPath := "/api/paas/v4/chat/completions"
+	lightPath := "/api/coding/paas/v4/chat/completions" /* 36d3091：套餐消耗唯一通道（坑 #24） */
 	mux.HandleFunc(lightPath, func(w http.ResponseWriter, req *http.Request) {
 		if env.lightFn == nil {
 			w.WriteHeader(http.StatusOK)

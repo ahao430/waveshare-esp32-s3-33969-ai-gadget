@@ -53,7 +53,9 @@ void ui_key_dispatch(ui_key_t key)
 {
     switch (key) {
     case UI_KEY_PWR:
-        action_exec(g_cfg.pwr_short, NULL);
+        /* 2026-11-17 用户拍板：PWR 短按=息屏/点亮切换，固件固定行为。
+         * 屏保在真机 main.c（saver_enter/saver_exit），模拟器无此设施，
+         * 无操作；g_cfg.pwr_short 仅为配置链兼容保留，不再消费。 */
         break;
     case UI_KEY_BOOT:
         action_exec(g_cfg.boot_short, NULL);

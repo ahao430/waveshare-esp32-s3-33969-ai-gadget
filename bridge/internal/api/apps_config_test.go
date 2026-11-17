@@ -282,7 +282,7 @@ func TestKeysConfig(t *testing.T) {
 		t.Fatal("want fixed long-press info")
 	}
 
-	// 修改 + 回读
+	// 修改 + 回读（pwr_short 已锁定：body 值被忽略）
 	code, out = doJSON(t, "POST", srv.URL+"/api/v1/keys",
 		`{"pwr_short":"none","boot_short":"home","key3_short":"back","key3_long":"none"}`)
 	if code != 200 {
@@ -293,9 +293,12 @@ func TestKeysConfig(t *testing.T) {
 	if km["boot_short"] != "home" || km["key3_long"] != "none" {
 		t.Fatalf("keymap not persisted: %v", km)
 	}
+	if km["pwr_short"] != "home" {
+		t.Fatalf("pwr_short is locked, must stay %q, got %v", "home", km["pwr_short"])
+	}
 
-	// 非法动作拒绝（pwr_short 无 back）
-	code, out = doJSON(t, "POST", srv.URL+"/api/v1/keys", `{"pwr_short":"back"}`)
+	// 非法动作拒绝（boot_short 无 ptt；pwr_short 不再校验）
+	code, out = doJSON(t, "POST", srv.URL+"/api/v1/keys", `{"boot_short":"ptt"}`)
 	if code != 400 {
 		t.Fatalf("want 400, got %d %v", code, out)
 	}

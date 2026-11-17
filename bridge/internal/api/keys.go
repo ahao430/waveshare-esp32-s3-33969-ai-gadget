@@ -1,6 +1,8 @@
 // keys.go — 三物理键短按/长按映射配置（POWER_MANAGEMENT §13.4）。
-// 可配置：PWR 短按、BOOT 短按、KEY3 短按+长按。
-// 固定不可改：PWR 长按=开关机（PMU 硬件）、BOOT 长按=配网页。
+// 可配置：BOOT 短按、KEY3 短按+长按。
+// 固定不可改（2026-11-17 用户拍板）：PWR 短按=息屏/点亮、PWR 长按=关机
+// （PMU 硬件）、BOOT 长按=配网页。PWRShort 字段仅为 API 兼容保留，
+// POST 一律忽略、GET 恒返回存储值（设备/模拟器均不消费）。
 // 设备启动时 GET /api/v1/keys 拉取（与主题同机制：Web 下发优先）。
 package api
 
@@ -24,9 +26,8 @@ type Keymap struct {
 // defaultKeymap 与设备出厂行为一致（POWER_MANAGEMENT §13.4 默认映射）。
 var defaultKeymap = Keymap{PWRShort: "home", BOOTShort: "back", KEY3Short: "app", KEY3Long: "ptt"}
 
-// keyActions 每个槽位的合法动作。
+// keyActions 每个槽位的合法动作（pwr_short 已锁定为固件固定行为，不在表内）。
 var keyActions = map[string][]string{
-	"pwr_short":  {"home", "none"},
 	"boot_short": {"back", "home", "none"},
 	"key3_short": {"app", "back", "home", "none"},
 	"key3_long":  {"ptt", "none"},
@@ -78,7 +79,8 @@ func serveKeys(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			"keymap": km,
 			// 固定项：设备端不消费，供 Web 展示"不可修改"。
 			"fixed": map[string]string{
-				"pwr_long":  "开关机（PMU 硬件行为，不可修改）",
+				"pwr_short": "息屏/点亮（固定，不可修改）",
+				"pwr_long":  "关机（PMU 硬件行为，不可修改）",
 				"boot_long": "打开配网页（固定，不可修改）",
 			},
 			"actions": keyActions,
@@ -93,7 +95,7 @@ func serveKeys(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			return
 		}
 		for slot, allowed := range keyActions {
-			v := body.PWRShort
+			v := ""
 			switch slot {
 			case "boot_short":
 				v = body.BOOTShort
@@ -112,7 +114,7 @@ func serveKeys(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			}
 		}
 		km := Keymap{ // 空槽回落默认，存完整值
-			PWRShort:  orDefault(body.PWRShort, defaultKeymap.PWRShort),
+			PWRShort:  readKeymap().PWRShort, // 已锁定：忽略 body，恒保留存储值
 			BOOTShort: orDefault(body.BOOTShort, defaultKeymap.BOOTShort),
 			KEY3Short: orDefault(body.KEY3Short, defaultKeymap.KEY3Short),
 			KEY3Long:  orDefault(body.KEY3Long, defaultKeymap.KEY3Long),
