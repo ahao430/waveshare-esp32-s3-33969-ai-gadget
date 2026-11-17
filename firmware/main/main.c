@@ -891,6 +891,14 @@ static void wifi_ps_update(void *arg)
 {
     (void)arg;
     bool fast = true;
+    /* 配网面板打开期间（断连/扫描敏感窗口）锁全速，不做任何切换 */
+    if (wifi_prov_manual()) {
+        if (s_wifi_ps_cur != WIFI_PS_NONE) {
+            s_wifi_ps_cur = WIFI_PS_NONE;
+            if (esp_wifi_set_ps(WIFI_PS_NONE) != ESP_OK) s_wifi_ps_cur = -1;
+        }
+        return;
+    }
     if (s_pm_ok) { /* 无电源信息（PMU 不可用）时保守保持全速 */
         battery_status_t st = power_manager_snapshot();
         if (!st.usb_connected && !st.charging) { /* 电池供电 */
@@ -931,14 +939,6 @@ static void wifi_start(void)
      * "remote cfg 偶发卡顿疑 DNS" 的真凶即它。交互期全速（PS_NONE）
      * 实测 RTT 6~18ms。开机先全速，之后按电源/场景 1s 粒度自动档
      * （wifi_ps_update，策略表见其头注释）。 */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-    s_wifi_ps_cur = WIFI_PS_NONE;
-    const esp_timer_create_args_t ps_args = {
-        .callback = wifi_ps_update, .name = "wifi_ps",
-    };
-    esp_timer_handle_t ps_timer = NULL;
-    ESP_ERROR_CHECK(esp_timer_create(&ps_args, &ps_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(ps_timer, 1000000));
 
     /* 凭据优先级：NVS（配网页保存，ADR-009）→ wifi_secret.h 编译兜底 */
     char ssid[33] = "", pass[WIFI_PROV_PASS_MAX] = "";
@@ -959,6 +959,18 @@ static void wifi_start(void)
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
     }
     ESP_ERROR_CHECK(esp_wifi_start());
+    /* set_ps 必须在 started 之后调用才生效（在 start 前调会被驱动
+     * 重置回默认 MIN_MODEM——2026-11-17 实证：设备实际一直跑省电态，
+     * PM 唤醒状态机全程激活，配网面板的断连+扫描并发触发驱动 PHY
+     * track_pll 定时器 deinit/init 竞态 → ppTask abort 重启）。 */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    s_wifi_ps_cur = WIFI_PS_NONE;
+    const esp_timer_create_args_t ps_args = {
+        .callback = wifi_ps_update, .name = "wifi_ps",
+    };
+    esp_timer_handle_t ps_timer = NULL;
+    ESP_ERROR_CHECK(esp_timer_create(&ps_args, &ps_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(ps_timer, 1000000));
     if (ssid[0] != '\0') {
         ESP_LOGI(TAG, "wifi connecting to \"%s\" (creds=%s) ...", ssid, src);
         if (strcmp(src, "wifi_secret.h") == 0) {
