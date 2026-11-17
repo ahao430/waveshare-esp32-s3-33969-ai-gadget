@@ -269,6 +269,7 @@ static void fetch_subscriptions(gadget_state_t *st)
                 if (cJSON_IsNumber(bal)) {
                     const char *u = cJSON_IsString(unit) ? unit->valuestring : "";
                     if (strcmp(u, "CNY") == 0) u = "";
+                    else if (strcmp(u, "usd") == 0) u = "$"; /* newapi：$427.48 而非 usd427.48 */
                     snprintf(s->balance, sizeof(s->balance), "%s%.2f", u, bal->valuedouble);
                 }
             }

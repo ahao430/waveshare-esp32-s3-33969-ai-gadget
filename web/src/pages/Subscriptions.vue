@@ -156,7 +156,7 @@ async function loadSnaps() {
           expires: e.snapshot.plan_expires_at,
           balance:
             c0 && c0.balance != null
-              ? `${c0.unit === 'CNY' || !c0.unit ? '¥' : c0.unit}${c0.balance.toFixed(2)}`
+              ? `${{ CNY: '¥', usd: '$' }[c0.unit ?? ''] ?? c0.unit}${c0.balance.toFixed(2)}`
               : undefined,
         }
       } else {
