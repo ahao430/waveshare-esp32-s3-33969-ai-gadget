@@ -28,7 +28,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
 | 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连；Bridge 地址簿+预置） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
-| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700，20px）；订阅页加粗字体 `scripts/gen_sub_font.sh`（wght=700，12/14/16px，GB2312 全集——页面标题/套餐名是动态数据，必须全集防豆腐） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh |
+| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700，20px） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh。**勿为单页新增独立字库**——rodata 与 PSRAM 堆共享映射窗口，见坑 #25 |
 | 大号数字 | `scripts/gen_cn_font.sh` 末尾生成 `font_digits_84.c`（Montserrat 84px 子集） | 番茄钟倒计时用；逐位固定宽度渲染防抖 |
 | 桌面图标 | `simulator/lvgl-pc/assets/icons/`（88×88） | 缺位自动回退符号；名字与 launcher catalog key 对齐；`gen_icon_embed.sh` 的 SKIP 里的图标不嵌入固件（省 flash） |
 
@@ -214,6 +214,13 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     abort → 开机无限重启。改任何静态 .bss/保留额度前先算这本账：
     RESERVE_INTERNAL 或 .bss 多吃 ~12KB 就够把 Wi-Fi 顶下线。
 
+25. **rodata 与 PSRAM 堆池共享 8MB 映射窗口——单页独立字库直接挤垮语音（2026-11-17）**：
+    为订阅页加粗做了三档 GB2312 全集字体（font_sub_12/14/16，+1.67MB rodata），刷机后
+    PSRAM 显示 86%（堆池 4416K→~3MB），TTS 的 768KB 大块分配失败，三个聊天语音全哑。
+    **规则：`SPIRAM_RODATA=y`（坑 #14 组合）下 .rodata 每涨 ~1MB，PSRAM 堆池就缩 ~1MB；
+    加字库/内嵌素材前先算 rodata 池账（idf.py size 看 .rodata），单页美化需求一律优先
+    用现有 font_cn_*/font_pomo_* 解决。**已整体回退（池恢复 4416K）。
+
 ### 内存 / flash 账本（2026-11-17 实测，Bridge 链稳定版）
 
 > 数字全部来自真机串口日志与 `idf.py size`，改内存相关配置前后对照这本账。
@@ -223,7 +230,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **7.46MiB 已用 / 11.94MiB（62%，余 37%）** | 2026-11-17：GB2312 全集字库并入主库（净 +2.0MB，删 dyn_14）+ 订阅页加粗全集字库三档（font_sub_12/14/16，+1.67MiB——粗体笔画 RLE 压缩率差，比常规档贵） |
+| factory(app) | **5.57MiB 已用 / 11.94MiB（47%，余 53%）** | 2026-11-17：GB2312 全集字库并入主库（净 +2.0MB，删 dyn_14）。订阅页加粗字库三档（+1.67MiB）当日回退——挤占 PSRAM 堆池致聊天语音哑（坑 #25） |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 
@@ -239,7 +246,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 - .bss 大项：语音任务静态栈 16KB（16384，picker/sync/apply/reset 共用）、绘制缓冲 19.2KB（480×10×2 双缓冲）、hangprobe 8KB。
 - **改任何 .bss/保留额度前先算 Wi-Fi 底线**：post-ui free 掉到 ~56KB 以下 `esp_wifi_init` 分不到 10 个 RX 缓冲 → 开机 abort 循环（坑 #19）。
 
-**PSRAM（8MB octal @80MHz）**：**进堆的只有 ~4.4MB**（4416K+23K 池，
+**PSRAM（8MB octal @80MHz）**：**进堆的只有 ~4.4MB**（4416K+23K 池；**rodata 涨堆池就缩**，font_sub 事故实证，坑 #25，
   `Adding pool of 4416K`）——FETCH/RODATA=y 的虚拟地址窗口划分代价
   （这两开关 =n 时池可到 8192K，直连版实测，但会引爆坑 #14 崩溃，见下）。
   桌面稳态 heap 余 ~1.76MB（开机 4.53MB 总堆）；语音回合期另有 256KB

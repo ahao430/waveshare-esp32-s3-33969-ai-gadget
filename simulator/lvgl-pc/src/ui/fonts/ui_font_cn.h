@@ -30,11 +30,10 @@ LV_FONT_DECLARE(font_digits_56);
  * 2026-11-16 布局重做（统计改 20px）后不再使用，已从固件移除省 flash。 */
 LV_FONT_DECLARE(font_pomo_20);
 
-/* 订阅页加粗字体（Noto Sans SC wght=700，只含 ui_app_pages.c 字符串；
- * 见 scripts/gen_sub_font.sh。2026-11-17 用户反馈"小字看不清的加粗"，
- * 同尺寸直接换粗体、不加字号，布局零风险） */
-LV_FONT_DECLARE(font_sub_12);
-LV_FONT_DECLARE(font_sub_14);
-LV_FONT_DECLARE(font_sub_16);
+/* 注意：不要为单页再生成独立字库（曾做 font_sub_12/14/16 订阅页加粗
+ * 全集三档，+1.67MB rodata 直接把 PSRAM 堆池从 4416K 挤到 ~3MB，TTS
+ * 768KB 大块分配失败、三个聊天语音全哑——2026-11-17 实证已回退）。
+ * rodata 与 PSRAM 堆共享 8MB 映射窗口（SPIRAM_RODATA=y，坑 #14 组合），
+ * 加字库/大素材前先算池账。 */
 
 #endif /* UI_FONT_CN_H */

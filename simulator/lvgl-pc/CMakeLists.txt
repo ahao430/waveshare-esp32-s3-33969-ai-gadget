@@ -72,9 +72,6 @@ add_executable(gadget_sim
   src/ui/fonts/font_digits_56.c
   src/ui/icons/pomo_mascot.c
   src/ui/fonts/font_pomo_20.c
-  src/ui/fonts/font_sub_12.c
-  src/ui/fonts/font_sub_14.c
-  src/ui/fonts/font_sub_16.c
 )
 target_include_directories(gadget_sim PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
