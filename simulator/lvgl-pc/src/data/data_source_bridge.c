@@ -211,7 +211,7 @@ static void fetch_subscriptions(gadget_state_t *st)
     if (status == 200) {
         root = cJSON_Parse(buf);
         if (root) cache_write("cache/subscriptions.json", buf);
-        else DSLOG("subs fetch: HTTP 200 但 JSON 解析失败");
+        else DSLOG("subs fetch: HTTP 200 但 JSON 解析失败（可能 chunked）");
     }
     if (!root) { /* 断网/解析失败：回读 TF 离线缓存（ADR-010） */
         cache_mt = cache_read("cache/subscriptions.json", buf, BRIDGE_BUF_SIZE);

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -389,12 +390,25 @@ func fetchAndStore(ctx context.Context, d Deps, p quota.QuotaProvider) quota.Sto
 	return view
 }
 
+// writeJSON 先序列化再一次性写出，并显式声明 Content-Length。
+// 关键（2026-11-17 真机事故）：流式 Encoder 写超过 Go 内部 2048B 缓冲时
+// 自动降级 Transfer-Encoding: chunked，设备端 http_get 不会去块——
+// 聚合快照涨到 2.5KB（newapi 完整快照）当天，设备订阅页全体消失。
+// 显式 Content-Length 强 Go 走定长响应，任何体积都不分块。
 func writeJSON(w http.ResponseWriter, logger *slog.Logger, code int, v any) {
+	body, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		logger.Error("marshal response", "err", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"marshal_failed"}`))
+		return
+	}
+	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(code)
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
+	if _, err := w.Write(body); err != nil {
 		logger.Error("write response", "err", err)
 	}
 }

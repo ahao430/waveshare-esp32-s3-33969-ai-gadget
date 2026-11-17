@@ -132,6 +132,59 @@ int http_put_json(const char *url, const char *body, char *out, size_t out_len, 
     return http_request("PUT", url, body, out, out_len, timeout_ms, NULL);
 }
 
+/* ---- chunked 去块（2026-11-17 真机事故兜底） ----
+ * 事故：Bridge 流式写 JSON，聚合快照涨过 Go 内部 2048B 缓冲即自动
+ * Transfer-Encoding: chunked，本路径不解析分块帧 → cJSON 拿到
+ * "9ec\r\n{...}" 解析失败 → 设备订阅页全体消失。服务端已改显式
+ * Content-Length 定长；此处再兜一层，任何端点未来意外分块也不至于黑屏。
+ * 流式路径（SSE/语音）早有 read_chunked_body，仅缓冲路径缺。 */
+
+/* 大小写不敏感的限定区域包含判断（避免 memmem 不可移植）。 */
+static bool ci_contains(const char *hay, size_t n, const char *needle)
+{
+    size_t m = strlen(needle);
+    if (m == 0 || n < m) return false;
+    for (size_t i = 0; i + m <= n; i++) {
+        size_t j = 0;
+        while (j < m && (hay[i + j] | 0x20) == (needle[j] | 0x20)) j++;
+        if (j == m) return true;
+    }
+    return false;
+}
+
+/* 就地去块：hex-size [;ext] CRLF data CRLF ... 0 CRLF（trailer 忽略）。
+ * 首行就解析不出十六进制 → 原样返回（不是 chunked）；中途异常返回
+ * 已去块部分。 */
+static size_t dechunk_inplace(char *b, size_t len)
+{
+    size_t rd = 0, wr = 0;
+    for (;;) {
+        size_t sz = 0;
+        int digits = 0;
+        while (rd < len) {
+            char c = b[rd];
+            int v;
+            if (c >= '0' && c <= '9') v = c - '0';
+            else if (c >= 'a' && c <= 'f') v = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F') v = c - 'A' + 10;
+            else break;
+            sz = sz * 16 + (size_t)v;
+            rd++;
+            digits++;
+        }
+        if (!digits) return wr > 0 ? wr : len; /* 不是 chunked / 异常 */
+        while (rd < len && b[rd] != '\n') rd++; /* 跳过扩展段到行尾 */
+        if (rd < len) rd++;
+        if (sz == 0) break; /* 终止块（trailer 不消费） */
+        if (rd + sz > len) sz = len - rd; /* 截断防御 */
+        memmove(b + wr, b + rd, sz);
+        wr += sz;
+        rd += sz;
+        while (rd < len && (b[rd] == '\r' || b[rd] == '\n')) rd++; /* 块尾 CRLF */
+    }
+    return wr;
+}
+
 /* ---- 流式 POST（SSE 用） ---- */
 
 /* 连接并发出 POST；返回 fd（调用方负责 close），负值=错误。 */
@@ -356,6 +409,17 @@ static int http_request(const char *method, const char *url, const char *json_bo
     int status = atoi(out + 9);
     char *resp_body = strstr(out, "\r\n\r\n");
     if (!resp_body) return -7;
+    /* 响应头区域探测 chunked（见 dechunk_inplace 注释），是则去块 */
+    if (ci_contains(out, (size_t)(resp_body - out), "Transfer-Encoding:") &&
+        ci_contains(out, (size_t)(resp_body - out), "chunked")) {
+        resp_body += 4;
+        size_t raw_len = total - (size_t)(resp_body - out);
+        size_t dec_len = dechunk_inplace(resp_body, raw_len);
+        if (resp_body != out) memmove(out, resp_body, dec_len);
+        out[dec_len] = '\0';
+        if (body_len_out) *body_len_out = dec_len;
+        return status;
+    }
     resp_body += 4;
     size_t resp_len = total - (size_t)(resp_body - out);
     if (resp_body != out) memmove(out, resp_body, resp_len);
