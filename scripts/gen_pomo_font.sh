@@ -61,6 +61,24 @@ sys.stdout.write("".join(sorted(chars)))
 PY
 )
 
+# LV_SYMBOL_*（FontAwesome 私有区）：粗体字体也要带符号字形，否则
+# 按钮里的 ⟳/▶/⏸/✓ 全是豆腐块（2026-11-17 实证）。做法同 gen_cn_font.sh。
+FA_WOFF="simulator/lvgl-pc/build/_deps/lvgl-src/scripts/built_in_font/FontAwesome5-Solid+Brands+Regular.woff"
+FA_SYMBOLS=$(python3 - <<'PYEOF'
+import re, sys
+hdr = "simulator/lvgl-pc/build/_deps/lvgl-src/src/font/lv_symbol_def.h"
+out = set()
+with open(hdr, encoding="utf-8", errors="ignore") as f:
+    for m in re.finditer(r'#define\s+LV_SYMBOL_\w+\s+"((?:\\x[0-9A-Fa-f]{2})+)"', f.read()):
+        raw = bytes(int(b, 16) for b in re.findall(r'\\x([0-9A-Fa-f]{2})', m.group(1)))
+        try:
+            out.add(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            pass
+sys.stdout.write("".join(sorted(out)))
+PYEOF
+)
+
 echo "== 番茄钟字符集：$(printf '%s' "$SYMBOLS" | wc -m | tr -d ' ') 个 CJK/符号"
 mkdir -p "$OUT_DIR"
 for sz in 20; do
@@ -69,6 +87,8 @@ for sz in 20; do
     --font "$BOLD_TTF" \
     --range "0x20-0x7E" \
     --symbols "$SYMBOLS" \
+    --font "$FA_WOFF" \
+    --symbols "$FA_SYMBOLS" \
     --size "$sz" --bpp 4 --no-kerning \
     --format lvgl --lv-include "lvgl.h" \
     --lv-font-name "font_pomo_${sz}" \

@@ -598,8 +598,13 @@ static void update_ui(bool phase_changed)
                 lv_obj_set_style_bg_grad_color(b, lv_color_hex(c1), 0);
                 lv_obj_set_style_bg_grad_dir(b, LV_GRAD_DIR_HOR, 0);
                 lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-                lv_obj_set_style_text_color(b, lv_color_hex(0x000000), 0);
+                /* 文字色必须打到 label 子对象：ui_label 创建时写死了
+                 * 局部样式，父按钮上的 text_color 不会被子对象继承 */
+                lv_obj_t *lbl = lv_obj_get_child(b, 0);
+                if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
             } else {
+                lv_obj_t *lbl = lv_obj_get_child(b, 0);
+                if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(POMO_DIM), 0);
                 lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
                 lv_obj_set_style_text_color(b, lv_color_hex(POMO_DIM), 0);
             }
@@ -788,8 +793,8 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_bg_color(dot, lv_color_hex(POMO_RED), 0);
     lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_t *title = ui_label(scr, "番茄时钟", &lv_font_cn_16, UI_TEXT);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 168, 30);
+    lv_obj_t *title = ui_label(scr, "番茄时钟", &font_pomo_20, UI_TEXT);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 166, 28);
     /* 设置入口：无框小按钮（避免 deprecated 的 add_flag 用法） */
     g_gear = lv_button_create(scr);
     lv_obj_set_size(g_gear, 40, 40);
@@ -820,7 +825,7 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
         lv_obj_set_style_radius(b, 16, 0);
         lv_obj_set_style_border_width(b, 0, 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
-        lv_obj_t *l = ui_label(b, segs[i], &lv_font_cn_14, UI_TEXT);
+        lv_obj_t *l = ui_label(b, segs[i], &font_pomo_20, UI_TEXT);
         lv_obj_center(l);
         lv_obj_add_event_cb(b, seg_cb, LV_EVENT_CLICKED,
                             (void *)(intptr_t)(i == 0 ? PH_FOCUS
@@ -871,20 +876,20 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_text_align(colon, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 210);
 
-    /* 环内副题：白色（用户 2026-11-17：灰紫在黑底上看不清） */
-    g_sub_lbl = ui_label(scr, "", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 266);
+    /* 环内副题：白色加粗（用户 2026-11-17：灰紫细体在黑底上看不清） */
+    g_sub_lbl = ui_label(scr, "", &font_pomo_20, UI_TEXT);
+    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 264);
 
-    /* 今日统计胶囊（320×34） */
+    /* 今日统计胶囊（360×36；20px 粗体后文案加宽到 ~350，320 会溢出） */
     lv_obj_t *stbar = lv_obj_create(scr);
-    lv_obj_set_size(stbar, 320, 34);
-    lv_obj_align(stbar, LV_ALIGN_TOP_MID, 0, 340);
+    lv_obj_set_size(stbar, 360, 36);
+    lv_obj_align(stbar, LV_ALIGN_TOP_MID, 0, 338);
     lv_obj_set_style_bg_color(stbar, lv_color_hex(POMO_CARD), 0);
     lv_obj_set_style_bg_opa(stbar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(stbar, 0, 0);
-    lv_obj_set_style_radius(stbar, 17, 0);
+    lv_obj_set_style_radius(stbar, 18, 0);
     lv_obj_clear_flag(stbar, LV_OBJ_FLAG_SCROLLABLE);
-    g_stats_lbl = ui_label(stbar, "", &lv_font_cn_14, UI_TEXT);
+    g_stats_lbl = ui_label(stbar, "", &font_pomo_20, UI_TEXT);
     lv_obj_center(g_stats_lbl);
 
     /* 底部双钮：重置（暗） + 开始/暂停（橙红渐变主钮） */
@@ -895,7 +900,7 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_radius(b_reset, 26, 0);
     lv_obj_set_style_border_width(b_reset, 0, 0);
     lv_obj_set_style_shadow_width(b_reset, 0, 0);
-    lv_obj_t *rl = ui_label(b_reset, LV_SYMBOL_REFRESH " 重置", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *rl = ui_label(b_reset, LV_SYMBOL_REFRESH " 重置", &font_pomo_20, UI_TEXT);
     lv_obj_center(rl);
     lv_obj_add_event_cb(b_reset, reset_cb, LV_EVENT_CLICKED, NULL);
 
@@ -908,9 +913,9 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_radius(g_btn_play, 26, 0);
     lv_obj_set_style_border_width(g_btn_play, 0, 0);
     lv_obj_set_style_shadow_width(g_btn_play, 0, 0);
-    /* 主钮文字黑色（橙红渐变上白字对比不够，用户 2026-11-17） */
+    /* 主钮文字黑色加粗（橙红渐变上白细字对比不够，用户 2026-11-17） */
     g_lbl_play = ui_label(g_btn_play, LV_SYMBOL_PLAY " 开始",
-                          &lv_font_cn_14, lv_color_hex(0x000000));
+                          &font_pomo_20, lv_color_hex(0x000000));
     lv_obj_center(g_lbl_play);
     lv_obj_add_event_cb(g_btn_play, start_pause_cb, LV_EVENT_CLICKED, NULL);
 
