@@ -69,3 +69,6 @@ firmware/main/wifi_secret.h
 # 模拟器 TF 卡演示目录（GADGET_SD_DIR 默认）
 /sdcard/
 simulator/lvgl-pc/sdcard/
+
+# 私有部署笔记（真实主机/路径/凭据位置，绝不进公共仓库）
+*.local.md
