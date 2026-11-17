@@ -598,7 +598,7 @@ static void update_ui(bool phase_changed)
                 lv_obj_set_style_bg_grad_color(b, lv_color_hex(c1), 0);
                 lv_obj_set_style_bg_grad_dir(b, LV_GRAD_DIR_HOR, 0);
                 lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-                lv_obj_set_style_text_color(b, lv_color_white(), 0);
+                lv_obj_set_style_text_color(b, lv_color_hex(0x000000), 0);
             } else {
                 lv_obj_set_style_bg_opa(b, LV_OPA_TRANSP, 0);
                 lv_obj_set_style_text_color(b, lv_color_hex(POMO_DIM), 0);
@@ -852,27 +852,28 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_arc_set_angles(g_arc, 0, 360);
     lv_obj_add_event_cb(g_arc, pomo_arc_draw_cb, LV_EVENT_DRAW_POST, NULL);
 
-    /* 环内：吉祥物（76px RGB565，随模式/完成态切换）。y=127 让黑底
-     * 方块完全进环内（描边内缘 128）——首版 118 的黑角会切环顶。 */
+    /* 环内：吉祥物（64px RGB565，随模式/完成态切换）。y=132 让黑底
+     * 方块完全离开描边（220px 环描边内缘 128，76px 版黑角曾切环）。 */
     g_mascot = lv_image_create(scr);
     lv_image_set_src(g_mascot, phase_mascot());
-    lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 127);
+    lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 132);
 
-    /* 环内倒计时（64px 逐位定宽，冒号 20px）：位置绝对稳定不抖 */
-    static const lv_coord_t DXS[4] = { -64, -26, 26, 64 };
+    /* 环内倒计时（56px 逐位定宽）：位置绝对稳定不抖 */
+    static const lv_coord_t DXS[4] = { -60, -24, 24, 60 };
     for (int i = 0; i < 4; i++) {
-        g_digits[i] = ui_label(scr, "0", &font_digits_64, UI_TEXT);
-        lv_obj_set_width(g_digits[i], 44);
+        g_digits[i] = ui_label(scr, "0", &font_digits_56, UI_TEXT);
+        lv_obj_set_width(g_digits[i], 40);
         lv_obj_set_style_text_align(g_digits[i], LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 206);
+        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 202);
     }
-    lv_obj_t *colon = ui_label(scr, ":", &font_digits_64, UI_TEXT);
-    lv_obj_set_width(colon, 20);
+    lv_obj_t *colon = ui_label(scr, ":", &font_digits_56, UI_TEXT);
+    lv_obj_set_width(colon, 18);
     lv_obj_set_style_text_align(colon, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 206);
+    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 202);
 
-    g_sub_lbl = ui_label(scr, "", &lv_font_cn_14, lv_color_hex(POMO_DIM));
-    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 268);
+    /* 环内副题：白色（用户 2026-11-17：灰紫在黑底上看不清） */
+    g_sub_lbl = ui_label(scr, "", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 258);
 
     /* 今日统计胶囊（320×34） */
     lv_obj_t *stbar = lv_obj_create(scr);
@@ -883,7 +884,7 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_border_width(stbar, 0, 0);
     lv_obj_set_style_radius(stbar, 17, 0);
     lv_obj_clear_flag(stbar, LV_OBJ_FLAG_SCROLLABLE);
-    g_stats_lbl = ui_label(stbar, "", &lv_font_cn_14, lv_color_hex(POMO_TEXT2));
+    g_stats_lbl = ui_label(stbar, "", &lv_font_cn_14, UI_TEXT);
     lv_obj_center(g_stats_lbl);
 
     /* 底部双钮：重置（暗） + 开始/暂停（橙红渐变主钮） */
@@ -894,7 +895,8 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_radius(b_reset, 26, 0);
     lv_obj_set_style_border_width(b_reset, 0, 0);
     lv_obj_set_style_shadow_width(b_reset, 0, 0);
-    ui_label(b_reset, LV_SYMBOL_REFRESH " 重置", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *rl = ui_label(b_reset, LV_SYMBOL_REFRESH " 重置", &lv_font_cn_14, UI_TEXT);
+    lv_obj_center(rl);
     lv_obj_add_event_cb(b_reset, reset_cb, LV_EVENT_CLICKED, NULL);
 
     g_btn_play = lv_button_create(scr);
@@ -906,8 +908,9 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_radius(g_btn_play, 26, 0);
     lv_obj_set_style_border_width(g_btn_play, 0, 0);
     lv_obj_set_style_shadow_width(g_btn_play, 0, 0);
+    /* 主钮文字黑色（橙红渐变上白字对比不够，用户 2026-11-17） */
     g_lbl_play = ui_label(g_btn_play, LV_SYMBOL_PLAY " 开始",
-                          &lv_font_cn_14, lv_color_white());
+                          &lv_font_cn_14, lv_color_hex(0x000000));
     lv_obj_center(g_lbl_play);
     lv_obj_add_event_cb(g_btn_play, start_pause_cb, LV_EVENT_CLICKED, NULL);
 

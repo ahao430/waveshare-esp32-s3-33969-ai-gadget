@@ -18,7 +18,7 @@ out_dir, src = sys.argv[1], sys.argv[2]
 img = Image.open(src).convert("RGB")
 W, H = img.size
 qw, qh = W // 2, H // 2
-SIZE = 76
+SIZE = 64
 
 # 四宫格 → 状态：左上=专注 右上=休息 左下=长休 右下=完成
 cells = [("focus", 0, 0), ("rest", 1, 0), ("long", 0, 1), ("done", 1, 1)]
