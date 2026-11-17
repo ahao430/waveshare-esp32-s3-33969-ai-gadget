@@ -27,7 +27,11 @@ static const char *TAG = "audio_esp32";
 #define PCM_CHUNK_FRAMES 320
 /* TTS 上限 1.5MB ≈ 48s 16k/16bit 语音（PSRAM）。
  * 流式一句一合成，~110 字中文实测 664KB，512KB 会截尾。 */
-#define AUDIO_TTS_MAX_BYTES (1536 * 1024)
+#define AUDIO_TTS_MAX_BYTES (768 * 1024) /* 24s @16k/16bit（2026-11-17：
+    * 原 1.5MB 连续块在 ALWAYSINTERNAL=2048 后分不出——LVGL 小对象
+    * 搬进 PSRAM 吃掉连续空间，'tts buffer alloc failed' 刷屏、有字幕
+    * 无声音。流式播放按写/读游标推进，768KB 覆盖 99% 回复（实测
+    * 272KB/16.8s），更长的尾部丢弃可接受） */
 
 static esp_codec_dev_handle_t g_spk, g_mic;
 static atomic_bool g_inited;
