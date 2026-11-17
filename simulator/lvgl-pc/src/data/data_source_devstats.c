@@ -62,7 +62,11 @@ static int cpu_load_sample(void)
             return -1; /* 极小概率失败（静态缓冲不会 ENOMEM）*/
         }
         s_spin_started = true;
-        return -1; /* 首次只启动，下个窗口出数 */
+        /* 播种基准点：首个窗口即可算（否则要多等一轮采集，实测三轮才出数） */
+        prev_cnt = s_spin_cnt;
+        prev_us = esp_timer_get_time();
+        prev_valid = true;
+        return -1; /* 本轮只启动，下轮（30s）出数 */
     }
     uint32_t now = s_spin_cnt;
     int64_t us = esp_timer_get_time();

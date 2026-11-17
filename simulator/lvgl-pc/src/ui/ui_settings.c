@@ -812,109 +812,105 @@ static void page_device(lv_obj_t *scr)
     g_devs_gen++;
     g_devs_valid = false;
 
-    /* 右上刷新胶囊（纯容器+可点，时间随采集结果更新） */
-    lv_obj_t *pill = lv_obj_create(scr);
-    lv_obj_set_size(pill, 118, 34);
-    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, 0, 2);
-    lv_obj_set_style_bg_color(pill, lv_color_hex(0x1A1A3E), 0);
-    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(pill, lv_color_hex(0x2A2A55), 0);
-    lv_obj_set_style_border_width(pill, 1, 0);
-    lv_obj_set_style_radius(pill, 17, 0);
-    lv_obj_clear_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(pill, devs_refresh_cb, LV_EVENT_CLICKED, NULL);
-    g_devs_time_lbl = ui_label(pill, LV_SYMBOL_REFRESH " 刷新",
-                               &lv_font_cn_12, lv_color_hex(0x22D3EE));
-    lv_obj_center(g_devs_time_lbl);
-
     /* 行 1：SRAM / PSRAM / Flash（142×138 ×3） */
     lv_obj_t *c0 = devs_metric_card(scr, 142, 138, LV_SYMBOL_BARS, 0x38BDF8,
                                     "SRAM", 0x38BDF8, 0x3B82F6, 0);
-    lv_obj_align(c0, LV_ALIGN_TOP_LEFT, 0, 44);
+    lv_obj_align(c0, LV_ALIGN_TOP_LEFT, 0, 40);
     lv_obj_t *c1 = devs_metric_card(scr, 142, 138, LV_SYMBOL_DRIVE, 0xC084FC,
                                     "PSRAM", 0xC084FC, 0xA855F7, 1);
-    lv_obj_align(c1, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_align(c1, LV_ALIGN_TOP_MID, 0, 40);
     lv_obj_t *c2 = devs_metric_card(scr, 142, 138, LV_SYMBOL_SAVE, 0x4ADE80,
                                     "Flash", 0x4ADE80, 0x22C55E, 2);
-    lv_obj_align(c2, LV_ALIGN_TOP_RIGHT, 0, 44);
+    lv_obj_align(c2, LV_ALIGN_TOP_RIGHT, 0, 40);
 
-    /* 行 2：TF 卡（左 209）+ CPU 温度/负载（右 229，双栏） */
-    lv_obj_t *tf = devs_metric_card(scr, 209, 104, LV_SYMBOL_SD_CARD, 0x34D399,
+    /* 行 2：TF 卡（左 209）+ CPU 温度/负载（右 229，双栏），加高防底注裁切 */
+    lv_obj_t *tf = devs_metric_card(scr, 209, 118, LV_SYMBOL_SD_CARD, 0x34D399,
                                     "TF 卡", 0x34D399, 0x2DD4BF, 3);
-    lv_obj_align(tf, LV_ALIGN_TOP_LEFT, 0, 190);
+    lv_obj_align(tf, LV_ALIGN_TOP_LEFT, 0, 186);
     /* TF 卡紧凑版：大数字与数据同行、条与备注上移（骨架 helper 后微调） */
-    lv_obj_align(g_devs_pct[3], LV_ALIGN_TOP_LEFT, 2, 20);
-    lv_obj_align(g_devs_data[3], LV_ALIGN_TOP_RIGHT, -2, 30);
-    lv_obj_align(g_devs_bar[3], LV_ALIGN_TOP_LEFT, 2, 62);
-    lv_obj_align(g_devs_note[3], LV_ALIGN_TOP_LEFT, 2, 80);
+    lv_obj_align(g_devs_pct[3], LV_ALIGN_TOP_LEFT, 2, 22);
+    lv_obj_align(g_devs_data[3], LV_ALIGN_TOP_RIGHT, -2, 32);
+    lv_obj_align(g_devs_bar[3], LV_ALIGN_TOP_LEFT, 2, 72);
+    lv_obj_align(g_devs_note[3], LV_ALIGN_TOP_LEFT, 2, 94);
 
     lv_obj_t *cpu = lv_obj_create(scr);
-    lv_obj_set_size(cpu, 229, 104);
-    lv_obj_align(cpu, LV_ALIGN_TOP_RIGHT, 0, 190);
+    lv_obj_set_size(cpu, 229, 118);
+    lv_obj_align(cpu, LV_ALIGN_TOP_RIGHT, 0, 186);
     ui_style_card(cpu);
     lv_obj_clear_flag(cpu, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *div = lv_obj_create(cpu);
-    lv_obj_set_size(div, 1, 76);
-    lv_obj_align(div, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_set_size(div, 1, 90);
+    lv_obj_align(div, LV_ALIGN_TOP_MID, 0, 14);
     lv_obj_set_style_bg_color(div, lv_color_hex(0x2A2A55), 0);
     lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(div, 0, 0);
 
     lv_obj_t *ti = ui_label(cpu, LV_SYMBOL_TINT, &lv_font_montserrat_14,
                             lv_color_hex(0xF59E0B));
-    lv_obj_align(ti, LV_ALIGN_TOP_LEFT, 12, 4);
+    lv_obj_align(ti, LV_ALIGN_TOP_LEFT, 12, 6);
     lv_obj_t *tt = ui_label(cpu, "CPU 温度", &lv_font_cn_12, UI_TEXT);
-    lv_obj_align(tt, LV_ALIGN_TOP_LEFT, 32, 2);
+    lv_obj_align(tt, LV_ALIGN_TOP_LEFT, 32, 4);
     g_devs_temp_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
-    lv_obj_align(g_devs_temp_lbl, LV_ALIGN_TOP_LEFT, 12, 24);
+    lv_obj_align(g_devs_temp_lbl, LV_ALIGN_TOP_LEFT, 12, 32);
     lv_obj_t *tn = ui_label(cpu, "芯片内部温度", &lv_font_cn_12,
                             lv_color_hex(0x8A8AB0));
-    lv_obj_align(tn, LV_ALIGN_TOP_LEFT, 12, 58);
+    lv_obj_align(tn, LV_ALIGN_TOP_LEFT, 12, 72);
 
     lv_obj_t *li = ui_label(cpu, LV_SYMBOL_LOOP, &lv_font_montserrat_14,
                             lv_color_hex(0x38BDF8));
-    lv_obj_align(li, LV_ALIGN_TOP_LEFT, 128, 4);
+    lv_obj_align(li, LV_ALIGN_TOP_LEFT, 128, 6);
     lv_obj_t *lt = ui_label(cpu, "CPU 负载", &lv_font_cn_12, UI_TEXT);
-    lv_obj_align(lt, LV_ALIGN_TOP_LEFT, 148, 2);
+    lv_obj_align(lt, LV_ALIGN_TOP_LEFT, 148, 4);
     g_devs_load_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
-    lv_obj_align(g_devs_load_lbl, LV_ALIGN_TOP_LEFT, 128, 24);
+    lv_obj_align(g_devs_load_lbl, LV_ALIGN_TOP_LEFT, 128, 32);
     lv_obj_t *ln = ui_label(cpu, "双核平均值", &lv_font_cn_12,
                             lv_color_hex(0x8A8AB0));
-    lv_obj_align(ln, LV_ALIGN_TOP_LEFT, 128, 58);
+    lv_obj_align(ln, LV_ALIGN_TOP_LEFT, 128, 72);
 
-    /* 行 3：运行时间 | 设备信息 */
+    /* 行 3：运行时间 | 设备信息（加高：72→90，"自上次开机"曾被裁切） */
     lv_obj_t *bot = lv_obj_create(scr);
-    lv_obj_set_size(bot, 448, 72);
-    lv_obj_align(bot, LV_ALIGN_TOP_MID, 0, 304);
+    lv_obj_set_size(bot, 448, 90);
+    lv_obj_align(bot, LV_ALIGN_TOP_MID, 0, 312);
     ui_style_card(bot);
     lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *div2 = lv_obj_create(bot);
-    lv_obj_set_size(div2, 1, 48);
-    lv_obj_align(div2, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_set_size(div2, 1, 62);
+    lv_obj_align(div2, LV_ALIGN_TOP_MID, 0, 14);
     lv_obj_set_style_bg_color(div2, lv_color_hex(0x2A2A55), 0);
     lv_obj_set_style_bg_opa(div2, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(div2, 0, 0);
 
     lv_obj_t *ul = ui_label(bot, "系统运行时间", &lv_font_cn_12,
                             lv_color_hex(0x8A8AB0));
-    lv_obj_align(ul, LV_ALIGN_TOP_LEFT, 14, 6);
+    lv_obj_align(ul, LV_ALIGN_TOP_LEFT, 14, 10);
     g_devs_up_lbl = ui_label(bot, "--", &lv_font_cn_16, UI_TEXT);
-    lv_obj_align(g_devs_up_lbl, LV_ALIGN_TOP_LEFT, 14, 26);
+    lv_obj_align(g_devs_up_lbl, LV_ALIGN_TOP_LEFT, 14, 32);
     lv_obj_t *un = ui_label(bot, "自上次开机", &lv_font_cn_12,
                             lv_color_hex(0x8A8AB0));
-    lv_obj_align(un, LV_ALIGN_TOP_LEFT, 14, 50);
+    lv_obj_align(un, LV_ALIGN_TOP_LEFT, 14, 62);
 
     lv_obj_t *cl = ui_label(bot, "设备信息", &lv_font_cn_12,
                             lv_color_hex(0x8A8AB0));
-    lv_obj_align(cl, LV_ALIGN_TOP_LEFT, 238, 6);
+    lv_obj_align(cl, LV_ALIGN_TOP_LEFT, 238, 10);
     g_devs_chip_lbl = ui_label(bot, "--", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_devs_chip_lbl, LV_ALIGN_TOP_LEFT, 238, 26);
+    lv_obj_align(g_devs_chip_lbl, LV_ALIGN_TOP_LEFT, 238, 32);
     g_devs_fw_lbl = ui_label(bot, "--", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_devs_fw_lbl, LV_ALIGN_TOP_LEFT, 238, 46);
+    lv_obj_align(g_devs_fw_lbl, LV_ALIGN_TOP_LEFT, 238, 56);
 
-    lv_obj_t *note = ui_label(scr, "负载为空闲采样估算 · 温度为芯片内部读数",
-                              &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -4);
+    /* 底部：刷新胶囊（可点，采集后显示时间） */
+    lv_obj_t *pill = lv_obj_create(scr);
+    lv_obj_set_size(pill, 150, 36);
+    lv_obj_align(pill, LV_ALIGN_TOP_MID, 0, 410);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(0x1A1A3E), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(pill, lv_color_hex(0x2A2A55), 0);
+    lv_obj_set_style_border_width(pill, 1, 0);
+    lv_obj_set_style_radius(pill, 18, 0);
+    lv_obj_clear_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(pill, devs_refresh_cb, LV_EVENT_CLICKED, NULL);
+    g_devs_time_lbl = ui_label(pill, LV_SYMBOL_REFRESH " 刷新",
+                               &lv_font_cn_14, lv_color_hex(0x22D3EE));
+    lv_obj_center(g_devs_time_lbl);
 
     /* 首采 + 30s 自动刷新（页面关闭/切子页即杀） */
     devs_fetch_start();
