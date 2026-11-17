@@ -249,9 +249,11 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 **PSRAM（8MB octal @80MHz）**：**进堆的只有 ~4.4MB**（4416K+23K 池；**rodata 涨堆池就缩**，font_sub 事故实证，坑 #25，
   `Adding pool of 4416K`）——FETCH/RODATA=y 的虚拟地址窗口划分代价
   （这两开关 =n 时池可到 8192K，直连版实测，但会引爆坑 #14 崩溃，见下）。
-  桌面稳态 heap 余 ~1.76MB（开机 4.53MB 总堆）；语音回合期另有 256KB
-  录音缓冲（G_CAPTURE，8s@16k）+ 1.5MB TTS 缓冲（AUDIO_TTS_MAX_BYTES，
-  惰性分配）。**给 PSRAM 大块分配留的余量上限就是 ~1.7MB**。
+  2026-11-17 坑 #25 修复后真机实测（系统状态页口径）：开机桌面已用
+  ~30%（余 ~3.0MB）；语音回合后 ~73%——TTS 768KB（AUDIO_TTS_MAX_BYTES，
+  坑 #22 从 1.5MB 降档，分配后常驻）+ 录音缓冲 256KB（G_CAPTURE，
+  8s@16k）+ 回合临时分配，余 ~1.2MB。**给 PSRAM 大块分配留的余量
+  上限就是 ~1.2MB**。
 
 **Mac 侧服务**：Bridge 进程 RSS ~15MB（Go，API+Web 静态托管同进程同端口 :8081）；无独立 Web 进程。
 
