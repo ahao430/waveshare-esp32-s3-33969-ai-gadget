@@ -92,7 +92,9 @@ Bridge 地址」是一个**地址簿**——可保存多个地址、点一下即
    cd firmware && idf.py build
    idf.py -p /dev/cu.usbmodem1101 flash
    ```
-   `firmware/main/wifi_secret.h` 只是出厂兜底，**推荐不填**，用第 4 步运行期配网。
+   `firmware/main/wifi_secret.h` 只是出厂兜底，**自己开发推荐不填**（用第 4 步
+   运行期配网）；**给别人打包分发时推荐预填**（对方刷完即用，跳过配网，
+   见下文《给他人打包固件》）。
 
 4. **设备配网**：设备「设置 → 网络与连接」——Wi-Fi 设置（扫描→选网→软键盘输密码，
    存 NVS 重启记住）+ Bridge 地址（填第 2 步部署的地址；多地址可保存切换）。
@@ -104,6 +106,35 @@ Bridge 地址」是一个**地址簿**——可保存多个地址、点一下即
 
 6. **多环境**：在设备「Bridge 地址」地址簿里同时保存本机与服务器地址，
    开发调试切本机、正式使用切服务器，一键生效。
+
+### 给他人打包固件（免配网开箱即用）
+
+把 Wi-Fi 和 Bridge 地址在**编译期**写进固件，对方拿到 `ai_gadget.bin`
+刷入即连网即连 Bridge，零设备端操作：
+
+```bash
+cd firmware/main
+cp wifi_secret.h.example wifi_secret.h   # 该文件已 gitignore，不会入库
+# 编辑 wifi_secret.h：
+#   WIFI_SSID / WIFI_PASS     对方现场的 2.4G Wi-Fi
+#   BRIDGE_HOST               你的 Bridge 地址（默认激活的那个）
+#   BRIDGE_SEED_HOSTS         地址簿预置（逗号分隔；公网域名写明文 80，
+#                             不要带 :8081——见下「地址端口注意」）
+cd .. && idf.py build
+# 交付 build/ai_gadget.bin，对方刷写：
+#   esptool.py --chip esp32s3 write_flash 0x0 build/bootloader.bin \
+#     0x8000 build/partition_table/partition-table.bin 0x20000 build/ai_gadget.bin
+```
+
+注意事项：
+- **凭据安全**：`wifi_secret.h` 不进 Git；交付的 bin 内含 Wi-Fi 明文密码，
+  只发给信任的人（NVS 运行期配网的凭据优先级高于编译兜底，对方之后
+  可在设备上改成自己的网络）。
+- **地址端口注意**：设备 HTTP 只支持明文 `http://`（无 TLS、不带
+  Authorization）——公网 Bridge 必须开 80 明文端口且不能设
+  `BRIDGE_TOKEN`；`BRIDGE_SEED_HOSTS` 里公网地址写域名不带端口。
+- **后续可换**：所有预填项都能在设备「设置 → 网络与连接」里改
+  （Wi-Fi 扫描重配 / Bridge 地址切换），编译兜底只在 NVS 从未配置过时生效。
 
 ### 日常使用
 
