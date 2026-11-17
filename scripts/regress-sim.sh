@@ -34,5 +34,5 @@ if [ "$uniq" -lt 6 ]; then
     exit 1
 fi
 
-echo "PASS: 10 App 全部渲染，唯一画面 $uniq/10（2026-11-18 基线 = 10，阅读器已接入）
+echo "PASS: 10 App 全部渲染，唯一画面 $uniq/10（2026-11-18 基线 = 10，阅读器已接入）"
 echo "  截帧留存: $OUT"
