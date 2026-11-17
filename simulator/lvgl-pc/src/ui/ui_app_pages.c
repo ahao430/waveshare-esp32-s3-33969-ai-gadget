@@ -312,19 +312,24 @@ static void quota_arc_draw_cb(lv_event_t *e)
     lv_layer_t *layer = lv_event_get_layer(e);
 
     lv_color_t c0, c1;
-    if (r->arc_used >= 100) {       /* 耗尽：红（亮红→正红，小跨度） */
-        c0 = lv_color_hex(0xFF7B6B);
-        c1 = lv_color_hex(0xE84C4C);
-    } else if (r->arc_used >= 80) { /* 剩余 <20%：橙（小跨度） */
+    int remain = 100 - r->arc_used;
+    /* 状态色按「已用额度」分档（用户 2026-11-17 拍板）：用一半=黄、
+     * 用八成=橙、用九成=红，其余=青绿；各档均小跨度微渐变、两端
+     * 对深背景醒目 */
+    if (r->arc_used >= 90) {
+        c0 = lv_color_hex(0xFF6B6B);
+        c1 = lv_color_hex(0xE85555);   /* 用 ≥90%：红 */
+    } else if (r->arc_used >= 80) {
         c0 = lv_color_hex(0xFFC75E);
-        c1 = lv_color_hex(0xFF9A3D);
-    } else {                        /* 正常：固定青绿微渐变（用户 2026-11-17
-                                       指定色系，不随主题；亮薄荷→青绿） */
+        c1 = lv_color_hex(0xFF9A3D);   /* 用 ≥80%：橙 */
+    } else if (r->arc_used >= 50) {
+        c0 = lv_color_hex(0xFFD34D);
+        c1 = lv_color_hex(0xFFAD33);   /* 用 ≥50%：黄 */
+    } else {
         c0 = lv_color_hex(0x63F2CF);
-        c1 = lv_color_hex(0x1FD3A6);
+        c1 = lv_color_hex(0x1FD3A6);   /* 正常：青绿 */
     }
 
-    int remain = 100 - r->arc_used;
     if (remain <= 0) return; /* 空弧不画 */
 
     lv_area_t coords;
