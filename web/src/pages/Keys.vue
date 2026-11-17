@@ -61,7 +61,8 @@ const rows = [
     key: 'pwr_short' as const,
     name: '电源键（PWRON）',
     options: ['home', 'none'],
-    longLabel: '开关机（PMU 硬件行为，不可修改）',
+    longLabel: '关机（长按：PMU 硬件行为，不可修改）',
+    shortLabel: '息屏/点亮（固定，不可修改）', /* 2026-11-17 用户拍板 */
   },
   {
     key: 'boot_short' as const,
@@ -81,8 +82,9 @@ const rows = [
 <template>
   <h1 class="page-title">物理按键</h1>
   <p class="page-sub">
-    三个顶部按键的短按/长按行为。电源键与 BOOT 键的长按是硬件/固件固定功能，
-    不可修改；可配置项保存后由设备联网拉取。
+    三个顶部按键的短按/长按行为。电源键短按（息屏/点亮）与长按（关机）
+    均为固件固定功能，不可修改；BOOT 长按固定；其余可配置项保存后由
+    设备联网拉取。
   </p>
 
   <p v-if="message" class="mb-4 text-sm" :class="messageErr ? 'text-err' : 'text-ok'">{{ message }}</p>
@@ -90,7 +92,10 @@ const rows = [
   <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
     <div v-for="row in rows" :key="row.key" class="card space-y-3">
       <h3 class="font-semibold">{{ row.name }}</h3>
-      <label class="block text-sm">
+      <div v-if="row.shortLabel" class="rounded border border-dashed border-line px-3 py-2 text-xs text-dim">
+        短按：<span class="text-warn">🔒 {{ row.shortLabel }}</span>
+      </div>
+      <label v-else class="block text-sm">
         <span class="mb-1 block text-dim">短按</span>
         <select v-model="km[row.key]" class="input" :disabled="!loaded">
           <option v-for="o in row.options" :key="o" :value="o">{{ optNames[o] }}</option>

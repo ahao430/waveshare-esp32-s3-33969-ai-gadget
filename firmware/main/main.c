@@ -666,7 +666,17 @@ static void key_task(void *arg)
         }
         if (pwr & BATT_KEY_CLICK) {
             g_key_activity_us = esp_timer_get_time(); /* 活动记账 */
-            ESP_LOGI(TAG, "PWR short press (no-op for now)");
+            /* PWR 短按 = 息屏/点亮切换（固定行为，不可配置——用户
+             * 2026-11-17 拍板：短按息屏、长按关机都要锁定）。息屏 =
+             * 屏保态（黑底时钟 + 亮度 15%），触摸屏或 KEY3 也可唤醒。 */
+            display_lock();
+            if (g_saver_on) {
+                saver_exit();
+            } else {
+                saver_enter();
+            }
+            display_unlock();
+            ESP_LOGI(TAG, "PWR short press -> screensaver %s", g_saver_on ? "ON" : "OFF");
         }
 
         if (bits & EV_KEY3_BIT) {
