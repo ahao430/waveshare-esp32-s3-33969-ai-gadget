@@ -28,8 +28,15 @@ lv_color_t g_ui_accent2;
 
 static int g_theme_idx;
 
+void ui_font_cn24_anchor(void); /* 文件尾定义：24px 字库引用链锚 */
+
 void ui_theme_select(int idx)
 {
+    /* 24px 字库锚点挂这里（开机必调）。原挂在 ui_fmt_md_hhmm 里，
+     * 2026-11-17 订阅页重排后该函数失去全部调用点被 GC——连带锚点
+     * 失效、cn_24 的 1.1MB 字库被 --gc-sections 剔除（固件体积实证
+     * 5.79MB→4.69MB），恢复引用链。 */
+    ui_font_cn24_anchor();
     if (idx < 0 || idx >= UI_THEME_COUNT) idx = 0;
     g_theme_idx = idx;
     g_ui_accent  = lv_color_hex(k_ui_themes[idx].accent);
@@ -75,11 +82,8 @@ void ui_fmt_hhmm(long unix_ts, char *buf, int buflen)
     strftime(buf, (size_t)buflen, "%H:%M", &tmv);
 }
 
-void ui_font_cn24_anchor(void); /* 文件尾定义：24px 字库引用链锚 */
-
 void ui_fmt_md_hhmm(long unix_ts, char *buf, int buflen)
 {
-    ui_font_cn24_anchor(); /* 字库引用链锚（见文件尾注释） */
     time_t t = (time_t)unix_ts;
     struct tm tmv;
     localtime_r(&t, &tmv);
