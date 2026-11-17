@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -194,8 +195,12 @@ func defaultLightRequester(p *Provider) LightRequester {
 			"max_tokens": 1,
 			"stream":     false,
 		})
+		/* Coding Plan 专用端点（/api/coding/paas/v4）：普通端点
+		 * /api/paas/v4 是标准 API 计费通道，套餐 key 调套餐模型直接
+		 * 429、调免费模型不计套餐（2026-11-17 before/after 实证）。
+		 * 来源：AIVault 的 kZhipuOpenaiBase（社区验证）。 */
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-			p.baseURL+"/api/paas/v4/chat/completions", bytes.NewReader(body))
+			strings.TrimRight(p.baseURL, "/")+"/api/coding/paas/v4/chat/completions", bytes.NewReader(body))
 		if err != nil {
 			return 0, err
 		}
