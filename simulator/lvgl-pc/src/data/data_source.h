@@ -297,4 +297,34 @@ int ds_files_remote_list(char *out, int cap);
 /* Bridge → TF downloads/<name>（≤2MB；msg 回显结果文案）：0/-1 */
 int ds_files_download(const char *name, char *msg, int msg_cap);
 
+/* ---------------- 设备状态采集（设置→系统状态仪表盘） ----------------
+ * 阻塞采集（TF FATFS 扫描/Flash 分区遍历，~几十毫秒到几百毫秒），
+ * 必须在 worker 线程调用（坑 #11），不在 LVGL 线程。
+ * 真机：heap_caps 水位/温度传感器/分区表/自旋采样负载；
+ * 模拟器：设计稿量级的演示值（TF 卡为 sdcard/ 目录真实占用）。 */
+typedef struct {
+    bool valid; /* 采集成功（任一项可用即 true） */
+    /* SRAM（内部 RAM，字节） */
+    uint32_t sram_free, sram_min, sram_total;
+    /* PSRAM（字节） */
+    uint32_t psram_free, psram_total;
+    /* Flash：app 分区（程序）+ storage 分区（内置 FATFS，未挂载时
+     * used=0 且 flash_fs_mounted=false，容量仍给出） */
+    uint32_t flash_app_used, flash_app_total;
+    uint32_t flash_fs_used, flash_fs_total;
+    bool flash_fs_mounted;
+    /* TF 卡（容量可超 4GB → 64 位） */
+    bool tf_mounted;
+    uint64_t tf_used, tf_total;
+    /* CPU */
+    float cpu_temp; /* ℃；<0 = 不支持 */
+    int cpu_load;   /* 双核平均 %（0~100，滚动窗口） */
+    /* 系统 */
+    uint32_t uptime_s;
+    char chip[40];  /* "ESP32-S3 双核 240MHz" */
+    char fw_ver[40];/* "v1.0.0"（放宽防 format-truncation） */
+} ds_devstats_t;
+
+bool ds_devstats_fetch(ds_devstats_t *out);
+
 #endif /* DATA_SOURCE_H */

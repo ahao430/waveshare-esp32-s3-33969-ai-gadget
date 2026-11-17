@@ -35,6 +35,7 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/data/data_source_bridge.c
     ${SIM_SRC_DIR}/data/data_source_wifi.c
     ${SIM_SRC_DIR}/data/data_source_files.c
+    ${SIM_SRC_DIR}/data/data_source_devstats.c
     ${SIM_SRC_DIR}/data/http_client.c
     ${SIM_SRC_DIR}/data/mock_data.c
     # 语音会话：voice_session 状态机 + mock（模拟器双端兼容）+ esp32 真机 ops
@@ -56,6 +57,8 @@ idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
         esp_wifi esp_event esp_netif nvs_flash  # Wi-Fi/NVS
         esp_timer                               # esp_timer_get_time
         esp_driver_gpio esp_driver_i2c          # KEY3 ISR / I2C 扫描探针
+        esp_driver_tsens                        # devstats：芯片温度传感器
+        app_update spi_flash fatfs              # devstats：OTA 描述/分区/FATFS 用量
         pthread                                 # esp_pthread_set_cfg：线程栈放 PSRAM
         lwip)                                   # esp_sntp 对时
 

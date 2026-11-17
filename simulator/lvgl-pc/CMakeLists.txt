@@ -41,6 +41,7 @@ add_executable(gadget_sim
   src/data/data_source_bridge.c
   src/data/data_source_wifi.c
   src/data/data_source_files.c
+  src/data/data_source_devstats.c
   src/data/http_client.c
   src/data/mock_data.c
   src/ui/app_manager.c

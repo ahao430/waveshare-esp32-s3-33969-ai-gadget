@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "app_manager.h"
 #include "data_source.h"
@@ -568,98 +569,356 @@ static void page_service(lv_obj_t *scr)
     lv_obj_set_width(note, 430);
 }
 
-/* ---------------- 页面：设备信息 ---------------- */
+/* ---------------- 页面：系统状态（仪表盘，设计稿 霓虹系统状态仪表盘） ----------------
+ * SRAM/PSRAM/Flash/TF/CPU 五卡 + 底部运行时间/设备信息条。采集走 worker
+ * （FATFS 扫描/分区遍历阻塞，坑 #11），页面代际防悬垂，30s 自动刷新。 */
+
+static lv_timer_t *g_devs_timer;
+static unsigned g_devs_gen; /* 页面代际：切页/重建即失效在途采集 */
+static volatile bool g_devs_busy;
+static bool g_devs_valid;
+
+/* 动态控件引用（页面销毁即作废，build_page 切页时置 NULL） */
+static lv_obj_t *g_devs_time_lbl;                       /* 刷新·HH:MM:SS */
+static lv_obj_t *g_devs_pct[4];                         /* 0=SRAM 1=PSRAM 2=Flash 3=TF */
+static lv_obj_t *g_devs_data[4], *g_devs_note[4], *g_devs_bar[4];
+static lv_obj_t *g_devs_temp_lbl, *g_devs_load_lbl, *g_devs_up_lbl;
+static lv_obj_t *g_devs_chip_lbl, *g_devs_fw_lbl;
+
+static void fmt_bytes(char *buf, int cap, uint64_t b)
+{
+    if (b < 1024ull * 1024) snprintf(buf, cap, "%u KB", (unsigned)((b + 1023) / 1024));
+    else if (b < 10ull * 1024 * 1024 * 1024)
+        snprintf(buf, cap, "%.1f MB", b / 1048576.0);
+    else snprintf(buf, cap, "%.1f GB", b / 1073741824.0);
+}
+
+static int pct_of(uint64_t used, uint64_t total)
+{
+    if (total == 0 || used > total) return 0;
+    return (int)(used * 100 / total);
+}
+
+/* 卡片备注用短单位（K/M/G）——cn_12 下 "剩余 226 KB · 最低 180 KB"
+ * 超 142px 卡宽被截断，实测要 ≤17 半角位 */
+static void fmt_bytes_short(char *buf, int cap, uint64_t b)
+{
+    if (b < 1024ull * 1024) snprintf(buf, cap, "%uK", (unsigned)((b + 1023) / 1024));
+    else if (b < 10ull * 1024 * 1024 * 1024)
+        snprintf(buf, cap, "%.1fM", b / 1048576.0);
+    else snprintf(buf, cap, "%.1fG", b / 1073741824.0);
+}
+
+static void fmt_uptime(char *buf, int cap, uint32_t s)
+{
+    uint32_t d = s / 86400, h = s % 86400 / 3600, m = s % 3600 / 60;
+    if (d > 0) snprintf(buf, cap, "%u 天 %u 小时", (unsigned)d, (unsigned)h);
+    else if (h > 0) snprintf(buf, cap, "%u 小时 %u 分", (unsigned)h, (unsigned)m);
+    else snprintf(buf, cap, "%u 分钟", (unsigned)m);
+}
+
+/* 采集结果落点（worker 线程写，LVGL 线程读） */
+static ds_devstats_t g_devs_snap;
+
+/* 把最近一次采集结果写进控件（LVGL 线程；控件可能已 NULL） */
+static void devs_apply(void)
+{
+    if (!g_devs_valid) return;
+    const ds_devstats_t *s = &g_devs_snap;
+
+    char a[16], b[16], data[48], note[96], pct[8];
+    /* SRAM：已用% / 已用+总量 / 剩余·历史最低 */
+    uint32_t used = s->sram_total - s->sram_free;
+    snprintf(pct, sizeof(pct), "%d%%", pct_of(used, s->sram_total));
+    fmt_bytes(a, sizeof(a), used);
+    fmt_bytes(b, sizeof(b), s->sram_total);
+    snprintf(data, sizeof(data), "%s / %s", a, b);
+    fmt_bytes_short(a, sizeof(a), s->sram_free);
+    fmt_bytes_short(b, sizeof(b), s->sram_min);
+    snprintf(note, sizeof(note), "剩 %s · 最低 %s", a, b);
+    lv_label_set_text(g_devs_pct[0], pct);
+    lv_label_set_text(g_devs_data[0], data);
+    lv_label_set_text(g_devs_note[0], note);
+    lv_bar_set_value(g_devs_bar[0], pct_of(used, s->sram_total), LV_ANIM_OFF);
+
+    /* PSRAM：堆池口径（实配 8MB，一部分被指令/常量窗口占用进不了堆） */
+    uint32_t pused = s->psram_total - s->psram_free;
+    snprintf(pct, sizeof(pct), "%d%%", pct_of(pused, s->psram_total));
+    fmt_bytes(a, sizeof(a), pused);
+    fmt_bytes(b, sizeof(b), s->psram_total);
+    snprintf(data, sizeof(data), "%s / %s", a, b);
+    fmt_bytes_short(a, sizeof(a), s->psram_free);
+    snprintf(note, sizeof(note), "剩 %s · 实配 8M", a);
+    lv_label_set_text(g_devs_pct[1], pct);
+    lv_label_set_text(g_devs_data[1], data);
+    lv_label_set_text(g_devs_note[1], note);
+    lv_bar_set_value(g_devs_bar[1], pct_of(pused, s->psram_total), LV_ANIM_OFF);
+
+    /* Flash：程序分区 + 内置 storage 分区合计；未挂载只计容量 */
+    uint64_t fused = (uint64_t)s->flash_app_used + s->flash_fs_used;
+    uint64_t ftotal = (uint64_t)s->flash_app_total + s->flash_fs_total;
+    snprintf(pct, sizeof(pct), "%d%%", pct_of(fused, ftotal));
+    fmt_bytes(a, sizeof(a), fused);
+    fmt_bytes(b, sizeof(b), ftotal);
+    snprintf(data, sizeof(data), "%s / %s", a, b);
+    fmt_bytes_short(a, sizeof(a), s->flash_app_used);
+    fmt_bytes_short(b, sizeof(b), s->flash_fs_total);
+    snprintf(note, sizeof(note), "程序 %s · 内置 %s", a, b);
+    lv_label_set_text(g_devs_pct[2], pct);
+    lv_label_set_text(g_devs_data[2], data);
+    lv_label_set_text(g_devs_note[2], note);
+    lv_bar_set_value(g_devs_bar[2], pct_of(fused, ftotal), LV_ANIM_OFF);
+
+    /* TF 卡 */
+    if (s->tf_mounted && s->tf_total > 0) {
+        snprintf(pct, sizeof(pct), "%d%%", pct_of(s->tf_used, s->tf_total));
+        fmt_bytes(a, sizeof(a), s->tf_used);
+        fmt_bytes(b, sizeof(b), s->tf_total);
+        snprintf(data, sizeof(data), "%s / %s", a, b);
+        fmt_bytes_short(a, sizeof(a), s->tf_total - s->tf_used);
+        snprintf(note, sizeof(note), "剩 %s · 已挂载", a);
+    } else {
+        snprintf(pct, sizeof(pct), "--");
+        snprintf(data, sizeof(data), "未插卡");
+        snprintf(note, sizeof(note), "文件 App 将静默降级");
+    }
+    lv_label_set_text(g_devs_pct[3], pct);
+    lv_label_set_text(g_devs_data[3], data);
+    lv_label_set_text(g_devs_note[3], note);
+    lv_bar_set_value(g_devs_bar[3], s->tf_mounted ? pct_of(s->tf_used, s->tf_total) : 0, LV_ANIM_OFF);
+
+    /* CPU 温度/负载（℃ 字形不在字库，用 °C——° 在生成字符集里） */
+    if (s->cpu_temp >= 0) snprintf(note, sizeof(note), "%.1f°C", (double)s->cpu_temp);
+    else snprintf(note, sizeof(note), "--");
+    lv_label_set_text(g_devs_temp_lbl, note);
+    snprintf(note, sizeof(note), "%d%%", s->cpu_load >= 0 ? s->cpu_load : 0);
+    lv_label_set_text(g_devs_load_lbl, s->cpu_load >= 0 ? note : "--");
+
+    /* 底部：运行时间 + 设备信息 */
+    fmt_uptime(note, sizeof(note), s->uptime_s);
+    lv_label_set_text(g_devs_up_lbl, note);
+    lv_label_set_text(g_devs_chip_lbl, s->chip);
+    snprintf(note, sizeof(note), "固件版本 %s", s->fw_ver);
+    lv_label_set_text(g_devs_fw_lbl, note);
+
+    /* 刷新时间 */
+    time_t now = time(NULL);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    char tb[24];
+    snprintf(tb, sizeof(tb), LV_SYMBOL_REFRESH " %02d:%02d",
+             tmv.tm_hour, tmv.tm_min);
+    lv_label_set_text(g_devs_time_lbl, tb);
+}
+
+static void devs_apply_async(void *arg)
+{
+    (void)arg;
+    if (g_page == SP_DEVICE && g_root && g_devs_time_lbl) devs_apply();
+}
+
+static void *devs_worker(void *arg)
+{
+    (void)arg;
+    unsigned gen = g_devs_gen;
+    ds_devstats_fetch(&g_devs_snap);
+    g_devs_valid = true;
+    g_devs_busy = false;
+    if (gen == g_devs_gen) lv_async_call(devs_apply_async, NULL);
+    return NULL;
+}
+
+static void devs_fetch_start(void)
+{
+    if (g_devs_busy) return;
+    g_devs_busy = true;
+#ifdef ESP_PLATFORM
+    /* 真机：投常驻静态栈语音任务（坑 #13/#15 模式，与订阅页同款）。
+     * pthread 走不通——2026-11-17 实测设置页打开后 largest_int 掉到
+     * 10.2KB，16KB/12KB 两档全灭，采集静默不跑、页面全是 "--"。
+     * busy（语音占用中）跳过本轮，30s 后自动重试。 */
+    int rc = ui_bg_task_post(devs_worker, NULL);
+    if (rc != 0) {
+        printf("devs fetch: bg task busy/skip rc=%d\n", rc);
+        g_devs_busy = false;
+    }
+#else
+    if (ui_worker_start(devs_worker, NULL, 16 * 1024) != 0) g_devs_busy = false;
+#endif
+}
+
+static void devs_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (g_page == SP_DEVICE && g_root) devs_fetch_start();
+}
+
+static void devs_refresh_cb(lv_event_t *e)
+{
+    (void)e;
+    devs_fetch_start();
+}
+
+/* 指标卡（SRAM/PSRAM/Flash/TF 共用骨架） */
+static lv_obj_t *devs_metric_card(lv_obj_t *parent, int w, int h,
+                                  const char *sym, uint32_t sym_color,
+                                  const char *title, uint32_t val_color,
+                                  uint32_t grad_to, int idx)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, w, h);
+    ui_style_card(card);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *ic = ui_label(card, sym, &lv_font_montserrat_14,
+                            lv_color_hex(sym_color));
+    lv_obj_align(ic, LV_ALIGN_TOP_LEFT, 2, 2);
+    lv_obj_t *t = ui_label(card, title, &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(t, LV_ALIGN_TOP_LEFT, 22, 0);
+
+    g_devs_pct[idx] = ui_label(card, "--", &lv_font_montserrat_28,
+                               lv_color_hex(val_color));
+    lv_obj_align(g_devs_pct[idx], LV_ALIGN_TOP_LEFT, 2, 20);
+
+    g_devs_data[idx] = ui_label(card, "--", &lv_font_cn_12,
+                                lv_color_hex(0xC6CFE6));
+    lv_obj_align(g_devs_data[idx], LV_ALIGN_TOP_LEFT, 2, 56);
+
+    lv_obj_t *bar = lv_bar_create(card);
+    lv_obj_set_size(bar, w - 20, 8);
+    lv_obj_align(bar, LV_ALIGN_TOP_LEFT, 2, 76);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x2A2A45), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(bar, 4, 0);
+    lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar, lv_color_hex(val_color), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_hex(grad_to), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_bar_set_range(bar, 0, 100);
+    g_devs_bar[idx] = bar;
+
+    g_devs_note[idx] = ui_label(card, "--", &lv_font_cn_12,
+                                lv_color_hex(0x8A8AB0));
+    lv_obj_align(g_devs_note[idx], LV_ALIGN_TOP_LEFT, 2, 92);
+    return card;
+}
 
 static void page_device(lv_obj_t *scr)
 {
-    page_title(scr, "设备信息");
+    page_title(scr, "系统状态");
 
-    lv_obj_t *card1 = lv_obj_create(scr);
-    lv_obj_set_size(card1, LV_PCT(100), 80);
-    lv_obj_align(card1, LV_ALIGN_TOP_MID, 0, 52);
-    ui_style_card(card1);
-    lv_obj_clear_flag(card1, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *dot = lv_obj_create(card1);
-    lv_obj_set_size(dot, 10, 10);
-    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(dot, UI_OK, 0);
-    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(dot, 0, 0);
-    lv_obj_align(dot, LV_ALIGN_LEFT_MID, 4, 0);
-    lv_obj_t *fw = ui_label(card1, "Gadget Firmware v0.1.0-sim", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(fw, LV_ALIGN_LEFT_MID, 22, -12);
-    lv_obj_t *fw2 = ui_label(card1, "构建 2026-11-14 · 运行正常", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(fw2, LV_ALIGN_LEFT_MID, 22, 14);
+    /* 采集代际 +1：上一轮在途结果作废 */
+    g_devs_gen++;
+    g_devs_valid = false;
 
-    /* 电源与电池（PLAN §13.3；模拟器为 mock 演示值，真机 AXP2101 采集） */
-    const gadget_state_t *s = ds_state();
-    lv_obj_t *pwr = lv_obj_create(scr);
-    lv_obj_set_size(pwr, LV_PCT(100), 148);
-    lv_obj_align(pwr, LV_ALIGN_TOP_MID, 0, 140);
-    ui_style_card(pwr);
-    lv_obj_clear_flag(pwr, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *pt = ui_label(pwr, "电源与电池", &lv_font_cn_14, UI_TEXT_DIM);
-    lv_obj_align(pt, LV_ALIGN_TOP_LEFT, 2, 0);
+    /* 右上刷新胶囊（纯容器+可点，时间随采集结果更新） */
+    lv_obj_t *pill = lv_obj_create(scr);
+    lv_obj_set_size(pill, 118, 34);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, 0, 2);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(0x1A1A3E), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(pill, lv_color_hex(0x2A2A55), 0);
+    lv_obj_set_style_border_width(pill, 1, 0);
+    lv_obj_set_style_radius(pill, 17, 0);
+    lv_obj_clear_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(pill, devs_refresh_cb, LV_EVENT_CLICKED, NULL);
+    g_devs_time_lbl = ui_label(pill, LV_SYMBOL_REFRESH " 刷新",
+                               &lv_font_cn_12, lv_color_hex(0x22D3EE));
+    lv_obj_center(g_devs_time_lbl);
 
-    char vbuf[16], pbuf[16];
-    snprintf(vbuf, sizeof(vbuf), "%.2f V", s->battery_voltage_mv / 1000.0);
-    snprintf(pbuf, sizeof(pbuf), "%d%%", s->battery_pct);
-    if (s->battery_present) {
-        lv_obj_t *pv = ui_label(pwr, pbuf, &lv_font_montserrat_20,
-                                s->battery_pct < 20 ? UI_WARN : UI_TEXT);
-        lv_obj_align(pv, LV_ALIGN_TOP_RIGHT, -2, -4);
-        if (s->charging) {
-            lv_obj_t *bolt = ui_label(pwr, LV_SYMBOL_CHARGE, &lv_font_montserrat_14, UI_OK);
-            lv_obj_align(bolt, LV_ALIGN_TOP_RIGHT, -56, 0);
-        }
-    } else {
-        lv_obj_t *pv = ui_label(pwr, s->usb_connected ? "USB" : "--",
-                                &lv_font_montserrat_16, UI_TEXT_DIM);
-        lv_obj_align(pv, LV_ALIGN_TOP_RIGHT, -2, 0);
-    }
+    /* 行 1：SRAM / PSRAM / Flash（142×138 ×3） */
+    lv_obj_t *c0 = devs_metric_card(scr, 142, 138, LV_SYMBOL_BARS, 0x38BDF8,
+                                    "SRAM", 0x38BDF8, 0x3B82F6, 0);
+    lv_obj_align(c0, LV_ALIGN_TOP_LEFT, 0, 44);
+    lv_obj_t *c1 = devs_metric_card(scr, 142, 138, LV_SYMBOL_DRIVE, 0xC084FC,
+                                    "PSRAM", 0xC084FC, 0xA855F7, 1);
+    lv_obj_align(c1, LV_ALIGN_TOP_MID, 0, 44);
+    lv_obj_t *c2 = devs_metric_card(scr, 142, 138, LV_SYMBOL_SAVE, 0x4ADE80,
+                                    "Flash", 0x4ADE80, 0x22C55E, 2);
+    lv_obj_align(c2, LV_ALIGN_TOP_RIGHT, 0, 44);
 
-    const char *chg = s->battery_present
-                          ? (s->charging ? "充电中" : (s->usb_connected ? "USB 供电" : "电池供电"))
-                          : "未检测到电池";
-    const char *rows_pwr[][2] = {
-        { "电池电压", s->battery_present ? vbuf : "--" },
-        { "电池电量", s->battery_present ? pbuf : "--" },
-        { "充电状态", chg },
-        { "USB 供电", s->usb_connected ? "已连接" : "未连接" },
-    };
-    for (int i = 0; i < 4; i++) {
-        lv_obj_t *k = ui_label(pwr, rows_pwr[i][0], &lv_font_cn_12, UI_TEXT_DIM);
-        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 2, 26 + i * 26);
-        lv_obj_t *v = ui_label(pwr, rows_pwr[i][1], &lv_font_cn_12, UI_TEXT);
-        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -2, 26 + i * 26);
-    }
+    /* 行 2：TF 卡（左 209）+ CPU 温度/负载（右 229，双栏） */
+    lv_obj_t *tf = devs_metric_card(scr, 209, 104, LV_SYMBOL_SD_CARD, 0x34D399,
+                                    "TF 卡", 0x34D399, 0x2DD4BF, 3);
+    lv_obj_align(tf, LV_ALIGN_TOP_LEFT, 0, 190);
+    /* TF 卡紧凑版：大数字与数据同行、条与备注上移（骨架 helper 后微调） */
+    lv_obj_align(g_devs_pct[3], LV_ALIGN_TOP_LEFT, 2, 20);
+    lv_obj_align(g_devs_data[3], LV_ALIGN_TOP_RIGHT, -2, 30);
+    lv_obj_align(g_devs_bar[3], LV_ALIGN_TOP_LEFT, 2, 62);
+    lv_obj_align(g_devs_note[3], LV_ALIGN_TOP_LEFT, 2, 80);
 
-    /* 硬件表（规格固定；内存/Flash 动态指标真机采集，PRODUCT_SPEC §4.2） */
-    static const char *rows[][2] = {
-        { "芯片",  "ESP32-S3" },
-        { "CPU",   "双核 LX7 · 240 MHz" },
-        { "Flash", "16 MB" },
-        { "PSRAM", "8 MB" },
-        { "屏幕",  "480 × 480 AMOLED" },
-    };
-    lv_obj_t *card2 = lv_obj_create(scr);
-    lv_obj_set_size(card2, LV_PCT(100), 136);
-    lv_obj_align(card2, LV_ALIGN_TOP_MID, 0, 296);
-    ui_style_card(card2);
-    lv_obj_clear_flag(card2, LV_OBJ_FLAG_SCROLLABLE);
-    for (int i = 0; i < 5; i++) {
-        lv_obj_t *k = ui_label(card2, rows[i][0], &lv_font_cn_14, UI_TEXT_DIM);
-        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 6, 6 + i * 22);
-        /* 值含中文/×/·（"双核 LX7 · 240 MHz"）→ 必须用 cn 字体
-         * （montserrat 无 CJK，曾整行豆腐） */
-        lv_obj_t *v = ui_label(card2, rows[i][1], &lv_font_cn_14, UI_TEXT);
-        lv_obj_align(v, LV_ALIGN_TOP_RIGHT, -6, 6 + i * 22);
-    }
+    lv_obj_t *cpu = lv_obj_create(scr);
+    lv_obj_set_size(cpu, 229, 104);
+    lv_obj_align(cpu, LV_ALIGN_TOP_RIGHT, 0, 190);
+    ui_style_card(cpu);
+    lv_obj_clear_flag(cpu, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *div = lv_obj_create(cpu);
+    lv_obj_set_size(div, 1, 76);
+    lv_obj_align(div, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_set_style_bg_color(div, lv_color_hex(0x2A2A55), 0);
+    lv_obj_set_style_bg_opa(div, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(div, 0, 0);
 
-    lv_obj_t *note = ui_label(scr,
-        "电源为模拟值（真机 AXP2101 采集）；内存/Flash 动态指标 Phase 6 接入",
-        &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_t *ti = ui_label(cpu, LV_SYMBOL_TINT, &lv_font_montserrat_14,
+                            lv_color_hex(0xF59E0B));
+    lv_obj_align(ti, LV_ALIGN_TOP_LEFT, 12, 4);
+    lv_obj_t *tt = ui_label(cpu, "CPU 温度", &lv_font_cn_12, UI_TEXT);
+    lv_obj_align(tt, LV_ALIGN_TOP_LEFT, 32, 2);
+    g_devs_temp_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
+    lv_obj_align(g_devs_temp_lbl, LV_ALIGN_TOP_LEFT, 12, 24);
+    lv_obj_t *tn = ui_label(cpu, "芯片内部温度", &lv_font_cn_12,
+                            lv_color_hex(0x8A8AB0));
+    lv_obj_align(tn, LV_ALIGN_TOP_LEFT, 12, 58);
+
+    lv_obj_t *li = ui_label(cpu, LV_SYMBOL_LOOP, &lv_font_montserrat_14,
+                            lv_color_hex(0x38BDF8));
+    lv_obj_align(li, LV_ALIGN_TOP_LEFT, 128, 4);
+    lv_obj_t *lt = ui_label(cpu, "CPU 负载", &lv_font_cn_12, UI_TEXT);
+    lv_obj_align(lt, LV_ALIGN_TOP_LEFT, 148, 2);
+    g_devs_load_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
+    lv_obj_align(g_devs_load_lbl, LV_ALIGN_TOP_LEFT, 128, 24);
+    lv_obj_t *ln = ui_label(cpu, "双核平均值", &lv_font_cn_12,
+                            lv_color_hex(0x8A8AB0));
+    lv_obj_align(ln, LV_ALIGN_TOP_LEFT, 128, 58);
+
+    /* 行 3：运行时间 | 设备信息 */
+    lv_obj_t *bot = lv_obj_create(scr);
+    lv_obj_set_size(bot, 448, 72);
+    lv_obj_align(bot, LV_ALIGN_TOP_MID, 0, 304);
+    ui_style_card(bot);
+    lv_obj_clear_flag(bot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *div2 = lv_obj_create(bot);
+    lv_obj_set_size(div2, 1, 48);
+    lv_obj_align(div2, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_set_style_bg_color(div2, lv_color_hex(0x2A2A55), 0);
+    lv_obj_set_style_bg_opa(div2, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(div2, 0, 0);
+
+    lv_obj_t *ul = ui_label(bot, "系统运行时间", &lv_font_cn_12,
+                            lv_color_hex(0x8A8AB0));
+    lv_obj_align(ul, LV_ALIGN_TOP_LEFT, 14, 6);
+    g_devs_up_lbl = ui_label(bot, "--", &lv_font_cn_16, UI_TEXT);
+    lv_obj_align(g_devs_up_lbl, LV_ALIGN_TOP_LEFT, 14, 26);
+    lv_obj_t *un = ui_label(bot, "自上次开机", &lv_font_cn_12,
+                            lv_color_hex(0x8A8AB0));
+    lv_obj_align(un, LV_ALIGN_TOP_LEFT, 14, 50);
+
+    lv_obj_t *cl = ui_label(bot, "设备信息", &lv_font_cn_12,
+                            lv_color_hex(0x8A8AB0));
+    lv_obj_align(cl, LV_ALIGN_TOP_LEFT, 238, 6);
+    g_devs_chip_lbl = ui_label(bot, "--", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(g_devs_chip_lbl, LV_ALIGN_TOP_LEFT, 238, 26);
+    g_devs_fw_lbl = ui_label(bot, "--", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(g_devs_fw_lbl, LV_ALIGN_TOP_LEFT, 238, 46);
+
+    lv_obj_t *note = ui_label(scr, "负载为空闲采样估算 · 温度为芯片内部读数",
+                              &lv_font_cn_12, UI_TEXT_DIM);
     lv_obj_align(note, LV_ALIGN_BOTTOM_MID, 0, -4);
+
+    /* 首采 + 30s 自动刷新（页面关闭/切子页即杀） */
+    devs_fetch_start();
+    g_devs_timer = lv_timer_create(devs_timer_cb, 30000, NULL);
 }
 
 /* ---------------- 页面分发 ---------------- */
@@ -673,6 +932,18 @@ void ui_settings_build_page(lv_obj_t *scr)
         lv_timer_delete(g_net_timer);
         g_net_timer = NULL;
         g_net_ssid_lbl = g_net_ip_lbl = g_net_bh_val_lbl = g_net_admin_val_lbl = NULL;
+    }
+    /* 同理：系统状态页轮询与在途采集（代际 +1 令其结果作废） */
+    if (g_devs_timer) {
+        lv_timer_delete(g_devs_timer);
+        g_devs_timer = NULL;
+    }
+    g_devs_gen++;
+    g_devs_time_lbl = NULL;
+    g_devs_temp_lbl = g_devs_load_lbl = g_devs_up_lbl = NULL;
+    g_devs_chip_lbl = g_devs_fw_lbl = NULL;
+    for (int i = 0; i < 4; i++) {
+        g_devs_pct[i] = g_devs_data[i] = g_devs_note[i] = g_devs_bar[i] = NULL;
     }
 
     switch (g_page) {
@@ -704,7 +975,7 @@ void ui_settings_build_page(lv_obj_t *scr)
             { SP_DISPLAY, "显示与声音", "音量、亮度、息屏",   LV_SYMBOL_SETTINGS, 0x7C5CFF },
             { SP_NETWORK, "网络与连接", "Wi-Fi、配网、二维码", LV_SYMBOL_WIFI,     0x2EC4B6 },
             { SP_SERVICE, "服务管理",   "订阅刷新、后台服务",  LV_SYMBOL_REFRESH,  0xFF8A3D },
-            { SP_DEVICE,  "设备信息",   "版本、内存、硬件",    LV_SYMBOL_LIST,     0x3A6FF7 },
+            { SP_DEVICE,  "系统状态",   "内存、存储、CPU",     LV_SYMBOL_LIST,     0x3A6FF7 },
         };
         for (int i = 0; i < 4; i++) {
             lv_obj_t *card = entry_card(scr, items[i].page, items[i].t,
@@ -743,4 +1014,9 @@ void ui_settings_on_exit(void)
 {
     g_page = SP_HOME;
     g_root = NULL;
+    if (g_devs_timer) {
+        lv_timer_delete(g_devs_timer);
+        g_devs_timer = NULL;
+    }
+    g_devs_gen++; /* 在途采集结果作废 */
 }
