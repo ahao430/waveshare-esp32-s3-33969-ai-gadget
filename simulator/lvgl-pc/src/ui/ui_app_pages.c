@@ -515,14 +515,14 @@ static void prewarm_modal_confirm_cb(lv_event_t *e)
     lv_obj_set_style_bg_color(card, UI_CARD, 0);
     lv_obj_set_style_radius(card, 20, 0);
 
-    lv_obj_t *title = ui_label(card, "预热结果", &lv_font_cn_16, UI_TEXT);
+    lv_obj_t *title = ui_label(card, "预热结果", &font_sub_16, UI_TEXT);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
 
-    lv_obj_t *body = ui_label(card, msg, &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *body = ui_label(card, msg, &font_sub_14, UI_TEXT);
     lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(body, LV_ALIGN_CENTER, 0, 0);
 
-    lv_obj_t *hint = ui_label(card, "点击任意处关闭", &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_t *hint = ui_label(card, "点击任意处关闭", &font_sub_12, UI_TEXT_DIM);
     lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
@@ -551,14 +551,14 @@ static void quota_prewarm_cb(lv_event_t *e)
     lv_obj_set_style_radius(card, 20, 0);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = ui_label(card, "预热确认", &lv_font_cn_16, UI_TEXT);
+    lv_obj_t *title = ui_label(card, "预热确认", &font_sub_16, UI_TEXT);
     lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
 
     lv_obj_t *text = ui_label(
         card,
         "发送一次轻量请求（glm-5.3）\n"
         "将消耗约 1% 额度并启动 5 小时窗口",
-        &lv_font_cn_14, UI_TEXT_DIM);
+        &font_sub_14, UI_TEXT_DIM);
     lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(text, LV_ALIGN_CENTER, 0, -2);
 
@@ -568,7 +568,7 @@ static void quota_prewarm_cb(lv_event_t *e)
     ui_style_card(cancel);
     lv_obj_set_style_radius(cancel, 14, 0);
     lv_obj_add_event_cb(cancel, prewarm_modal_close_cb, LV_EVENT_CLICKED, mask);
-    lv_obj_t *cl = ui_label(cancel, "取消", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *cl = ui_label(cancel, "取消", &font_sub_14, UI_TEXT);
     lv_obj_center(cl);
 
     lv_obj_t *confirm = lv_button_create(card);
@@ -578,7 +578,7 @@ static void quota_prewarm_cb(lv_event_t *e)
     lv_obj_set_style_bg_color(confirm, UI_ACCENT, 0);
     lv_obj_set_style_radius(confirm, 14, 0);
     lv_obj_add_event_cb(confirm, prewarm_modal_confirm_cb, LV_EVENT_CLICKED, mask);
-    lv_obj_t *kl = ui_label(confirm, "确认预热", &lv_font_cn_14, UI_TEXT);
+    lv_obj_t *kl = ui_label(confirm, "确认预热", &font_sub_14, UI_TEXT);
     lv_obj_center(kl);
 }
 
@@ -604,7 +604,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
-    r->title_lbl = ui_label(hdr, "", &lv_font_cn_16, UI_TEXT);
+    r->title_lbl = ui_label(hdr, "", &font_sub_16, UI_TEXT);
     lv_obj_t *chip = lv_obj_create(hdr);
     lv_obj_set_size(chip, LV_SIZE_CONTENT, 24);
     lv_obj_set_style_bg_color(chip, UI_CARD_HI, 0);
@@ -614,7 +614,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_pad_hor(chip, 10, 0);
     lv_obj_set_style_pad_ver(chip, 2, 0);
     lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
-    r->plan_lbl = ui_label(chip, "--", &lv_font_cn_12, UI_QUOTA_DIM);
+    r->plan_lbl = ui_label(chip, "--", &font_sub_12, UI_QUOTA_DIM);
     lv_obj_center(r->plan_lbl);
 
     /* 居中大环（200px）：环心=巨型剩余百分比 + "剩余额度"副标 */
@@ -639,17 +639,17 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 138);
     r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_28, UI_TEXT);
     lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 10, 154);
-    r->arc_sub = ui_label(tile, "剩余额度", &lv_font_cn_16, UI_QUOTA_DIM);
+    r->arc_sub = ui_label(tile, "剩余额度", &font_sub_16, UI_QUOTA_DIM);
     lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
 
     /* 环外：重置倒计时（设计稿：48px 大数字 + 说明行；说明行含更新时间） */
     r->cd_big = ui_label(tile, "0:00:00", &lv_font_montserrat_48, UI_TEXT);
     lv_obj_align(r->cd_big, LV_ALIGN_TOP_MID, 0, 276);
-    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_14, UI_QUOTA_DIM);
+    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &font_sub_14, UI_QUOTA_DIM);
     lv_obj_align(r->cd_cap, LV_ALIGN_TOP_MID, 0, 328);
 
     /* 周额度行（设计稿：周额度 [42%] [进度条] 剩余；无周限整行隐藏） */
-    r->week_cap = ui_label(tile, "周额度", &lv_font_cn_14, UI_QUOTA_DIM);
+    r->week_cap = ui_label(tile, "周额度", &font_sub_14, UI_QUOTA_DIM);
     lv_obj_align(r->week_cap, LV_ALIGN_TOP_MID, -150, 352);
     r->week_val = ui_label(tile, "--", &lv_font_montserrat_28, UI_ACCENT2);
     lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -90, 346);
@@ -661,7 +661,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_bg_color(r->week_bar, UI_ACCENT2, LV_PART_INDICATOR);
     lv_obj_set_style_radius(r->week_bar, 5, 0);
     lv_obj_set_style_radius(r->week_bar, 5, LV_PART_INDICATOR);
-    r->week_right = ui_label(tile, "剩余", &lv_font_cn_14, UI_QUOTA_DIM);
+    r->week_right = ui_label(tile, "剩余", &font_sub_14, UI_QUOTA_DIM);
     lv_obj_align(r->week_right, LV_ALIGN_TOP_MID, 118, 352);
 
     /* 底部操作栏（设计稿：整条胶囊，左「刷新」| 竖线 | 右「手动预热」双行） */
@@ -689,7 +689,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_t *btn_sym = ui_label(zone_refresh, LV_SYMBOL_REFRESH,
                                  &lv_font_montserrat_16, UI_ACCENT2);
     lv_obj_align(btn_sym, LV_ALIGN_CENTER, can_pre ? -28 : -34, 0);
-    r->refresh_lbl = ui_label(zone_refresh, "刷新", &lv_font_cn_16, UI_TEXT);
+    r->refresh_lbl = ui_label(zone_refresh, "刷新", &font_sub_16, UI_TEXT);
     lv_obj_align(r->refresh_lbl, LV_ALIGN_CENTER, can_pre ? 20 : 16, 0);
 
     if (can_pre) {
@@ -711,7 +711,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
         lv_obj_clear_flag(zone_pre, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(zone_pre, quota_prewarm_cb, LV_EVENT_CLICKED,
                             (void *)(uintptr_t)idx);
-        lv_obj_t *t1 = ui_label(zone_pre, "手动预热", &lv_font_cn_16,
+        lv_obj_t *t1 = ui_label(zone_pre, "手动预热", &font_sub_16,
                                 lv_color_hex(0xFF9A4D));
         lv_obj_align(t1, LV_ALIGN_CENTER, 0, 0);
     }
@@ -740,12 +740,12 @@ static void quota_build(lv_obj_t *scr, int app_id)
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t *ic = ui_label(card, LV_SYMBOL_PLUS, &lv_font_montserrat_28, UI_ACCENT);
         lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 28);
-        lv_obj_t *t = ui_label(card, "还没有订阅", &lv_font_cn_16, UI_TEXT);
+        lv_obj_t *t = ui_label(card, "还没有订阅", &font_sub_16, UI_TEXT);
         lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 74);
-        lv_obj_t *d = ui_label(card, "请添加订阅", &lv_font_cn_14, UI_ACCENT);
+        lv_obj_t *d = ui_label(card, "请添加订阅", &font_sub_14, UI_ACCENT);
         lv_obj_align(d, LV_ALIGN_TOP_MID, 0, 106);
         lv_obj_t *h = ui_label(card, "在 Web 后台「订阅额度」页配置，\n设备端将自动显示",
-                               &lv_font_cn_12, UI_TEXT_DIM);
+                               &font_sub_12, UI_TEXT_DIM);
         lv_obj_align(h, LV_ALIGN_TOP_MID, 0, 140);
         lv_obj_t *btn = lv_button_create(scr);
         lv_obj_set_size(btn, 180, 44);
@@ -756,7 +756,7 @@ static void quota_build(lv_obj_t *scr, int app_id)
         lv_obj_add_event_cb(btn, quota_refresh_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)app_id);
         lv_obj_t *bs = ui_label(btn, LV_SYMBOL_REFRESH, &lv_font_montserrat_16, UI_TEXT);
         lv_obj_align(bs, LV_ALIGN_CENTER, -30, 0);
-        lv_obj_t *bt = ui_label(btn, "重新检查", &lv_font_cn_14, UI_TEXT);
+        lv_obj_t *bt = ui_label(btn, "重新检查", &font_sub_14, UI_TEXT);
         lv_obj_align(bt, LV_ALIGN_CENTER, 16, 0);
         return;
     }
@@ -997,11 +997,11 @@ static void placeholder_build(lv_obj_t *scr, int app_id)
 
     lv_obj_t *icon = ui_label(card, LV_SYMBOL_WARNING, &lv_font_montserrat_28, UI_TEXT_DIM);
     lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 16);
-    lv_obj_t *l1 = ui_label(card, "暂未实现", &lv_font_cn_16, UI_TEXT);
+    lv_obj_t *l1 = ui_label(card, "暂未实现", &font_sub_16, UI_TEXT);
     lv_obj_align(l1, LV_ALIGN_CENTER, 0, 0);
     char buf[64];
     snprintf(buf, sizeof(buf), "规划：%s", meta->phase);
-    lv_obj_t *l2 = ui_label(card, buf, &lv_font_cn_14, UI_TEXT_DIM);
+    lv_obj_t *l2 = ui_label(card, buf, &font_sub_14, UI_TEXT_DIM);
     lv_obj_align(l2, LV_ALIGN_CENTER, 0, 28);
 }
 

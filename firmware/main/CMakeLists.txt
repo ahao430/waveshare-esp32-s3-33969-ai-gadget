@@ -32,6 +32,9 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/fonts/font_digits_56.c
     ${SIM_SRC_DIR}/ui/icons/pomo_mascot.c
     ${SIM_SRC_DIR}/ui/fonts/font_pomo_20.c
+    ${SIM_SRC_DIR}/ui/fonts/font_sub_12.c
+    ${SIM_SRC_DIR}/ui/fonts/font_sub_14.c
+    ${SIM_SRC_DIR}/ui/fonts/font_sub_16.c
     # 数据源（mock 起步；Wi-Fi 就绪后 ds_init 切 bridge）
     ${SIM_SRC_DIR}/data/data_source.c
     ${SIM_SRC_DIR}/data/data_source_mock.c

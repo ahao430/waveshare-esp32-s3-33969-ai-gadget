@@ -28,7 +28,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | 小智官方服务 | `bridge/internal/xiaozhi/`、`docs/XIAOZHI_PROTOCOL.md` §5 | Bridge 模拟设备（OTA 激活 + WS + Opus）；**已实现并真网验证**（ADR-005）。bridge 的 go 命令要带 `-tags nolibopusfile` |
 | Web 页面 | `web/src/pages/*.vue` | 加页要同步 router/index.ts + App.vue nav + Dashboard 入口 |
 | 固件 | `firmware/main/`（bring-up 骨架）、`firmware/components/power_manager/`、`firmware/components/wifi_prov/`（运行期配网：NVS+扫描+试连；Bridge 地址簿+预置） | UI 移植阶段会把 simulator 源编进来（main/CMakeLists 预留注释） |
-| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700，20px） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh |
+| 中文字体 | `scripts/gen_cn_font.sh` → `simulator/lvgl-pc/src/ui/fonts/font_cn_*.c`；番茄钟加粗字体 `scripts/gen_pomo_font.sh`（Noto Sans SC wght=700，20px）；订阅页加粗字体 `scripts/gen_sub_font.sh`（wght=700，12/14/16px，GB2312 全集——页面标题/套餐名是动态数据，必须全集防豆腐） | 改字典/加字后必须重新生成，否则真机/模拟器豆腐块；番茄钟文案改动也要重跑 gen_pomo_font.sh |
 | 大号数字 | `scripts/gen_cn_font.sh` 末尾生成 `font_digits_84.c`（Montserrat 84px 子集） | 番茄钟倒计时用；逐位固定宽度渲染防抖 |
 | 桌面图标 | `simulator/lvgl-pc/assets/icons/`（88×88） | 缺位自动回退符号；名字与 launcher catalog key 对齐；`gen_icon_embed.sh` 的 SKIP 里的图标不嵌入固件（省 flash） |
 
@@ -223,7 +223,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **5.79MiB 已用 / 11.94MiB（54%）** | 2026-11-17：GB2312 全集字库并入主库（12/14/16/20/24px 全部 6763 字，bpp4）——净 +2.0MB，删 dyn_14 回退机制 |
+| factory(app) | **7.46MiB 已用 / 11.94MiB（62%，余 37%）** | 2026-11-17：GB2312 全集字库并入主库（净 +2.0MB，删 dyn_14）+ 订阅页加粗全集字库三档（font_sub_12/14/16，+1.67MiB——粗体笔画 RLE 压缩率差，比常规档贵） |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 

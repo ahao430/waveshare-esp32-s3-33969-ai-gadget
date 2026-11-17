@@ -30,4 +30,11 @@ LV_FONT_DECLARE(font_digits_56);
  * 2026-11-16 布局重做（统计改 20px）后不再使用，已从固件移除省 flash。 */
 LV_FONT_DECLARE(font_pomo_20);
 
+/* 订阅页加粗字体（Noto Sans SC wght=700，只含 ui_app_pages.c 字符串；
+ * 见 scripts/gen_sub_font.sh。2026-11-17 用户反馈"小字看不清的加粗"，
+ * 同尺寸直接换粗体、不加字号，布局零风险） */
+LV_FONT_DECLARE(font_sub_12);
+LV_FONT_DECLARE(font_sub_14);
+LV_FONT_DECLARE(font_sub_16);
+
 #endif /* UI_FONT_CN_H */
