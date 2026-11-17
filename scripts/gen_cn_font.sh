@@ -58,9 +58,11 @@ chars |= set("（）【】·％、，。：；！？°")
 chars |= set("晴间少云局部阴有雾冻毛毛雨浓小中大雪粒阵强雷伴冰雹雨"
              "体感湿度风更新获取失败服务未连接或定位可达点重试天气")
 
-# GB2312 一级字库（3755 常用汉字）：覆盖城市/行政区名（服务器下发、
-# 源码里不会出现的动态中文）。区位 16-55 区即汉字一级区。
-for hi in range(0xB0, 0xD8):
+# GB2312 全集（6763 字 = 一级 3755 + 二级 3008）：2026-11-17 用户拍板
+# 并入主库——fallback 字号失配的结构性缺陷（16/20/24 共用一个 14px
+# dyn_14，两个字号必然失配）+ 电子书阅读器的兜底字库前置。
+# 区位 16-87 区 = 汉字全集（一级 + 二级）。
+for hi in range(0xB0, 0xF8):
     for lo in range(0xA1, 0xFF):
         try:
             ch = bytes([hi, lo]).decode("gb2312")
@@ -91,10 +93,10 @@ echo "   CJK/全角 ${#SYMBOLS} 个 · symbol ${#FA_SYMBOLS} 个"
 mkdir -p "$OUT_DIR"
 for sz in $SIZES; do
   echo "== 生成 ${sz}px"
-  # npx 不锁版本：lv_font_conv 新版会重写全部 .c（生成器格式漂移，几万行
+  # 已锁 1.5.3（不锁版本时新版会重写全部 .c（生成器格式漂移，几万行
   # diff、渲染行为未知）——重跑后必须 git diff fonts/ 逐个比对，只保留
   # 真正新增的字号，旧字号一律 checkout 恢复（2026-11-17 踩坑实证）。
-  npx --yes lv_font_conv \
+  npx --yes lv_font_conv@1.5.3 \
     --font "$FONT_TTF" \
     --range "0x20-0x7F" \
     --symbols "$SYMBOLS" \
@@ -110,29 +112,7 @@ for sz in $SIZES; do
     -o "$OUT_DIR/font_cn_${sz}.c"
 done
 
-# ---- 动态中文回退字体（DYN=1 才生成）----
-# 默认关闭：用户 2026-11-15 决策"只保留常用字"（GB2312 一级），
-# 代价是自定义机器人名里的生僻字（魅/薰）显示豆腐。
-# 机器人名等"服务器/用户自定义"中文不受源码字面量约束，常含 GB2312
-# 一级区以外的字（如实测：魅=GBK f7c8、薰=deb9）→ 单列 GBK 二级汉字
-# 区（0xD8-0xF7）小字体，14px / bpp2（约 150KB，flash 预算内），挂在
-# 16/20px 主字体的 fallback 上：主字体没有的字自动由它渲染，不再豆腐。
-if [ "${DYN:-0}" != "1" ]; then
-  echo "== 跳过动态回退字体（DYN=1 可启用）"
-  # 从主字体里摘掉 fallback（幂等）
-  python3 - "$OUT_DIR" <<'PYEOF2'
-import sys, pathlib, re
-out = pathlib.Path(sys.argv[1])
-for size in ("16", "20", "24"):
-    p = out / f"font_cn_{size}.c"
-    if not p.exists():
-        continue
-    s = p.read_text(encoding="utf-8")
-    s = re.sub(r"extern const lv_font_t lv_font_cn_dyn_14;[^\n]*\n\n", "", s)
-    s = s.replace(".fallback = &lv_font_cn_dyn_14,", ".fallback = NULL,")
-    p.write_text(s, encoding="utf-8")
-PYEOF2
-  echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c（无动态回退，请重编模拟器）"
+echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c（无动态回退，请重编模拟器）"
   exit 0
 fi
 
@@ -151,7 +131,7 @@ for hi in range(0xD8, 0xF8):
 sys.stdout.write("".join(sorted(chars)))
 PYEOF
 )
-npx --yes lv_font_conv \
+npx --yes lv_font_conv@1.5.3 \
   --font "$FONT_TTF" \
   --symbols "$DYNSYMS" \
   --size 14 --bpp 2 $COMPRESS_FLAG --no-kerning \
@@ -188,7 +168,7 @@ PYEOF
 MONT_TTF="simulator/lvgl-pc/build/_deps/lvgl-src/scripts/built_in_font/Montserrat-Medium.ttf"
 if [ -f "$MONT_TTF" ]; then
   echo "== 生成 84px 倒计时数字字体"
-  npx --yes lv_font_conv \
+  npx --yes lv_font_conv@1.5.3 \
     --font "$MONT_TTF" \
     --range "0x20,0x30-0x3A" \
     --size 84 --bpp 4 --no-kerning \

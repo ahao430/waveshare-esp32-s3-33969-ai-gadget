@@ -180,7 +180,7 @@ scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归�
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **3.79MiB 已用 / 11.94MiB（31.8%）** | code 1.24MiB + rodata 2.41MiB（`idf.py size`） |
+| factory(app) | **5.79MiB 已用 / 11.94MiB（54%）** | 2026-11-17：GB2312 全集字库并入主库（12/14/16/20/24px 全部 6763 字，bpp4）——净 +2.0MB，删 dyn_14 回退机制 |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 
