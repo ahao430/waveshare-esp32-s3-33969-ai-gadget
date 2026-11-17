@@ -121,7 +121,6 @@ static void *dec_thread(void *arg)
         if (s_is_mp3) {
             frames = (int)drmp3_read_pcm_frames_s16(&s_mp3, 576, pcm);
             got = frames * s_ch * 2;
-            if (gen == s_gen && frames == 0) fprintf(stderr, "[music-sim] mp3 eos at %.1fs\n", (double)frames_total / s_rate);
         } else if (s_wav) {
             got = (int)fread(pcm, 1, sizeof(pcm), s_wav);
             s_wav_left -= got;
@@ -164,7 +163,6 @@ static int sim_open_track(const char *path, int *duration_s, int *sample_rate,
     /* 关掉上一首的遗留状态 */
     sim_stop_stream();
     s_cur_sec = 0;
-    fprintf(stderr, "[music-sim] open %s\n", path);
     s_is_mp3 = strstr(path, ".mp3") || strstr(path, ".MP3") ||
                (strcasecmp(path + strlen(path) - 4, ".mp3") == 0);
     if (s_is_mp3) {
@@ -215,7 +213,6 @@ static void sim_stop_stream(void)
 
 static int sim_start(void)
 {
-    fprintf(stderr, "[music-sim] start rate=%d ch=%d mp3=%d\n", s_rate, s_ch, s_is_mp3);
     s_gen++;
     s_quit = 0;
     s_pause = 0;
