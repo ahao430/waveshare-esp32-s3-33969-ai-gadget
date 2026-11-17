@@ -658,6 +658,12 @@ static void urls_fill(void)
     snprintf(g_devcfg_url, sizeof(g_devcfg_url), "%s/api/v1/device/config", g_base);
 }
 
+/* 当前激活的 Bridge 基址（网络诊断等 UI 直接读；mock 模式为空串） */
+const char *ds_bridge_active_base(void)
+{
+    return g_base;
+}
+
 void ds_bridge_rebind(const char *bridge_url)
 {
     if (!bridge_url || bridge_url[0] == '\0') return;

@@ -458,3 +458,66 @@ int http_post_raw_stream(const char *url, const char *content_type,
     close(fd);
     return status;
 }
+
+/* ---- 网络诊断探测（门户检测，2026-11-17）----
+ * GET 但不跟随重定向：3xx 是核心信号——门户网络会劫持任意 HTTP 请求
+ * 302 到认证页（Location 即认证 URL，UI 弹二维码让手机扫）。
+ * 返回：HTTP 状态码（含 3xx）；-2=DNS 解析失败 -4=connect 超时（阻断型
+ * 网络，如公司访客网防火墙丢包）-6=响应异常。
+ * location 非 NULL 且 3xx 时拷出 Location 头（绝对 URL 优先，相对则
+ * 拼回原 host）。 */
+int http_probe(const char *url, char *location, size_t loc_cap, int timeout_ms)
+{
+    char host[128], path[256];
+    int port;
+    if (parse_url(url, host, sizeof(host), &port, path, sizeof(path)) != 0) return -1;
+
+    char portstr[8];
+    snprintf(portstr, sizeof(portstr), "%d", port);
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, portstr, &hints, &res) != 0 || !res) return -2;
+
+    int fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (fd < 0) { freeaddrinfo(res); return -3; }
+    set_timeouts(fd, timeout_ms);
+    if (connect_timeout(fd, res->ai_addr, res->ai_addrlen, timeout_ms) != 0) {
+        close(fd); freeaddrinfo(res); return -4;
+    }
+    freeaddrinfo(res);
+
+    char req[512];
+    int reqlen = snprintf(req, sizeof(req),
+                          "GET %s HTTP/1.1\r\nHost: %s:%d\r\n"
+                          "User-Agent: gadget-probe\r\nConnection: close\r\n\r\n",
+                          path, host, port);
+    if (reqlen < 0 || write(fd, req, (size_t)reqlen) != reqlen) {
+        close(fd); return -5;
+    }
+
+    char line[512];
+    int status = 0;
+    char loc[512] = "";  /* 与读行缓冲同宽：-Wformat-truncation */
+    for (;;) {
+        ssize_t ll = read_line(fd, line, sizeof(line));
+        if (ll < 0) { close(fd); return -6; }
+        if (ll == 0) break;
+        if (status == 0 && strncmp(line, "HTTP/1.", 7) == 0) status = atoi(line + 9);
+        if (strncasecmp(line, "Location:", 9) == 0) {
+            const char *v = line + 9;
+            while (*v == ' ') v++;
+            snprintf(loc, sizeof(loc), "%s", v);
+        }
+    }
+    close(fd);
+    if (location && loc_cap) {
+        if (loc[0] == '/') {
+            /* 相对 Location：拼回原 host（门户常见写法） */
+            snprintf(location, loc_cap, "http://%s:%d%s", host, port, loc);
+        } else {
+            snprintf(location, loc_cap, "%s", loc);
+        }
+    }
+    return status;
+}

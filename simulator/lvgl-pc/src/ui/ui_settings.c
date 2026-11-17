@@ -9,6 +9,8 @@
 
 #include "app_manager.h"
 #include "data_source.h"
+#include "http_client.h" /* http_probe：网络诊断 */
+#include "ui_worker.h"   /* ui_worker_start：诊断探测 worker */
 #include "ui.h"
 #include "ui_gesture.h"
 #include "ui_launcher.h"
@@ -295,6 +297,97 @@ static void page_display(lv_obj_t *scr)
     lv_obj_add_event_cb(dd, timeout_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
+/* ---- 网络诊断（门户检测 + 二维码，2026-11-17）----
+ * 探测当前 Bridge 地址：200=通；3xx=门户劫持（弹认证页二维码——
+ * 注意多数门户按 MAC 放行，手机扫码认证的是手机自己，设备可能仍
+ * 不通，弹窗文案如实说明）；-4=阻断型网络（公司访客网常见：Wi-Fi
+ * 能连 DNS 能解析，但出网 TCP 被防火墙丢弃——扫码也无认证页可扫）。
+ * worker 探测（勿阻塞 LVGL 线程，踩坑 #11）；结果弹窗挂 lv_layer_top
+ * 自成一体，不依赖子页存活。 */
+static char s_probe_loc[384];
+static int s_probe_status;
+
+static void probe_result_async(void *arg)
+{
+    (void)arg;
+    lv_obj_t *mask = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(mask, 480, 480);
+    lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_color(mask, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(mask, 0, 0);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(mask, qr_close_cb, LV_EVENT_CLICKED, mask);
+
+    lv_obj_t *title = ui_label(mask, "网络诊断", &lv_font_cn_20, UI_TEXT);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
+
+    lv_obj_t *body = NULL;
+    int body_y = 80;
+    if (s_probe_status == 200) {
+        body = ui_label(mask, "✓ 网络正常\nBridge 连接畅通", &lv_font_cn_16, UI_OK);
+    } else if (s_probe_status >= 300 && s_probe_status < 400 && s_probe_loc[0]) {
+        body = ui_label(mask, "检测到门户认证网络\n手机连同一 Wi-Fi 扫码打开认证页\n"
+                             "注意：多数门户按设备放行\n手机认证后本设备可能仍不通",
+                        &lv_font_cn_14, UI_WARN);
+        body_y = 56;
+        lv_obj_t *qr = lv_qrcode_create(mask);
+        lv_qrcode_update(qr, s_probe_loc, (uint32_t)strlen(s_probe_loc));
+        lv_obj_set_size(qr, 260, 260);
+        lv_obj_align(qr, LV_ALIGN_TOP_MID, 0, 128);
+    } else if (s_probe_status == -4) {
+        body = ui_label(mask, "网络被阻断（非门户）\nWi-Fi 已连接但出网被拦截\n"
+                             "公司访客网常见——无认证页可扫\n换网络或用手机热点共享",
+                        &lv_font_cn_14, UI_WARN);
+        body_y = 56;
+    } else if (s_probe_status == -2) {
+        body = ui_label(mask, "DNS 解析失败\n检查 Bridge 地址拼写\n或当前网络无 DNS 服务",
+                        &lv_font_cn_14, UI_WARN);
+        body_y = 56;
+    } else {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "探测失败：status=%d", s_probe_status);
+        body = ui_label(mask, buf, &lv_font_cn_14, UI_WARN);
+        body_y = 56;
+    }
+    lv_obj_align(body, LV_ALIGN_TOP_MID, 0, body_y);
+
+    lv_obj_t *hint = ui_label(mask, "点击任意处关闭", &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -12);
+}
+
+static void *probe_worker(void *arg)
+{
+    (void)arg;
+    const char *base = ds_bridge_active_base(); /* 当前激活地址（mock 为空） */
+    if (!base || !base[0]) base = "http://127.0.0.1:8081"; /* mock 兜底 */
+    char url[224];
+    snprintf(url, sizeof(url), "%s/api/v1/subscriptions", base);
+    s_probe_loc[0] = '\0';
+    s_probe_status = http_probe(url, s_probe_loc, sizeof(s_probe_loc), 8000);
+    ui_lock();
+    lv_async_call(probe_result_async, NULL);
+    ui_unlock();
+    return NULL;
+}
+
+static void probe_open_cb(lv_event_t *e)
+{
+    (void)e;
+    if (ui_worker_start(probe_worker, NULL, 12 * 1024) != 0) {
+        /* ENOMEM 静默失败是踩坑 #13 的教训：必须给用户反馈 */
+        lv_obj_t *mask = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(mask, 480, 480);
+        lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_set_style_bg_color(mask, lv_color_hex(0x0B1020), 0);
+        lv_obj_set_style_bg_opa(mask, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(mask, 0, 0);
+        lv_obj_add_event_cb(mask, qr_close_cb, LV_EVENT_CLICKED, mask);
+        lv_obj_t *t = ui_label(mask, "内存紧张，请稍后重试", &lv_font_cn_16, UI_WARN);
+        lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 200);
+    }
+}
+
 /* ---------------- 页面：网络与连接 ---------------- */
 
 /* 面板入口的 event 包装（lv_event_cb_t 签名） */
@@ -420,6 +513,18 @@ static void page_network(lv_obj_t *scr)
         lv_obj_t *a = ui_label(row, LV_SYMBOL_RIGHT, &lv_font_montserrat_14, UI_TEXT_DIM);
         lv_obj_align(a, LV_ALIGN_RIGHT_MID, -10, 0);
     }
+
+    /* 行 5：网络诊断（门户检测+二维码；公司访客网/酒店 Wi-Fi 排障） */
+    lv_obj_t *r5 = lv_button_create(scr);
+    lv_obj_set_size(r5, LV_PCT(100) - 8, 48);
+    lv_obj_align(r5, LV_ALIGN_TOP_MID, 0, 356);
+    ui_style_card(r5);
+    lv_obj_set_style_bg_color(r5, UI_CARD_HI, 0);
+    lv_obj_add_event_cb(r5, probe_open_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *t5 = ui_label(r5, "网络诊断", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(t5, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *h5 = ui_label(r5, LV_SYMBOL_SETTINGS " 门户检测", &lv_font_montserrat_14, UI_TEXT_DIM);
+    lv_obj_align(h5, LV_ALIGN_RIGHT_MID, -10, 0);
 
     net_timer_cb(NULL); /* 立即刷一次 */
     g_net_timer = lv_timer_create(net_timer_cb, 1500, NULL);

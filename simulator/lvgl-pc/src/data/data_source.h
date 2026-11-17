@@ -249,6 +249,10 @@ bool ds_wifi_status(char *ssid, int ssid_cap, char *ip, int ip_cap);
  * 非当前地址。UI 切换 = save(目标) + rebind。 */
 bool ds_bridge_host_get(char *out, int cap);
 void ds_bridge_host_save(const char *url);
+/* 当前激活的 Bridge 基址（http://host:port；mock 模式为空串）。
+ * 网络诊断等需要直连探测的 UI 用。 */
+const char *ds_bridge_active_base(void);
+
 void ds_bridge_rebind(const char *url);
 int ds_bridge_host_list(char *out, int cap); /* 0=已写 / -1=空 */
 int ds_bridge_host_remove(const char *url);  /* 0=已删 / -1=当前或未找到 */
