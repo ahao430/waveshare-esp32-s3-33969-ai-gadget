@@ -10,6 +10,10 @@
 #include "data_source.h"
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
+#include "esp_log.h"
+#define MLOG(fmt, ...) ESP_LOGI("music", fmt, ##__VA_ARGS__)
+#else
+#define MLOG(fmt, ...) ((void)0)
 #endif
 #include "music_player.h"
 
@@ -47,6 +51,8 @@ static music_state_t s_state = MUSIC_STOPPED;
 static bool s_shuffle;
 static music_loop_t s_loop = MUSIC_LOOP_ALL;
 static bool s_inited;
+/* 最近一次 scan 的空态说明（区分未插卡/只有子目录/没有音频），UI hint 用 */
+static char s_scan_note[96];
 
 music_state_t music_player_state(void) { return s_state; }
 int music_player_cur_idx(void) { return s_cur; }
@@ -75,20 +81,35 @@ void music_player_scan(void)
 
     s_n = 0;
     s_cur = -1;
+    s_scan_note[0] = 0;
     if (!s_tracks) {
         s_tracks = heap_caps_malloc(MUSIC_LIST_MAX * sizeof(music_track_t),
                                     MALLOC_CAP_SPIRAM);
     }
-    if (!s_tracks) return;
+    if (!s_tracks) {
+        snprintf(s_scan_note, sizeof(s_scan_note), "内存不足，扫描失败");
+        return;
+    }
     if (ds_sd_resolve(root, sizeof(root), "music") != 0) return;
-    if (ds_files_list(root, ents, MUSIC_LIST_MAX, &n) != 0) n = 0;
+    if (ds_files_list(root, ents, MUSIC_LIST_MAX, &n) != 0) {
+        /* opendir 失败：未插卡 / 无 music 目录（真机 FATFS） */
+        MLOG("scan %s: opendir failed (no card?)", root);
+        snprintf(s_scan_note, sizeof(s_scan_note),
+                 "未检测到 TF 卡或 music/ 目录\n请插卡后重进曲库");
+        return;
+    }
 
+    int dirs = 0, by_ext = 0;
     for (int i = 0; i < n; i++) {
         const char *name = ents[i].name;
+        if (ents[i].is_dir) { dirs++; continue; }
         const char *dot = strrchr(name, '.');
-        if (!dot || ents[i].is_dir) continue;
+        if (!dot) continue;
         const char *ext = dot + 1;
-        if (strcasecmp(ext, "mp3") != 0 && strcasecmp(ext, "wav") != 0) continue;
+        if (strcasecmp(ext, "mp3") != 0 && strcasecmp(ext, "wav") != 0) {
+            by_ext++;
+            continue;
+        }
         char abspath[256];
         if (ds_sd_resolve(abspath, sizeof(abspath), "music")) continue;
         size_t used = strlen(abspath);
@@ -98,14 +119,32 @@ void music_player_scan(void)
         snprintf(t->path, sizeof(t->path), "%s", abspath);
         snprintf(t->fmt, sizeof(t->fmt),
                  strcasecmp(ext, "mp3") == 0 ? "MP3" : "WAV");
-        snprintf(t->title, sizeof(t->title), "%.60s", name);
-        /* 去扩展名作为缺省标题 */
-        t->title[strlen(t->title) - strlen(dot)] = 0;
+        /* 文件名全量拷贝（title 容量=name 容量），再按长度去扩展名——
+         * 切点落在 '.'（ASCII 边界），不切半个 UTF-8 中文字符 */
+        snprintf(t->title, sizeof(t->title), "%.95s", name);
+        size_t tl = strlen(t->title);
+        if (strlen(dot) < tl) t->title[tl - strlen(dot)] = 0;
         music_player_probe_id3(t);
         s_n++;
     }
+    MLOG("scan %s: %d entries (%d dirs) -> %d tracks (%d by ext)",
+         root, n, dirs, s_n, by_ext);
+    if (s_n == 0) {
+        if (dirs > 0 && dirs == n)
+            snprintf(s_scan_note, sizeof(s_scan_note),
+                     "music/ 下只有子目录（不递归）\n请把 MP3/WAV 放在 music/ 根目录");
+        else if (n > 0)
+            snprintf(s_scan_note, sizeof(s_scan_note),
+                     "music/ 下 %d 个文件都不是 MP3/WAV", n - dirs);
+        else
+            snprintf(s_scan_note, sizeof(s_scan_note),
+                     "music/ 目录是空的");
+    }
     if (s_n > 0 && s_cur < 0) s_cur = 0;
 }
+
+/* 最近一次扫描的空态说明；"" = 非空态或未扫描 */
+const char *music_player_scan_note(void) { return s_scan_note; }
 
 /* ---------------- ID3 标签（v2.3/2.4 头部 + v1 尾部） ---------------- */
 

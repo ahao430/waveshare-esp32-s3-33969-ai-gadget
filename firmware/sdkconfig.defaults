@@ -89,3 +89,9 @@ CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
 # 几百个小对象，16384 阈值下曾把内部 RAM 吃到 328B、largest_dma=0，
 # 刷屏 Draw bitmap NO_MEM。2048 后内部 RAM 留给 Wi-Fi/DMA/驱动。
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+
+# FATFS API 用 UTF-8（2026-11-18 音乐曲库空根因）：默认 ANSI_OEM+437 码页
+# 下，中文文件名（UTF-16 LFN）经 opendir 转码失败变 '?'，stat/fopen 反查
+# LFN 不匹配 → ds_files_list 静默跳过 → 中文名 MP3 全部隐形。UTF-8 API 下
+# readdir/stat/fopen 同编码 round-trip，中文名全链路通（显示也修复）。
+CONFIG_FATFS_API_ENCODING_UTF_8=y

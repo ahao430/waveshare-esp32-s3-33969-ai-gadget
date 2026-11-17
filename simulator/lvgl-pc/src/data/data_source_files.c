@@ -93,13 +93,14 @@ int ds_files_list(const char *dir, ds_file_entry_t *out, int max, int *n)
 
     struct dirent *de;
     char path[256];
+    int stat_fail = 0;
     while ((de = readdir(d)) != NULL && *n < max) {
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
         if (snprintf(path, sizeof(path), "%s/%s", dir, de->d_name) >= (int)sizeof(path)) {
             continue;
         }
         struct stat st;
-        if (stat(path, &st) != 0) continue;
+        if (stat(path, &st) != 0) { stat_fail++; continue; }
         ds_file_entry_t *e = &out[*n];
         strncpy(e->name, de->d_name, sizeof(e->name) - 1);
         e->name[sizeof(e->name) - 1] = '\0';
@@ -110,6 +111,8 @@ int ds_files_list(const char *dir, ds_file_entry_t *out, int max, int *n)
     }
     closedir(d);
     qsort(out, (size_t)*n, sizeof(out[0]), entry_cmp);
+    /* stat 失败多为文件名编码不兼容（坑 #28）——计数暴露而非静默吞 */
+    FLOG("list %s: %d entries, %d stat-fail", dir, *n, stat_fail);
     return 0;
 }
 

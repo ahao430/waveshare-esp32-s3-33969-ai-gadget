@@ -113,8 +113,11 @@ static void lib_async(void *arg)
     if (n == 0) {
         if (g_lib_hint) {
             lv_obj_clear_flag(g_lib_hint, LV_OBJ_FLAG_HIDDEN);
+            const char *note = music_player_scan_note();
             lv_label_set_text(g_lib_hint,
-                              g_root ? "TF 卡 music/ 目录没有可播的\nMP3/WAV 文件" : "");
+                              g_root ? (note[0] ? note
+                                       : "TF 卡 music/ 目录没有可播的\nMP3/WAV 文件")
+                                     : "");
         }
         return;
     }

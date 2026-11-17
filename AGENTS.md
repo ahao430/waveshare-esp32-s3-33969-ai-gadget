@@ -235,6 +235,15 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     2560K（坑 #25 机理延续，当时无人抓开机日志所以没发现）；font_sub 事故再缩
     到 ~890K（用户看到的"PSRAM 86%"）。现在池 2560K 下开机余 ~2.0MB，TTS 768KB
     分配无忧，但**分母变小，系统状态页百分比会比历史观感更高，属正常**。
+28. **FATFS 默认 ANSI_OEM+437 码页下中文文件名全部隐形（2026-11-18 曲库空根因）**：
+    `CONFIG_FATFS_API_ENCODING_ANSI_OEM`（默认）+ `CODEPAGE=437` 时，opendir 把
+    LFN 的 UTF-16 中文字转码失败替换成 '?'，后续 stat/fopen 用带 '?' 的名字反查
+    磁盘 LFN 不匹配（'?' ≠ 原字符）→ `ds_files_list` 的 stat 守卫静默跳过 →
+    中文名 MP3 在曲库/文件管理里全部不可见（无任何报错日志）。**修复：
+    `CONFIG_FATFS_API_ENCODING_UTF_8=y`**（sdkconfig.defaults 已固定），readdir/
+    stat/fopen 全链路 UTF-8 round-trip，文件管理里中文名显示同时修复。配套观测：
+    `ds_files_list` 打 stat-fail 计数、`music_player_scan` 打扫描汇总日志
+    （`music` TAG）。
 
 ### 内存 / flash 账本（2026-11-18 实测，音乐播放器版）
 

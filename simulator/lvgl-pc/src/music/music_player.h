@@ -49,6 +49,7 @@ typedef enum {
 
 void music_player_init(void);   /* 幂等：注册 backend、清状态 */
 void music_player_scan(void);   /* 扫描曲库（阻塞 IO——worker 线程调用！） */
+const char *music_player_scan_note(void); /* 最近扫描的空态说明（""=非空态） */
 int  music_player_count(void);
 const music_track_t *music_player_track(int idx);
 
