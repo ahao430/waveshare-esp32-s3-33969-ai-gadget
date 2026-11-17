@@ -363,7 +363,15 @@ static void quota_update_one(int idx)
     char buf[96], tbuf[20];
 
     lv_label_set_text(r->title_lbl, sub->name);
-    lv_label_set_text(r->plan_lbl, sub->plan);
+    /* 套餐行拆成 header：左=服务商名（title_lbl），右徽章=到期部分。
+     * Bridge 的 plan 形如 "GLM Coding Lite · 12月11日到期"，取 · 后半段 */
+    const char *expiry = sub->plan;
+    const char *dot = strstr(sub->plan, "·");
+    if (dot) {
+        expiry = dot + strlen("·");
+        while (*expiry == ' ') expiry++;
+    }
+    lv_label_set_text(r->plan_lbl, expiry[0] ? expiry : "--");
 
     /* 元素级显隐（按 provider 实际返回的窗口，不补默认值）：
      *   5h 窗口有 → 环+剩余百分比+5h 倒计时；
@@ -386,15 +394,15 @@ static void quota_update_one(int idx)
         lv_obj_set_style_text_font(r->arc_lbl, &font_digits_84, 0);
         snprintf(buf, sizeof(buf), "%d", remain_pct);
         lv_label_set_text(r->arc_lbl, buf);
-        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 120);
+        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 119);
         lv_obj_clear_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
         lv_obj_update_layout(lv_obj_get_parent(r->arc_lbl));
         int nw = lv_obj_get_width(r->arc_lbl);
         int px = nw / 2 + 22;
         if (px > 90) px = 90; /* "100" 时不越出环内缘 */
-        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, px, 148);
+        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, px, 147);
         lv_label_set_text(r->arc_sub, "剩余额度");
-        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 208);
+        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
         /* 环外大倒计时（cd_big 由 1s timer 持续刷新，此处先落初值） */
         long reset_at = has_5h ? sub->reset_5h : sub->reset_week;
         long remain = reset_at > now ? reset_at - now : 0;
@@ -413,10 +421,10 @@ static void quota_update_one(int idx)
         r->arc_used = -1;
         lv_obj_set_style_text_font(r->arc_lbl, &lv_font_montserrat_48, 0);
         lv_label_set_text(r->arc_lbl, sub->balance[0] ? sub->balance : "--");
-        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 176);
+        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 150);
         lv_obj_add_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(r->arc_sub, "账户余额");
-        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 240);
+        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 214);
         lv_obj_add_flag(r->cd_big, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(r->cd_cap, LV_OBJ_FLAG_HIDDEN);
     }
@@ -432,7 +440,7 @@ static void quota_update_one(int idx)
         lv_label_set_text(r->week_val, buf);
         lv_obj_update_layout(lv_obj_get_parent(r->week_val));
         int vw = lv_obj_get_width(r->week_val);
-        lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -120 + vw / 2, 376);
+        lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -120 + vw / 2, 346);
         lv_bar_set_value(r->week_bar, wremain, LV_ANIM_OFF);
     } else {
         lv_obj_add_flag(r->week_cap, LV_OBJ_FLAG_HIDDEN);
@@ -564,26 +572,36 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     memset(r, 0, sizeof(*r));
     r->sub_idx = idx;
 
-    /* 标题（cn_20 大写）+ 套餐 chip（设计稿徽章：圆屏无角落，居中成胶囊） */
-    r->title_lbl = ui_label(tile, "", &lv_font_cn_20, UI_TEXT);
-    lv_obj_align(r->title_lbl, LV_ALIGN_TOP_MID, 0, 6);
-    lv_obj_t *chip = lv_obj_create(tile);
-    lv_obj_set_size(chip, LV_SIZE_CONTENT, 26);
-    lv_obj_align(chip, LV_ALIGN_TOP_MID, 0, 38);
+    /* 顶部 header（设计稿：左套餐名 + 右到期徽章。圆屏无角落→flex 行
+     * 整体居中，自动按内容宽度收敛） */
+    lv_obj_t *hdr = lv_obj_create(tile);
+    lv_obj_set_size(hdr, LV_SIZE_CONTENT, 26);
+    lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 36);
+    lv_obj_set_style_bg_opa(hdr, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(hdr, 0, 0);
+    lv_obj_set_style_pad_all(hdr, 0, 0);
+    lv_obj_set_style_pad_column(hdr, 10, 0);
+    lv_obj_set_flex_flow(hdr, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(hdr, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(hdr, LV_OBJ_FLAG_SCROLLABLE);
+    r->title_lbl = ui_label(hdr, "", &lv_font_cn_16, UI_TEXT);
+    lv_obj_t *chip = lv_obj_create(hdr);
+    lv_obj_set_size(chip, LV_SIZE_CONTENT, 24);
     lv_obj_set_style_bg_color(chip, UI_CARD_HI, 0);
     lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
-    lv_obj_set_style_radius(chip, 13, 0);
+    lv_obj_set_style_radius(chip, 12, 0);
     lv_obj_set_style_border_width(chip, 0, 0);
-    lv_obj_set_style_pad_hor(chip, 14, 0);
-    lv_obj_set_style_pad_ver(chip, 3, 0);
+    lv_obj_set_style_pad_hor(chip, 10, 0);
+    lv_obj_set_style_pad_ver(chip, 2, 0);
     lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
     r->plan_lbl = ui_label(chip, "--", &lv_font_cn_12, UI_TEXT_DIM);
     lv_obj_center(r->plan_lbl);
 
-    /* 居中大环：环心=巨型剩余百分比 + "剩余额度"副标（倒计时移出环外） */
+    /* 居中大环（200px）：环心=巨型剩余百分比 + "剩余额度"副标 */
     r->arc = lv_arc_create(tile);
-    lv_obj_set_size(r->arc, 240, 240);
-    lv_obj_align(r->arc, LV_ALIGN_TOP_MID, 0, 70);
+    lv_obj_set_size(r->arc, 200, 200);
+    lv_obj_align(r->arc, LV_ALIGN_TOP_MID, 0, 72);
     lv_arc_set_rotation(r->arc, 270);
     lv_arc_set_bg_angles(r->arc, 0, 360);
     lv_arc_set_range(r->arc, 0, 100);
@@ -597,42 +615,42 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_arc_opa(r->arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
     lv_obj_add_event_cb(r->arc, quota_arc_draw_cb, LV_EVENT_DRAW_POST, r);
 
-    /* 环心：巨型剩余百分比（84px digits）+ 小号 % + 副标 */
+    /* 环心：巨型剩余百分比（84px digits）+ 小号 % + 副标（环 200 缩后居中） */
     r->arc_lbl = ui_label(tile, "0", &font_digits_84, UI_TEXT);
-    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 120);
+    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 119);
     r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_48, UI_TEXT);
-    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 40, 148);
+    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 40, 147);
     r->arc_sub = ui_label(tile, "剩余额度", &lv_font_cn_16, UI_TEXT_DIM);
-    lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 208);
+    lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
 
     /* 环外：重置倒计时（设计稿：48px 大数字 + 说明行；说明行含更新时间） */
     r->cd_big = ui_label(tile, "0:00:00", &lv_font_montserrat_48, UI_TEXT);
-    lv_obj_align(r->cd_big, LV_ALIGN_TOP_MID, 0, 310);
+    lv_obj_align(r->cd_big, LV_ALIGN_TOP_MID, 0, 276);
     r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(r->cd_cap, LV_ALIGN_TOP_MID, 0, 362);
+    lv_obj_align(r->cd_cap, LV_ALIGN_TOP_MID, 0, 328);
 
     /* 周额度行（设计稿：周额度 [42%] [进度条] 剩余；无周限整行隐藏） */
     r->week_cap = ui_label(tile, "周额度", &lv_font_cn_14, UI_TEXT_DIM);
-    lv_obj_align(r->week_cap, LV_ALIGN_TOP_MID, -150, 376);
+    lv_obj_align(r->week_cap, LV_ALIGN_TOP_MID, -150, 352);
     r->week_val = ui_label(tile, "--", &lv_font_montserrat_28, UI_ACCENT2);
-    lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -90, 370);
+    lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -90, 346);
     r->week_bar = lv_bar_create(tile);
     lv_obj_set_size(r->week_bar, 130, 10);
-    lv_obj_align(r->week_bar, LV_ALIGN_TOP_MID, 24, 386);
+    lv_obj_align(r->week_bar, LV_ALIGN_TOP_MID, 24, 362);
     lv_bar_set_range(r->week_bar, 0, 100);
     lv_obj_set_style_bg_color(r->week_bar, UI_CARD_HI, 0);
     lv_obj_set_style_bg_color(r->week_bar, UI_ACCENT2, LV_PART_INDICATOR);
     lv_obj_set_style_radius(r->week_bar, 5, 0);
     lv_obj_set_style_radius(r->week_bar, 5, LV_PART_INDICATOR);
     r->week_right = ui_label(tile, "剩余", &lv_font_cn_14, UI_TEXT_DIM);
-    lv_obj_align(r->week_right, LV_ALIGN_TOP_MID, 118, 376);
+    lv_obj_align(r->week_right, LV_ALIGN_TOP_MID, 118, 352);
 
     /* 底部操作栏（设计稿：整条胶囊，左「刷新」| 竖线 | 右「手动预热」双行） */
     const gadget_state_t *s = ds_state();
     bool can_pre = idx < s->sub_count && s->subs[idx].can_prewarm;
     lv_obj_t *opbar = lv_obj_create(tile);
     lv_obj_set_size(opbar, 232, 46);
-    lv_obj_align(opbar, LV_ALIGN_TOP_MID, 0, 404);
+    lv_obj_align(opbar, LV_ALIGN_TOP_MID, 0, 390);
     lv_obj_set_style_bg_color(opbar, UI_CARD_HI, 0);
     lv_obj_set_style_bg_opa(opbar, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(opbar, 23, 0);
@@ -651,9 +669,9 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
                         (void *)(uintptr_t)g_q_app_id);
     lv_obj_t *btn_sym = ui_label(zone_refresh, LV_SYMBOL_REFRESH,
                                  &lv_font_montserrat_16, UI_ACCENT2);
-    lv_obj_align(btn_sym, LV_ALIGN_CENTER, can_pre ? -24 : -30, 0);
-    r->refresh_lbl = ui_label(zone_refresh, "刷新", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(r->refresh_lbl, LV_ALIGN_CENTER, can_pre ? 16 : 12, 0);
+    lv_obj_align(btn_sym, LV_ALIGN_CENTER, can_pre ? -28 : -34, 0);
+    r->refresh_lbl = ui_label(zone_refresh, "刷新", &lv_font_cn_16, UI_TEXT);
+    lv_obj_align(r->refresh_lbl, LV_ALIGN_CENTER, can_pre ? 20 : 16, 0);
 
     if (can_pre) {
         /* 竖分隔线 */
@@ -665,7 +683,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
         lv_obj_set_style_border_width(div, 0, 0);
         lv_obj_clear_flag(div, LV_OBJ_FLAG_CLICKABLE);
 
-        /* 右区：手动预热（主标题 + 副说明，双行） */
+        /* 右区：手动预热（单行大字，副标按用户要求去掉） */
         lv_obj_t *zone_pre = lv_obj_create(opbar);
         lv_obj_set_size(zone_pre, 132, 46);
         lv_obj_align(zone_pre, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -674,11 +692,9 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
         lv_obj_clear_flag(zone_pre, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(zone_pre, quota_prewarm_cb, LV_EVENT_CLICKED,
                             (void *)(uintptr_t)idx);
-        lv_obj_t *t1 = ui_label(zone_pre, "手动预热", &lv_font_cn_14,
+        lv_obj_t *t1 = ui_label(zone_pre, "手动预热", &lv_font_cn_16,
                                 lv_color_hex(0xFF9A4D));
-        lv_obj_align(t1, LV_ALIGN_CENTER, 0, -9);
-        lv_obj_t *t2 = ui_label(zone_pre, "触发 5 小时重置", &lv_font_cn_12, UI_TEXT_DIM);
-        lv_obj_align(t2, LV_ALIGN_CENTER, 0, 10);
+        lv_obj_align(t1, LV_ALIGN_CENTER, 0, 0);
     }
 
     /* 更新时间并入 cd_cap 说明行（设计稿无独立行，底部空间让给页点） */
