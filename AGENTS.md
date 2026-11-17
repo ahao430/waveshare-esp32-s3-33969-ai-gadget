@@ -165,6 +165,28 @@ scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归�
     xiaozhi-esp32 S3 同款）+ `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096`
     （默认 16384 的 in_buf 在对话页必 OOM）。此配置下 OTA 已真网跑通
     （bound=1）。
+20. **LVGL 控件内存默认吃内部 RAM——配网面板曾把 internal 吃到 328B
+    （2026-11-17）**：`LV_USE_CLIB_MALLOC` 下控件走 libc malloc，若
+    `SPIRAM_MALLOC_ALWAYSINTERNAL` 设大（曾 16384）则几百个小对象全
+    挤内部 RAM → `spicommon_dma_setup_priv_buffer` 失败 → Draw bitmap
+    NO_MEM 刷屏（屏幕无输出但 UI 逻辑正常）。**定值 2048（官方
+    xiaozhi-esp32 S3 同款）**：小分配去 PSRAM，内部 RAM 留给
+    Wi-Fi/DMA/驱动。配网列表/键盘是重灾区。
+21. **SNTP 只能初始化一次（2026-11-17 配网重连 abort 实证）**：
+    `net_task` 事件循环每次 GOT_IP（初连/重连/切网）都跑
+    `esp_sntp_setoperatingmode` → lwIP assert "Operating mode must not
+    be set while SNTP client is running" → abort 重启。任何"每次网络
+    事件都执行"的初始化代码都要查幂等性（SNTP/事件组/timer create）。
+22. **大块 PSRAM 连续分配不可靠——按最大回复定缓冲（2026-11-17）**：
+    TTS 缓冲 1.5MB 单块分配在 LVGL 小对象搬入 PSRAM 后失败
+    （'tts buffer alloc failed' 刷屏 → 有字幕无声音）。768KB
+    （24s@16k）实测稳，覆盖实际回复 272KB/16.8s。**PSRAM 大块
+    分配上限经验值 ~768KB**（碎片化后 1MB+ 不可靠）。
+23. **公司访客网可达性因目标而异（2026-11-17 修正）**：GYJX-GUEST
+    对旧 VPS 域名（wavesharebridge.ahao430.site，80）TCP 超时，但
+    对 NAS Bridge（route.ahao430.site:8081）完全正常（语音 40KB
+    上传）。"访客网阻断"不能一概而论——设备地址簿多地址备案、
+    网络诊断逐地址探测才是正解。
 19. **Wi-Fi 驱动初始化有内部 RAM 底线（2026-11-17 开机 abort 循环实证）**：
     post-ui 内部 free <~56KB 时 `esp_wifi_init` 静态 RX 缓冲分配不足
     （`Expected to init 10 rx buffer, actual is 7/8`）→ ESP_ERROR_CHECK
