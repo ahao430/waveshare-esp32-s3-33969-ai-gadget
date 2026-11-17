@@ -388,7 +388,7 @@ static void tile_add(lv_obj_t *grid, const app_def_t *def, int cell)
 
     /* 标签独立区：图标底 72 与标签顶（~78）分离（首次目视验收重叠后修正） */
     lv_obj_t *name = ui_label(tile, def->name, &lv_font_cn_12,
-                              def->enabled ? UI_TEXT : UI_TEXT_DIM);
+                              def->enabled ? lv_color_hex(0xFFFFFF) : UI_TEXT_DIM);
     lv_obj_align(name, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
@@ -569,7 +569,7 @@ void ui_launcher_build(void)
                 lv_obj_center(sym);
             }
             lv_obj_t *name = ui_label(tile_btn, def->name, &lv_font_cn_16,
-                                      def->enabled ? UI_TEXT : UI_TEXT_DIM);
+                                      def->enabled ? lv_color_hex(0xFFFFFF) : UI_TEXT_DIM);
             lv_obj_align(name, LV_ALIGN_TOP_MID, 0, 128);
         }
     }

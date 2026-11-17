@@ -781,7 +781,7 @@ static lv_obj_t *devs_metric_card(lv_obj_t *parent, int w, int h,
     lv_obj_align(g_devs_pct[idx], LV_ALIGN_TOP_LEFT, 2, 20);
 
     g_devs_data[idx] = ui_label(card, "--", &lv_font_cn_12,
-                                lv_color_hex(0xC6CFE6));
+                                UI_TEXT);
     lv_obj_align(g_devs_data[idx], LV_ALIGN_TOP_LEFT, 2, 56);
 
     lv_obj_t *bar = lv_bar_create(card);
@@ -799,7 +799,7 @@ static lv_obj_t *devs_metric_card(lv_obj_t *parent, int w, int h,
     g_devs_bar[idx] = bar;
 
     g_devs_note[idx] = ui_label(card, "--", &lv_font_cn_12,
-                                lv_color_hex(0x8A8AB0));
+                                UI_TEXT);
     lv_obj_align(g_devs_note[idx], LV_ALIGN_TOP_LEFT, 2, 92);
     return card;
 }
@@ -853,7 +853,7 @@ static void page_device(lv_obj_t *scr)
     g_devs_temp_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
     lv_obj_align(g_devs_temp_lbl, LV_ALIGN_TOP_LEFT, 12, 32);
     lv_obj_t *tn = ui_label(cpu, "芯片内部温度", &lv_font_cn_12,
-                            lv_color_hex(0x8A8AB0));
+                            UI_TEXT);
     lv_obj_align(tn, LV_ALIGN_TOP_LEFT, 12, 72);
 
     lv_obj_t *li = ui_label(cpu, LV_SYMBOL_LOOP, &lv_font_montserrat_14,
@@ -864,7 +864,7 @@ static void page_device(lv_obj_t *scr)
     g_devs_load_lbl = ui_label(cpu, "--", &lv_font_cn_20, UI_TEXT);
     lv_obj_align(g_devs_load_lbl, LV_ALIGN_TOP_LEFT, 128, 32);
     lv_obj_t *ln = ui_label(cpu, "双核平均值", &lv_font_cn_12,
-                            lv_color_hex(0x8A8AB0));
+                            UI_TEXT);
     lv_obj_align(ln, LV_ALIGN_TOP_LEFT, 128, 72);
 
     /* 行 3：运行时间 | 设备信息（加高：72→90，"自上次开机"曾被裁切） */
@@ -881,16 +881,16 @@ static void page_device(lv_obj_t *scr)
     lv_obj_set_style_border_width(div2, 0, 0);
 
     lv_obj_t *ul = ui_label(bot, "系统运行时间", &lv_font_cn_12,
-                            lv_color_hex(0x8A8AB0));
+                            UI_TEXT);
     lv_obj_align(ul, LV_ALIGN_TOP_LEFT, 14, 10);
     g_devs_up_lbl = ui_label(bot, "--", &lv_font_cn_16, UI_TEXT);
     lv_obj_align(g_devs_up_lbl, LV_ALIGN_TOP_LEFT, 14, 32);
     lv_obj_t *un = ui_label(bot, "自上次开机", &lv_font_cn_12,
-                            lv_color_hex(0x8A8AB0));
+                            UI_TEXT);
     lv_obj_align(un, LV_ALIGN_TOP_LEFT, 14, 62);
 
     lv_obj_t *cl = ui_label(bot, "设备信息", &lv_font_cn_12,
-                            lv_color_hex(0x8A8AB0));
+                            UI_TEXT);
     lv_obj_align(cl, LV_ALIGN_TOP_LEFT, 238, 10);
     g_devs_chip_lbl = ui_label(bot, "--", &lv_font_cn_14, UI_TEXT);
     lv_obj_align(g_devs_chip_lbl, LV_ALIGN_TOP_LEFT, 238, 32);
