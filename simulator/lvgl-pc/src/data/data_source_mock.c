@@ -35,6 +35,7 @@ static bool mock_ds_refresh(gadget_state_t *st)
     st->kimi_used_5h   = m->kimi_used_5h;
     st->kimi_used_week = m->kimi_used_week;
     st->updated_unix   = m->updated_unix;
+    st->subs_cache     = false; /* mock 永远"在线" */
 
     /* mock 固定 3 条演示订阅（演示三种卡形态；空态语义属于 bridge 无配置场景）：
      * [0] 智谱 v1：仅 5h 窗口、无周限（真实套餐形态），可预热；

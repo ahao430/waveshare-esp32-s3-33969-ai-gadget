@@ -178,7 +178,7 @@ static void quota_on_exit(void);
 static void quota_countdown_cb(lv_timer_t *t);
 static void quota_auto_refresh_cb(lv_timer_t *t);
 static void quota_update_all(void);
-static void quota_fetch_start(int app_id);
+static int quota_fetch_start(int app_id);
 static void quota_tile_scroll_cb(lv_event_t *e);
 static void quota_refresh_cb(lv_event_t *e);
 
@@ -269,13 +269,16 @@ void ui_open_app(int app_id) { app_manager_open(app_id); }
 typedef struct {
     lv_obj_t *arc;
     lv_obj_t *arc_lbl;
+    lv_obj_t *pct_sign;  /* % 号（小号字，跟在 84px 数字右侧） */
     lv_obj_t *arc_sub;
     lv_obj_t *week_bar;
     lv_obj_t *week_val;
     lv_obj_t *updated_lbl;
     lv_obj_t *title_lbl;
     lv_obj_t *plan_lbl;
+    lv_obj_t *refresh_lbl; /* "刷新"按钮文字（拉取中转"刷新中…"） */
     int sub_idx;
+    int arc_used; /* 当前 used%（-1=余额型不画弧；自绘渐变取色用） */
 } quota_refs_t;
 
 /* 每订阅一 tile，refs 按下标隔离（单 App 屏幕存活，静态数组足够） */
@@ -285,6 +288,55 @@ static lv_obj_t *g_q_tv;
 static lv_timer_t *g_q_cd_timer;
 static lv_timer_t *g_q_auto_timer;
 static int g_q_app_id;
+
+/* 霓虹渐变弧（设计稿 2026-11-17）：LVGL 9.2 的 arc 不支持渐变描边
+ * （源码无 arc_grad 属性），在 DRAW_POST 阶段自绘 24 段线性插值弧叠在
+ * 透明化的 indicator 上。正常=主题双色（accent2→accent），剩余<20%=橙，
+ * 耗尽=红。只在数值变化时随 invalidate 重画（每 60s 一次），无逐帧开销。 */
+static void quota_arc_draw_cb(lv_event_t *e)
+{
+    quota_refs_t *r = lv_event_get_user_data(e);
+    if (!r || r->arc_used < 0) return;
+    lv_obj_t *obj = lv_event_get_current_target(e);
+    lv_layer_t *layer = lv_event_get_layer(e);
+
+    lv_color_t c0, c1;
+    if (r->arc_used >= 100) {       /* 耗尽：红渐变 */
+        c0 = lv_color_hex(0xFF6B6B);
+        c1 = lv_color_hex(0xB92E2E);
+    } else if (r->arc_used >= 80) { /* 剩余 <20%：橙渐变 */
+        c0 = lv_color_hex(0xFFC14D);
+        c1 = lv_color_hex(0xFF7A3D);
+    } else {                        /* 正常：主题双色 */
+        c0 = UI_ACCENT2;
+        c1 = UI_ACCENT;
+    }
+
+    int remain = 100 - r->arc_used;
+    if (remain <= 0) return; /* 空弧不画 */
+
+    lv_area_t coords;
+    lv_obj_get_coords(obj, &coords);
+    lv_draw_arc_dsc_t dsc;
+    lv_draw_arc_dsc_init(&dsc);
+    dsc.width = 18;
+    dsc.rounded = 1;
+    dsc.opa = LV_OPA_COVER;
+    dsc.center.x = (coords.x1 + coords.x2) / 2;
+    dsc.center.y = (coords.y1 + coords.y2) / 2;
+    dsc.radius = (coords.x2 - coords.x1) / 2;
+
+    const int seg = 24;
+    float sweep = 360.0f * (float)remain / 100.0f;
+    for (int i = 0; i < seg; i++) {
+        float f0 = (float)i / seg, f1 = (float)(i + 1) / seg;
+        float mid = (f0 + f1) / 2;
+        dsc.color = lv_color_mix(c1, c0, (uint8_t)(255 * mid));
+        dsc.start_angle = 270.0f + sweep * f0;
+        dsc.end_angle = 270.0f + sweep * f1;
+        lv_draw_arc(layer, &dsc);
+    }
+}
 
 static void quota_tile_scroll_cb(lv_event_t *e)
 {
@@ -320,14 +372,22 @@ static void quota_update_one(int idx)
 
     if (has_5h || has_week) {
         lv_obj_clear_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
-        int remain_pct = has_5h ? 100 - sub->used_5h : 100 - sub->used_week;
+        int used_pct = has_5h ? sub->used_5h : sub->used_week;
+        int remain_pct = 100 - used_pct;
         if (remain_pct < 0) remain_pct = 0;
+        r->arc_used = used_pct; /* 自绘渐变取色（quota_arc_draw_cb） */
         lv_arc_set_value(r->arc, remain_pct);
-        lv_obj_set_style_arc_color(r->arc,
-                                   ui_pct_color(has_5h ? sub->used_5h : sub->used_week),
-                                   LV_PART_INDICATOR);
-        snprintf(buf, sizeof(buf), "%d%%", remain_pct);
+        lv_obj_invalidate(r->arc);
+        /* 巨型数字：digits 字体无 % 字形 → % 用小号独立标签跟在右侧 */
+        lv_obj_set_style_text_font(r->arc_lbl, &font_digits_84, 0);
+        snprintf(buf, sizeof(buf), "%d", remain_pct);
         lv_label_set_text(r->arc_lbl, buf);
+        lv_obj_clear_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_update_layout(lv_obj_get_parent(r->arc_lbl));
+        int nw = lv_obj_get_width(r->arc_lbl);
+        int px = nw / 2 + 22;
+        if (px > 90) px = 90; /* "100" 时不越出环内缘 */
+        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, px, 196);
         long reset_at = has_5h ? sub->reset_5h : sub->reset_week;
         long remain = reset_at > now ? reset_at - now : 0;
         snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld 后重置",
@@ -335,7 +395,10 @@ static void quota_update_one(int idx)
         lv_label_set_text(r->arc_sub, buf);
     } else {
         lv_obj_add_flag(r->arc, LV_OBJ_FLAG_HIDDEN);
+        r->arc_used = -1;
+        lv_obj_set_style_text_font(r->arc_lbl, &lv_font_montserrat_48, 0);
         lv_label_set_text(r->arc_lbl, sub->balance[0] ? sub->balance : "--");
+        lv_obj_add_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(r->arc_sub, "账户余额");
     }
 
@@ -353,7 +416,8 @@ static void quota_update_one(int idx)
     }
 
     ui_fmt_hhmm(s->updated_unix, tbuf, sizeof(tbuf));
-    snprintf(buf, sizeof(buf), "更新于 %s", tbuf);
+    snprintf(buf, sizeof(buf), "%s更新于 %s",
+             s->subs_cache ? "离线缓存 · " : "", tbuf);
     lv_label_set_text(r->updated_lbl, buf);
 }
 
@@ -495,12 +559,18 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_arc_width(r->arc, 18, LV_PART_MAIN);
     lv_obj_set_style_arc_width(r->arc, 18, LV_PART_INDICATOR);
     lv_obj_set_style_arc_color(r->arc, lv_color_hex(0x333A55), LV_PART_MAIN); /* 设计稿灰紫 track */
+    /* 渐变 indicator 改由 quota_arc_draw_cb 自绘（LVGL 9.2 arc 无渐变），
+     * 默认 indicator 全透明防止叠色 */
+    lv_obj_set_style_arc_opa(r->arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_add_event_cb(r->arc, quota_arc_draw_cb, LV_EVENT_DRAW_POST, r);
 
-    /* 环心：大号剩余百分比（y≈环心-26）+ 重置倒计时（其下） */
-    r->arc_lbl = ui_label(tile, "68%", &lv_font_montserrat_48, UI_TEXT);
-    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 172);
-    r->arc_sub = ui_label(tile, "2:30:00 后重置", &lv_font_cn_16, UI_TEXT_DIM);
-    lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 230);
+    /* 环心：巨型剩余百分比（84px digits，设计稿）+ 小号 % + 倒计时 */
+    r->arc_lbl = ui_label(tile, "0", &font_digits_84, UI_TEXT);
+    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 168);
+    r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_48, UI_TEXT);
+    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 40, 196);
+    r->arc_sub = ui_label(tile, "0:00:00 后重置", &lv_font_cn_16, UI_TEXT_DIM);
+    lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 250);
 
     /* 周额度单行 + 细进度条（收进中央，宽度按底部安全带收敛） */
     r->week_val = ui_label(tile, "", &lv_font_cn_14, UI_TEXT);
@@ -541,12 +611,12 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_add_event_cb(btn, quota_refresh_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)g_q_app_id);
     lv_obj_t *btn_sym = ui_label(btn, LV_SYMBOL_REFRESH, &lv_font_montserrat_14, UI_TEXT);
     lv_obj_align(btn_sym, LV_ALIGN_CENTER, -28, 0);
-    lv_obj_t *btn_txt = ui_label(btn, "刷新", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(btn_txt, LV_ALIGN_CENTER, 12, 0);
+    r->refresh_lbl = ui_label(btn, "刷新", &lv_font_cn_14, UI_TEXT);
+    lv_obj_align(r->refresh_lbl, LV_ALIGN_CENTER, 12, 0);
 
-    /* 底部信息行：居中 + 精简（BOTTOM_MID，宽度满足底缘安全带） */
+    /* 更新信息行：放在按钮上方空白区（原 BOTTOM_MID 与页点重叠且被圆屏裁掉） */
     r->updated_lbl = ui_label(tile, "", &lv_font_cn_12, UI_TEXT_DIM);
-    lv_obj_align(r->updated_lbl, LV_ALIGN_BOTTOM_MID, 0, -6);
+    lv_obj_align(r->updated_lbl, LV_ALIGN_TOP_MID, 0, 382);
 }
 
 /* 订阅页装配：空态分支 + 每订阅一 tile（横滑 + 页点） */
@@ -696,6 +766,13 @@ static void quota_fetch_done(void *arg)
             app_manager_open(d->app_id); /* 订阅数量变化：重建（空态↔列表） */
         } else {
             quota_update_all();
+            /* 加载态回位（重建分支的新 tile 天然是"刷新"） */
+            const gadget_state_t *s = ds_state();
+            for (int i = 0; i < s->sub_count && i < DS_SUB_MAX; i++) {
+                if (g_q[i].refresh_lbl) {
+                    lv_label_set_text(g_q[i].refresh_lbl, "刷新");
+                }
+            }
         }
     }
     free(d);
@@ -719,14 +796,15 @@ static void *quota_fetch_worker(void *arg)
     return NULL;
 }
 
-static void quota_fetch_start(int app_id)
+/* 返回 0=已发起 -1=忙/资源不足（本轮跳过） */
+static int quota_fetch_start(int app_id)
 {
-    if (g_q_fetch) return; /* 上一轮还在路上：忽略重入 */
+    if (g_q_fetch) return -1; /* 上一轮还在路上：忽略重入 */
     g_q_fetch = true;
     quota_fetch_t *d = calloc(1, sizeof(*d)); /* new_ivs=0：未拉到 */
     if (!d) {
         g_q_fetch = false;
-        return;
+        return -1;
     }
     d->gen = g_q_gen;
     d->before = ds_state()->sub_count;
@@ -742,14 +820,17 @@ static void quota_fetch_start(int app_id)
         UILOG("quota fetch: bg task busy/skip rc=%d", rc);
         g_q_fetch = false;
         free(d);
+        return -1;
     }
 #else
     if (ui_worker_start(quota_fetch_worker, d, 16 * 1024) != 0) {
         UILOG("quota fetch: worker start failed");
         g_q_fetch = false;
         free(d);
+        return -1;
     }
 #endif
+    return 0;
 }
 
 static void quota_auto_refresh_cb(lv_timer_t *t)
@@ -771,7 +852,15 @@ static void quota_on_exit(void)
 static void quota_refresh_cb(lv_event_t *e)
 {
     int app_id = (int)(uintptr_t)lv_event_get_user_data(e);
-    quota_fetch_start(app_id);
+    if (quota_fetch_start(app_id) == 0) {
+        /* 加载态：成功发起才改文案（busy 时按钮保持可用外观） */
+        const gadget_state_t *s = ds_state();
+        for (int i = 0; i < s->sub_count && i < DS_SUB_MAX; i++) {
+            if (g_q[i].refresh_lbl) {
+                lv_label_set_text(g_q[i].refresh_lbl, "刷新中…");
+            }
+        }
+    }
 }
 
 /* ---------------- 占位页（上滑返回） ---------------- */

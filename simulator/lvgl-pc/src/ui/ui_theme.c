@@ -50,8 +50,10 @@ void ui_style_card(lv_obj_t *obj)
 
 lv_color_t ui_pct_color(int used_pct)
 {
-    if (used_pct >= 85) return UI_ERR;
-    if (used_pct >= 60) return UI_WARN;
+    /* 设计稿状态语义（2026-11-17）：耗尽=红、剩余<20%=橙、其余正常。
+     * 唯一调用点是订阅页弧（渐变底色的兜底/告警色对见 ui_app_pages.c）。 */
+    if (used_pct >= 100) return UI_ERR;
+    if (used_pct >= 80) return UI_WARN;
     return UI_ACCENT;
 }
 

@@ -206,6 +206,7 @@ static void fetch_subscriptions(gadget_state_t *st)
     }
     int status = http_get(g_subs_url, buf, BRIDGE_BUF_SIZE, BRIDGE_TIMEOUT_MS * 4);
     long cache_mt = 0;
+    bool from_cache = false;
     cJSON *root = NULL;
     if (status == 200) {
         root = cJSON_Parse(buf);
@@ -215,6 +216,7 @@ static void fetch_subscriptions(gadget_state_t *st)
     if (!root) { /* 断网/解析失败：回读 TF 离线缓存（ADR-010） */
         cache_mt = cache_read("cache/subscriptions.json", buf, BRIDGE_BUF_SIZE);
         if (cache_mt) root = cJSON_Parse(buf);
+        from_cache = (root != NULL);
         /* 失败路径此前完全静默——真机"订阅页空"无从定位，补日志 */
         DSLOG("subs fetch: status=%d cache=%s", status,
               cache_mt ? (root ? "hit" : "hit-parse-fail") : "miss");
@@ -291,8 +293,9 @@ static void fetch_subscriptions(gadget_state_t *st)
         }
         if (n > 0) st->sub_count = n;
         else st->sub_count = 0; /* 明确空列表 → 设备空态 */
-        DSLOG("subs fetch: n=%d", st->sub_count);
+        DSLOG("subs fetch: n=%d cache=%d", st->sub_count, (int)from_cache);
         st->updated_unix = cache_mt ? cache_mt : (long)time(NULL);
+        st->subs_cache = from_cache;
     } while (0);
     cJSON_Delete(root);
 }
