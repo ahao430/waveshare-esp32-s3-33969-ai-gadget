@@ -624,7 +624,7 @@ static void hist_open_cb(lv_event_t *e)
         add_bubble(list, h[i].role, h[i].text);
     }
     if (*np == 0) {
-        lv_obj_t *empty = ui_label(list, "还没有对话记录", &lv_font_cn_14, UI_TEXT_DIM);
+        lv_obj_t *empty = ui_label(list, "还没有对话记录", &lv_font_cn_14, UI_TEXT);
         lv_obj_center(empty);
     }
     lv_obj_scroll_to_y(list, LV_COORD_MAX, LV_ANIM_OFF);
@@ -650,7 +650,7 @@ static void hist_open_cb(lv_event_t *e)
     lv_obj_t *wl = ui_label(wipe, g_app_id == UI_APP_CHAT
                                 ? LV_SYMBOL_REFRESH "  新对话"
                                 : LV_SYMBOL_TRASH "  清空",
-                            &lv_font_cn_16, UI_TEXT_DIM);
+                            &lv_font_cn_16, UI_TEXT);
     lv_obj_center(wl);
 }
 
@@ -1073,7 +1073,7 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
     g_status_lbl = ui_label(scr, state_text(VS_IDLE), &lv_font_cn_14, UI_TEXT);
     lv_obj_align(g_status_lbl, LV_ALIGN_TOP_MID, 0, 262);
 
-    g_reply_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT_DIM);
+    g_reply_lbl = ui_label(scr, "", &lv_font_cn_12, UI_TEXT);
     lv_obj_align(g_reply_lbl, LV_ALIGN_TOP_MID, 0, 284);
     lv_label_set_long_mode(g_reply_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(g_reply_lbl, 440);
@@ -1123,15 +1123,15 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
 
     if (!g_voice_enabled) {
         lv_obj_t *hint = ui_label(scr, "语音对话 · 等待数据源（PLAN §5.7）",
-                                  &lv_font_cn_12, UI_TEXT_DIM);
+                                  &lv_font_cn_12, UI_TEXT);
         lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, 6);
     }
 
     if (!g_voice_enabled) {
         lv_obj_t *hint = ui_label(scr, "ZCode 数据源待接入（PLAN §5.7）",
-                                  &lv_font_cn_12, UI_TEXT_DIM);
+                                  &lv_font_cn_12, UI_TEXT);
         lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 262);
-        lv_obj_set_style_text_color(hint, UI_TEXT_DIM, 0);
+        lv_obj_set_style_text_color(hint, UI_TEXT, 0);
         lv_obj_del(g_status_lbl);
         g_status_lbl = NULL;
     }
