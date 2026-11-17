@@ -298,9 +298,12 @@ static lv_timer_t *g_q_auto_timer;
 static int g_q_app_id;
 
 /* 霓虹渐变弧（设计稿 2026-11-17）：LVGL 9.2 的 arc 不支持渐变描边
- * （源码无 arc_grad 属性），在 DRAW_POST 阶段自绘 24 段线性插值弧叠在
- * 透明化的 indicator 上。正常=主题双色（accent2→accent），剩余<20%=橙，
- * 耗尽=红。只在数值变化时随 invalidate 重画（每 60s 一次），无逐帧开销。 */
+ * （源码无 arc_grad 属性），在 DRAW_POST 阶段自绘分段插值弧叠在
+ * 透明化的 indicator 上。色对原则（用户 2026-11-17 反馈）：渐变两端
+ * 色差要小（微渐变），且两端都要与深背景对比明显——此前正常态用
+ * 主题双色（蓝→青）跨度大、有一端偏暗，99% 满圈"远看像 60%"。
+ * 段间接缝按 0.8° 重叠消除缺口（满圈弧不能是虚线圈）。
+ * 只在数值变化时随 invalidate 重画（每 60s 一次），无逐帧开销。 */
 static void quota_arc_draw_cb(lv_event_t *e)
 {
     quota_refs_t *r = lv_event_get_user_data(e);
@@ -309,15 +312,16 @@ static void quota_arc_draw_cb(lv_event_t *e)
     lv_layer_t *layer = lv_event_get_layer(e);
 
     lv_color_t c0, c1;
-    if (r->arc_used >= 100) {       /* 耗尽：红渐变 */
-        c0 = lv_color_hex(0xFF6B6B);
-        c1 = lv_color_hex(0xB92E2E);
-    } else if (r->arc_used >= 80) { /* 剩余 <20%：橙渐变 */
-        c0 = lv_color_hex(0xFFC14D);
-        c1 = lv_color_hex(0xFF7A3D);
-    } else {                        /* 正常：主题双色 */
-        c0 = UI_ACCENT2;
-        c1 = UI_ACCENT;
+    if (r->arc_used >= 100) {       /* 耗尽：红（亮红→正红，小跨度） */
+        c0 = lv_color_hex(0xFF7B6B);
+        c1 = lv_color_hex(0xE84C4C);
+    } else if (r->arc_used >= 80) { /* 剩余 <20%：橙（小跨度） */
+        c0 = lv_color_hex(0xFFC75E);
+        c1 = lv_color_hex(0xFF9A3D);
+    } else {                        /* 正常：固定青绿微渐变（用户 2026-11-17
+                                       指定色系，不随主题；亮薄荷→青绿） */
+        c0 = lv_color_hex(0x63F2CF);
+        c1 = lv_color_hex(0x1FD3A6);
     }
 
     int remain = 100 - r->arc_used;
@@ -334,14 +338,18 @@ static void quota_arc_draw_cb(lv_event_t *e)
     dsc.center.y = (coords.y1 + coords.y2) / 2;
     dsc.radius = (coords.x2 - coords.x1) / 2;
 
-    const int seg = 24;
+    const int seg = 36;
     float sweep = 360.0f * (float)remain / 100.0f;
     for (int i = 0; i < seg; i++) {
         float f0 = (float)i / seg, f1 = (float)(i + 1) / seg;
         float mid = (f0 + f1) / 2;
         dsc.color = lv_color_mix(c1, c0, (uint8_t)(255 * mid));
-        dsc.start_angle = 270.0f + sweep * f0;
-        dsc.end_angle = 270.0f + sweep * f1;
+        float a0 = 270.0f + sweep * f0;
+        float a1 = 270.0f + sweep * f1;
+        if (i > 0) a0 -= 0.8f;         /* 段间重叠消接缝缺口 */
+        if (i < seg - 1) a1 += 0.8f;
+        dsc.start_angle = a0;
+        dsc.end_angle = a1;
         lv_draw_arc(layer, &dsc);
     }
 }
