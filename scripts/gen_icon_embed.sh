@@ -23,7 +23,7 @@ names = []
 # 未使用的占位 App 图标不嵌入固件（省 ~23KB flash/张）：
 # music App 目前是符号磁贴（app_defs 里 avatar=false），等接入播放器
 # 并启用真实图标时把 "music" 从这里删掉即可。
-SKIP = {"music"}
+SKIP = set()
 for d in src_dirs:
     for f in sorted(os.listdir(d)):
         if f.endswith(".png") and f[:-4] not in SKIP:

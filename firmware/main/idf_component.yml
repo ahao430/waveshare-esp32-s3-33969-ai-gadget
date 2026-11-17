@@ -1,6 +1,9 @@
 dependencies:
   # Waveshare 33969 BSP（显示/触摸/音频/TF，见 docs/HARDWARE.md §3）
   waveshare/esp32_s3_touch_amoled_2_16: "^2.0.1"
+  # 音乐播放器：MP3 解码（官方实测 S3R8 28KB heap/8.17% CPU）+ FFT 频谱
+  espressif/esp_audio_codec: "^2.6.2"
+  espressif/esp-dsp: "^1.8.2"
   # LVGL 钉 9.2.2 与模拟器完全同版（真机踩坑：9.6.0 绘制分发在普通
   # rect 绘制路径 100% 崩溃；同版还消灭 API 差异。adapter 允许 >=8,<10）
   lvgl/lvgl: "~9.4.0"

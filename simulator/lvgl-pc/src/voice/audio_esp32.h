@@ -42,4 +42,14 @@ void audio_esp32_tts_begin_stream(void);
 void audio_esp32_tts_write_pcm(const char *data, size_t len);
 void audio_esp32_tts_stream_end(void);
 
+/* ---------------- 音乐媒体通路（音乐播放器专用，owner 仲裁） ----------------
+ * TX 同一时刻只允许一个写者（beep 等待 TTS 的先例是模块内临时约定），
+ * 音乐引入第三方写者后升级为显式 owner 标志：音乐 acquire 期间
+ * tts_begin_stream/tts_write_pcm/beep 一律拒绝。采样率经 set_fs 切换
+ * （ES8311 支持 8-96k），release 回 16k/mono 交还语音。 */
+int audio_esp32_media_acquire(int sample_rate, int channels);
+int audio_esp32_media_write(const void *pcm, int len); /* 阻塞写（背压节流） */
+void audio_esp32_media_release(void);
+int audio_esp32_media_active(void);   /* 1=音乐占用输出（PTT/UI 查询） */
+
 #endif /* AUDIO_ESP32_H */

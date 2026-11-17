@@ -34,6 +34,7 @@ static const char *TAG = "audio_esp32";
     * 272KB/16.8s），更长的尾部丢弃可接受） */
 
 static esp_codec_dev_handle_t g_spk, g_mic;
+static volatile int s_media_owner; /* 输出 owner：0=语音侧 1=音乐播放器 */
 static atomic_bool g_inited;
 
 /* ---- 采集（PTT Listening 期间） ---- */
@@ -118,6 +119,7 @@ void audio_esp32_tts_stream_end(void)
 void audio_esp32_tts_write_pcm(const char *data, size_t len)
 {
     if (!atomic_load(&g_inited) || !data || len == 0) return;
+    if (s_media_owner) return; /* 音乐占用输出：语音回复无声（流程照常走完） */
     if (g_tts == NULL) {
         g_tts = malloc(AUDIO_TTS_MAX_BYTES);
         if (g_tts == NULL) {
@@ -272,6 +274,7 @@ static void beep_task(void *arg)
 void audio_esp32_ui_beep(int kind)
 {
     if (!atomic_load(&g_inited) || !g_spk) return;
+    if (s_media_owner) return; /* 音乐占用：提示音丢弃（等 10s 无意义） */
     if (g_beep_task) return; /* 上一声还在播/在排队：合并 */
     if (xTaskCreate(beep_task, "ui_beep", 4096, (void *)(intptr_t)kind, 5,
                     &g_beep_task) != pdPASS) {
@@ -301,6 +304,12 @@ static int esp32_play(const int16_t *pcm, int frames)
     (void)pcm;
     (void)frames; /* 约定：real 模式 play(NULL,0)=TTS 缓冲开始播放 */
     if (!atomic_load(&g_inited)) return -1;
+    if (s_media_owner) {
+        /* 音乐占用输出：回复无声但对话流程立即完成（vs_notify_play_done），
+         * 状态机不卡"思考中"。v1 语义：音乐播放时语音回复静音。 */
+        vs_notify_play_done();
+        return 0;
+    }
     if (g_tts_len == 0) {
         /* 无音频（如 mock TTS 缺席）：立即完成，文本进度照常走 */
         vs_notify_play_done();
@@ -366,4 +375,48 @@ int audio_esp32_init(void)
     }
     ESP_LOGI(TAG, "audio ready: 16k/16bit/mono, spk vol 70, mic gain 18dB (capture resident)");
     return 0;
+}
+
+/* ---------------- 音乐媒体通路（owner 仲裁） ---------------- */
+
+static volatile int s_media_owner; /* 0=无 1=音乐播放器 */
+
+int audio_esp32_media_active(void) { return s_media_owner; }
+
+int audio_esp32_media_acquire(int sample_rate, int channels)
+{
+    if (!atomic_load(&g_inited) || !g_spk) return -1;
+    if (s_media_owner) return -1;
+    esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = 16,
+        .channel = channels,
+        .sample_rate = sample_rate,
+    };
+    /* esp_codec_dev 1.5 无 set_fs：close+open 切采样率（TX 通道独立于 mic） */
+    esp_codec_dev_close(g_spk);
+    if (esp_codec_dev_open(g_spk, &fs) != 0) {
+        ESP_LOGE(TAG, "media open %dHz/%dch failed", sample_rate, channels);
+        return -1;
+    }
+    s_media_owner = 1;
+    ESP_LOGI(TAG, "media owner on (%dHz/%dch)", sample_rate, channels);
+    return 0;
+}
+
+int audio_esp32_media_write(const void *pcm, int len)
+{
+    if (!s_media_owner) return -1;
+    return esp_codec_dev_write(g_spk, (void *)(uintptr_t)pcm, len);
+}
+
+void audio_esp32_media_release(void)
+{
+    if (!s_media_owner) return;
+    s_media_owner = 0;
+    esp_codec_dev_sample_info_t fs = {
+        .bits_per_sample = 16, .channel = 1, .sample_rate = 16000
+    };
+    esp_codec_dev_close(g_spk);
+    esp_codec_dev_open(g_spk, &fs); /* 交还语音的 16k/mono */
+    ESP_LOGI(TAG, "media owner off");
 }

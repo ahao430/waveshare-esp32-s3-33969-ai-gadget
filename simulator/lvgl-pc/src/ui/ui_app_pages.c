@@ -974,7 +974,6 @@ typedef struct {
 
 static const placeholder_meta_t g_placeholders[] = {
     { UI_APP_WEATHER, "天气",       "Phase 5+（Bridge 天气源）" },
-    { UI_APP_MUSIC,   "音乐播放",   "Phase 5+" },
 };
 
 static void placeholder_build(lv_obj_t *scr, int app_id)
@@ -1033,7 +1032,7 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
         { UI_APP_POMODORO, "pomodoro", "番茄钟",  LV_SYMBOL_PLAY,     0xD94B3F, "A:simulator/lvgl-pc/assets/icons/pomodoro.png",  true,  ui_pomodoro_build,     ui_pomodoro_on_exit,   APP_FLAG_BG_TIMER | APP_FLAG_STATUSBAR },
         { UI_APP_FILES,    "files",    "文件",    LV_SYMBOL_DIRECTORY, 0xE0A030, "A:simulator/lvgl-pc/assets/icons/files.png",    true,  ui_files_build,        ui_files_on_exit, 0 },
         { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit, 0 },
-        { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0xFF4D6D, "A:simulator/lvgl-pc/assets/icons/music.png",     false, placeholder_build,     NULL, 0 },
+        { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0x7C6CFF, "A:simulator/lvgl-pc/assets/icons/music.png",     true, ui_music_build,        ui_music_on_exit, APP_FLAG_BG_TIMER | APP_FLAG_STATUSBAR },
     };
     const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
 

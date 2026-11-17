@@ -66,6 +66,8 @@ void ui_conversation_on_exit(void);
 void ui_files_build(lv_obj_t *screen, int app_id);
 void ui_files_on_exit(void);
 void ui_pomodoro_build(lv_obj_t *screen, int app_id);
+void ui_music_build(lv_obj_t *screen, int app_id);
+void ui_music_on_exit(void);
 void ui_pomodoro_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);

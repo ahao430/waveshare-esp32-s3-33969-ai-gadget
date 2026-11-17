@@ -533,3 +533,46 @@ Wi-Fi RX 分配不足开机循环）——真因与缓解手段纠缠，一晚�
 一个变量并让真机 soak 过夜；用户陪测的成本远高于多刷几轮的成本，出现
 第二类崩溃模式时立即止损回滚，不要叠实验。
 
+
+## ADR-016：本地音乐播放器（Hi-Fi 数字唱片机，WAV+MP3）
+
+**日期**：2026-11-18。**状态**：已实现（真机待用户验收）。
+
+**背景**：用户拍板做本地音乐播放器（TF 卡 `music/` 目录），蓝紫霓虹风
+格与全局深色 AMOLED 统一；FLAC 明确不做（v1）。
+
+**架构决策**：
+1. **双端后端注入**：`music_player.c`（状态机/曲库/ID3/RIFF，双端公共）
+   经 ops 结构注入平台后端——固件 `music_backend_esp32.c`（esp_audio_codec
+   simple dec 流式 + esp-dsp FFT），模拟器 `music_backend_sim.c`（dr_mp3
+   单头库 + SDL 音频输出，headless 跳过 SDL init 防 CoreAudio 挂起）。
+   PCM 契约一致，UI 无感知。
+2. **解码任务**：`xTaskCreateStatic` **栈放 PSRAM**（16KB，坑 #26——
+   内部 RAM 是坑 #19 红线，.bss 栈曾把 Wi-Fi init 顶下线 abort 循环）；
+   解码路径 fread(SDMMC)/I2S/FFT 不 disable flash cache，不踩坑 #14 断言。
+   单任务串行 read→decode→write，esp_codec_dev_write 阻塞背压天然节流，
+   无环形缓冲。
+3. **音频输出 owner 仲裁**（audio_esp32.c）：音乐 `media_acquire` 持有期
+   间——语音回复静音（`vs_notify_play_done` 立即完成，流程不卡）、提示音
+   丢弃、PTT 拒绝+提示。release 时 `esp_codec_dev_close+open` 切回 16k/mono
+   （1.5.x 无 set_fs）。**v1 不做 PTT 自动暂停恢复**（时序复杂度，留后续）。
+4. **显示**：SW transform 整图旋转不可行（模拟器 sample 实测
+   lv_draw_sw_transform 占满主线程，HARDWARE §2.7 教训成立）——唱片用
+   **纯 LVGL 对象绘制**（同心纹理 arc 10 圈不均匀缺口 + 中心封面圆）+
+   **24px 高光点绕行**模拟反光旋转（零 transform 成本）+ 进度弧 DRAW_POST
+   自绘（订阅页同款）。弃用 RGB565 纹理图方案（静态 dsc 在模拟器渲染
+   黑屏未解，绕开）。
+5. **曲终事件异步化**：eos 由解码线程置标志、UI timer 经
+   `music_player_get_progress` 轮询转发——**解码线程内直接调 on_track_end
+   会 join 自己死锁**（play 链路 stop 等 s_run 清零）。
+6. **素材零 rodata**：音乐功能未增 1 字节 rodata（纹理图方案已弃）。
+7. **组件裁剪**：esp_audio_codec sdkconfig 只留 MP3 解码器（全家族默认
+   开启时静态/链接体积大）；esp_codec_dev 1.5.11 无 set_fs 用 close+open。
+
+**验证**：模拟器 headless 截帧（播放页/信息行/频谱/进度弧/药丸全通，
+GADGET_SNAP + GADGET_DEMO_MUSIC_PLAY=1）；regress-sim 9 App 唯一画面
+PASS；固件 post-ui internal 64.7KB（>56KB 底线）、Wi-Fi 正常、心跳正常。
+真机播放/频谱/后台药丸待用户验收（TF 放 `music/` 目录 MP3/WAV）。
+
+**已知边界**：MP3 时长按码率估算（VBR 不准）；无 seek；GBK 编码 ID3
+标签显示回退文件名；PTT 自动暂停恢复未做。

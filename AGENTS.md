@@ -221,7 +221,22 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     加字库/内嵌素材前先算 rodata 池账（idf.py size 看 .rodata），单页美化需求一律优先
     用现有 font_cn_*/font_pomo_* 解决。**已整体回退（池恢复 4416K）。
 
-### 内存 / flash 账本（2026-11-17 实测，Bridge 链稳定版）
+26. **新功能组件的静态账必须过坑 #19 底线 + 内部 RAM 大缓冲三件套处置（2026-11-18 音乐播放器实证）**：
+    音乐链路一次引入 +9KB 解码栈/.bss + 21KB 曲库数组 + 12KB FFT，post-ui 内部 free
+    掉到 33~55KB → `esp_wifi_init` RX 8/10 → abort 无限重启。处置：曲库数组/FFT
+    缓冲改 PSRAM 惰性；**解码任务栈放 PSRAM**（ALLOW_STACK_EXTERNAL=y 已开，解码
+    路径 fread(SDMMC)/I2S/FFT 不 disable flash cache，不踩坑 #14 断言，开机实测
+    过）；esp_audio_codec 组件 sdkconfig 只留 MP3 解码器（其余家族静态表大）。
+    **规则：新功能先列"内部 RAM >1KB 的静态项"清单逐项过账，>4KB 一律 PSRAM 惰性；
+    任务栈默认 PSRAM（除非路径含 flash 写/esp_partition）。**
+27. **PSRAM 堆池的精确账：池 = 8MB − rodata 映射 − text 映射（FETCH=y）**，
+    实测三元一次方程成立（2560K 池 ≈ 8192K − 4.18MB rodata − 1.34MB text）。
+    "4416K 池"是 GB2312 全集字库并入前的老数——字库 +2MB rodata 时池同步缩到
+    2560K（坑 #25 机理延续，当时无人抓开机日志所以没发现）；font_sub 事故再缩
+    到 ~890K（用户看到的"PSRAM 86%"）。现在池 2560K 下开机余 ~2.0MB，TTS 768KB
+    分配无忧，但**分母变小，系统状态页百分比会比历史观感更高，属正常**。
+
+### 内存 / flash 账本（2026-11-18 实测，音乐播放器版）
 
 > 数字全部来自真机串口日志与 `idf.py size`，改内存相关配置前后对照这本账。
 
@@ -230,7 +245,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **5.57MiB 已用 / 11.94MiB（47%，余 53%）** | 2026-11-17：GB2312 全集字库并入主库（净 +2.0MB，删 dyn_14）。订阅页加粗字库三档（+1.67MiB）当日回退——挤占 PSRAM 堆池致聊天语音哑（坑 #25） |
+| factory(app) | **5.60MiB 已用 / 11.94MiB（47%，余 53%）** | 2026-11-18：音乐播放器（esp_audio_codec MP3+esp-dsp+解码任务，二进制仅 +25KB，rodata 未涨）；字体同 2026-11-17 账（全集主库，font_sub 事故回退见坑 #25） |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 
@@ -246,14 +261,14 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 - .bss 大项：语音任务静态栈 16KB（16384，picker/sync/apply/reset 共用）、绘制缓冲 19.2KB（480×10×2 双缓冲）、hangprobe 8KB。
 - **改任何 .bss/保留额度前先算 Wi-Fi 底线**：post-ui free 掉到 ~56KB 以下 `esp_wifi_init` 分不到 10 个 RX 缓冲 → 开机 abort 循环（坑 #19）。
 
-**PSRAM（8MB octal @80MHz）**：**进堆的只有 ~4.4MB**（4416K+23K 池；**rodata 涨堆池就缩**，font_sub 事故实证，坑 #25，
-  `Adding pool of 4416K`）——FETCH/RODATA=y 的虚拟地址窗口划分代价
+**PSRAM（8MB octal @80MHz）**：**堆池 2560K**（2026-11-18 精确账见坑 #27：8MB−rodata 4.18MB−text 1.34MB；
+  "4416K"是 GB2312 全集并入前的老数，**坑 #25 机理 rodata↔池 1:1 实测精确成立**）——FETCH/RODATA=y 的虚拟地址窗口划分代价
   （这两开关 =n 时池可到 8192K，直连版实测，但会引爆坑 #14 崩溃，见下）。
-  2026-11-17 坑 #25 修复后真机实测（系统状态页口径）：开机桌面已用
-  ~30%（余 ~3.0MB）；语音回合后 ~73%——TTS 768KB（AUDIO_TTS_MAX_BYTES，
-  坑 #22 从 1.5MB 降档，分配后常驻）+ 录音缓冲 256KB（G_CAPTURE，
-  8s@16k）+ 回合临时分配，余 ~1.2MB。**给 PSRAM 大块分配留的余量
-  上限就是 ~1.2MB**。
+  2026-11-18 口径（池 2560K，坑 #27）：开机桌面已用 ~0.6MB（余 ~2.0MB）；
+  语音回合后 ~1.8MB used（TTS 768KB 常驻 + 录音 256KB + 回合临时），
+  余 ~0.7MB。**给 PSRAM 大块分配留的余量上限 ~0.7MB**（音乐解码 28KB
+  常驻后再扣一点；FLAC 若做需重新过账——89KB heap 但 esp_audio_codec
+  组件 sdkconfig 已关）。
 
 **Mac 侧服务**：Bridge 进程 RSS ~15MB（Go，API+Web 静态托管同进程同端口 :8081）；无独立 Web 进程。
 
@@ -321,6 +336,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 | 文件 | 关闭句柄，worker 结果按页面代际丢弃 |
 | 设置 | 保存配置，释放页面 |
 | 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer）；阶段归零三连滴提示音（后台也响，`ui_sound_alert`） |
+| 音乐 | **后台常驻播放**（BG_TIMER\|STATUSBAR，ADR-016）：解码任务自主跑不随页面停；退出前台继续响+状态栏药丸（曲名）；音频输出 owner 互斥——音乐持有期间语音回复静音（流程照常走完）、提示音丢弃、PTT 拒绝+提示 |
 
 - App 级后台任务（如番茄钟）的 timer 不能随屏幕销毁；回调必须用
   `g_root==NULL` 守卫跳过所有 LVGL 调用（屏幕已被 app_manager 删除）。

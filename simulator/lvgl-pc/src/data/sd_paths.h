@@ -10,6 +10,7 @@
  *   data/      应用数据（番茄钟统计等；ADR-011 存储约定）
  *   appearance/ Web 自定义背景落盘（真机屏显需 LV_USE_PNG，暂只落盘）
  *   downloads/ 从 Bridge 下载的设备文件
+ *   music/     本地音乐库（音乐播放器扫描 .mp3/.wav）
  */
 #ifndef SD_PATHS_H
 #define SD_PATHS_H
