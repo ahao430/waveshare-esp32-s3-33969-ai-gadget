@@ -51,7 +51,7 @@ for path in glob.glob("simulator/lvgl-pc/src/ui/*.c") + glob.glob("simulator/lvg
                 chars.add(ch)
 
 # 保险冗余：数字/常用标点已在 ASCII range；全角括号与间隔号常见于格式化字符串
-chars |= set("（）【】·％、，。：；！？°")
+chars |= set("（）【】·％、，。：；！？°　")  # 　=U+3000 全角空格（阅读器段首缩进）
 
 # 天气描述字典（bridge internal/weather codeTable 全集——服务器下发的
 # 动态描述必须提前入集，否则设备豆腐）

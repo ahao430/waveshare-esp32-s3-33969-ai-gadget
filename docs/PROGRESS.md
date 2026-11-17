@@ -155,3 +155,16 @@
 | 小智设备直连：尝试与暂停（ADR-015） | ⏸ | 目标"设备不走 Bridge 直接连官方 xiaozhi.me"。按官方 SDK（78/xiaozhi-esp32 的 ota.md/websocket.md）逐字段核对实现：OTA+激活全链真网跑通（bound=1，PSRAM 路 mbedtls：EXTERNAL_MEM_ALLOC + IN_CONTENT_LEN=4096，破解 -0x008D=PSA_ERROR_INSUFFICIENT_MEMORY 误诊）；弃 esp_websocket_client（4KB 内部栈建不出来）自实现 esp_tls+RFC6455 同步 WSS 跑通握手；esp_audio_codec 2.6.2 补显式注册后 Opus 编码上行成功。**未收敛点**：说话后的概率性内核数据损坏（xSuspendedTaskList.pxIndex 被清零、SPI 总线锁坏、渲染线程 __stack_chk_fail），排查期间被坑 #14（FETCH/RODATA 实验变量）污染——真因与缓解手段纠缠，一晚未定位到唯一根因，用户拍板止损回滚 Bridge 链（已恢复稳定）。保留资产：xz_*.c/h 源码（未编译入库）+ 全部崩溃 backtrace 结论（AGENTS 坑 #14-#19）+ XIAOZHI_DIRECT.md 证据索引。 |
 | AstrBot 选机器人入口重做 + 静态任务投递 | ✅ | 用户反馈"设备上点标题没反应、下拉没有"：①入口从纯文字 label（点击区仅两字宽）重做为 220×44 卡片按钮（当前机器人名+montserrat 下拉箭头，符号与中文分 label 渲染——中文字体子集无符号字形）；②根因是拉列表 pthread 16KB 在对话页稳态 largest_int 8.7KB 时 ENOMEM 静默失败——picker/sync/apply/reset 四个 worker 改投常驻静态语音任务（s_botw_kind 分发、与 PTT 互斥，busy 提示"语音忙"），栈 14336→16384（picker 链 ~14KB+）；③面板空态内置提示（Bridge 未响应时不再只更新底部状态栏）。模拟器截帧验证布局；双平台编译全绿；真机 Wi-Fi/开机链路正常。 |
 | Wi-Fi 修复链落地（配网/凭据/自动切网） | ✅ | 今晚直连排查期间连带收敛的三件存量 bug：①`wifi_secret.h` 残留 WIFI_ACTIVATE_SSID 每次开机强制切回公司网与自动切网互殴——置空（"凭据保存不上"真凶）；②配网页扫描与自动重连抢驱动（返回 OK 但 0 结果）——`wifi_prov_manual_mode` 包裹扫描、空结果重试 3 次；③prov_auto 任务 6KB 栈溢出（连上后崩溃凭据没落盘）——8192 + 备份大缓冲移堆；NVS 88K 扩容 + `esp_wifi_set_storage(RAM)` 消驱动翻写。真机：开机自动连 6-2-3401、扫描出全量 AP、凭据落盘重启保持。 |
+
+### 2026-11-18（下午）小说阅读器 App（ADR-017）
+- 本地 TXT 阅读器 v1：书架（Books/ 递归+根目录，最近阅读排序）/阅读页
+  （零 chrome、左中右分区点击翻页、KEY3 下一页、菜单 overlay）/目录
+  （章节跳转）/设置（字号 16/20/24、行距三档、主题三档、自动翻页）。
+- 核心：流式 offset 分页（全书不进 RAM）、BOM→UTF-8 校验→GBK 换码
+  （GB2312 codepoint 矩阵 16KB rodata，`gen_gbk_table.py`）、章节扫描
+  （512 上限）、进度 byte offset 持久化（data/reader/*.json 原子写）。
+- 修复链：dec_next UTF-8 双重编码乱码（字节拼接未剥前缀位）→ GBK 表
+  存 codepoint（原 UTF-8 字节表被二次编码出 Hangul）；U+3000 入字体
+  子集（gen_cn_font.sh 保险集，全档重生成）。
+- 验证：独立 C 单测双书全绿（18/12 章识别+禁则排版）；regress 10 App；
+  check.sh 全绿；真机刷入开机健康（flash 5.97MB/50% 余）。

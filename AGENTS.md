@@ -254,7 +254,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **5.60MiB 已用 / 11.94MiB（47%，余 53%）** | 2026-11-18：音乐播放器（esp_audio_codec MP3+esp-dsp+解码任务，二进制仅 +25KB，rodata 未涨）；字体同 2026-11-17 账（全集主库，font_sub 事故回退见坑 #25） |
+| factory(app) | **5.97MiB 已用 / 11.94MiB（50%，余 50%）** | 2026-11-18：音乐 + 小说阅读器（GBK codepoint 表 16KB rodata + 阅读器代码；字体重生成补 U+3000）；字体同 2026-11-17 账（全集主库） |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 
@@ -346,6 +346,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 | 设置 | 保存配置，释放页面 |
 | 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer）；阶段归零三连滴提示音（后台也响，`ui_sound_alert`） |
 | 音乐 | **后台常驻播放**（BG_TIMER\|STATUSBAR，ADR-016）：解码任务自主跑不随页面停；退出前台继续响+状态栏药丸（曲名）；音频输出 owner 互斥——音乐持有期间语音回复静音（流程照常走完）、提示音丢弃、PTT 拒绝+提示 |
+| 小说 | **退出即停**（ADR-017）：on_exit 进度强落盘（worker）+ 释放 UI 引用；`g_book` 保留内存缓存（重进秒开）；KEY3 短按=下一页（App 注册 handler，on_exit 置 NULL） |
 
 - App 级后台任务（如番茄钟）的 timer 不能随屏幕销毁；回调必须用
   `g_root==NULL` 守卫跳过所有 LVGL 调用（屏幕已被 app_manager 删除）。

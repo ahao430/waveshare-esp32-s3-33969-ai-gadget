@@ -11,6 +11,8 @@
  *   appearance/ Web 自定义背景落盘（真机屏显需 LV_USE_PNG，暂只落盘）
  *   downloads/ 从 Bridge 下载的设备文件
  *   music/     本地音乐库（音乐播放器扫描 .mp3/.wav）
+ *   Books/     本地小说库（阅读器扫描 .txt，递归深度 3；进度/配置在
+ *              data/reader/*.json，不修改原始 TXT）  [ADR-017]
  */
 #ifndef SD_PATHS_H
 #define SD_PATHS_H

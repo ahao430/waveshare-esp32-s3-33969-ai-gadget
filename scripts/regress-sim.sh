@@ -13,13 +13,13 @@ BIN=simulator/lvgl-pc/build/gadget_sim
 OUT=$(mktemp -d /tmp/gadget-regress.XXXX)
 trap 'rm -rf "$OUT"' EXIT
 
-# 枚举号：UI_APP_COUNT 内有效 App（4=MUSIC 未接入跳过）
-for id in 0 1 2 3 4 5 6 7 8; do
+# 枚举号：UI_APP_COUNT 内有效 App
+for id in 0 1 2 3 4 5 6 7 8 9; do
     GADGET_SNAP="$OUT/app${id}.ppm" GADGET_DEMO_APP=$id "$BIN" >/dev/null 2>&1
 done
 
 fail=0
-for id in 0 1 2 3 4 5 6 7 8; do
+for id in 0 1 2 3 4 5 6 7 8 9; do
     f="$OUT/app${id}.ppm"
     if [ ! -s "$f" ] || [ "$(wc -c <"$f")" -lt 500000 ]; then
         echo "FAIL: app$id 截帧缺失/过小"; fail=1
@@ -30,9 +30,9 @@ done
 # 两两去重：9 页应 ≥6 个唯一画面（背景相同的纯文字页仍应有差异）
 uniq=$(md5 -q "$OUT"/*.ppm | sort -u | wc -l | tr -d ' ')
 if [ "$uniq" -lt 6 ]; then
-    echo "FAIL: 9 页只有 $uniq 个唯一画面（页面构建回归?）"
+    echo "FAIL: 10 页只有 $uniq 个唯一画面（页面构建回归?）"
     exit 1
 fi
 
-echo "PASS: 9 App 全部渲染，唯一画面 $uniq/9（2026-11-18 基线 = 9，音乐已接入）"
+echo "PASS: 10 App 全部渲染，唯一画面 $uniq/10（2026-11-18 基线 = 10，阅读器已接入）
 echo "  截帧留存: $OUT"

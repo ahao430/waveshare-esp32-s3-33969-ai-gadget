@@ -17,8 +17,11 @@ set(UI_SRC_LIST
     ${SIM_SRC_DIR}/ui/ui_files.c
     ${SIM_SRC_DIR}/ui/ui_pomodoro.c
     ${SIM_SRC_DIR}/ui/ui_music.c
+    ${SIM_SRC_DIR}/ui/ui_reader.c
     ${SIM_SRC_DIR}/music/music_player.c
     ${SIM_SRC_DIR}/music/music_backend_esp32.c
+    ${SIM_SRC_DIR}/reader/reader_book.c
+    ${SIM_SRC_DIR}/reader/gbk_table.c
     ${SIM_SRC_DIR}/ui/ui_wifi_panel.c
     ${SIM_SRC_DIR}/ui/ui_statusbar.c
     ${SIM_SRC_DIR}/ui/ui_theme.c
@@ -52,7 +55,7 @@ set(UI_SRC_LIST
 
 idf_component_register(SRCS "main.c" ${UI_SRC_LIST}
     INCLUDE_DIRS "." "${SIM_SRC_DIR}" "${SIM_SRC_DIR}/ui" "${SIM_SRC_DIR}/ui/fonts"
-    "${SIM_SRC_DIR}/ui/icons" "${SIM_SRC_DIR}/data" "${SIM_SRC_DIR}/music" "${SIM_SRC_DIR}/voice"
+    "${SIM_SRC_DIR}/ui/icons" "${SIM_SRC_DIR}/data" "${SIM_SRC_DIR}/music" "${SIM_SRC_DIR}/reader" "${SIM_SRC_DIR}/voice"
     PRIV_REQUIRES
         cjson                                   # data_source_bridge.c 解析 Bridge 响应
         waveshare__esp32_s3_touch_amoled_2_16   # BSP（显示/触摸/音频/I2C）

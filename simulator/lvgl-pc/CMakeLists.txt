@@ -56,8 +56,11 @@ add_executable(gadget_sim
   src/ui/ui_files.c
   src/ui/ui_pomodoro.c
   src/ui/ui_music.c
+  src/ui/ui_reader.c
   src/music/music_player.c
   src/music/music_backend_sim.c
+  src/reader/reader_book.c
+  src/reader/gbk_table.c
   src/ui/ui_wifi_panel.c
   src/ui/ui_statusbar.c
   src/ui/ui_gesture.c
@@ -81,6 +84,7 @@ target_include_directories(gadget_sim PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ui
   ${CMAKE_CURRENT_SOURCE_DIR}/src/data
   ${CMAKE_CURRENT_SOURCE_DIR}/src/music
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/reader
   ${CMAKE_CURRENT_SOURCE_DIR}/src/voice
   ${cjson_SOURCE_DIR} # cJSON.h 平铺在源码根；INTERFACE 会触发 build 目录前缀错误
 )
