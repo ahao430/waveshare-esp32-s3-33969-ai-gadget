@@ -43,13 +43,49 @@ static lv_obj_t *g_pass_eye_sym;    /* 眼睛图标（切换状态反馈） */
 
 /* ---- 工具 ---- */
 
-/* 扫描/试连 worker：三档栈（16KB→12KB→8KB）。与 HTTP worker 不同，
- * 这里只做 esp_wifi 扫描/试连（实测栈用量 2-3KB），8KB 兜底安全；
- * 2026-11-16 实测对话/设置页稳态 largest_int 仅 ~12.2KB，12KB 档
- * 因 TCB 开销差 200B 落不下。原实现直接 pthread 且忽略 rc，线程起
- * 不来就永远"扫描中"（真机事故根因）。 */
+/* ---- 真机：常驻静态栈任务（2026-11-17 升级）----
+ * 三档 pthread（16/12/8KB）在设置页场景实测全 ENOMEM——largest_int
+ * 仅 8180，连 8KB 档都差 12B，用户输密码被"内存紧张"挡死。配网是
+ * 设备唯一网络入口，不能容忍任何 ENOMEM：开机预分配 8KB .bss 静态
+ * 任务（prov_auto 教训：connect→save→backup 链 6KB 溢出，8KB 实测
+ * 稳），扫描/试连串行投递（面板场景天然互斥）。模拟器保留 pthread。
+ */
+#ifdef ESP_PLATFORM
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+static StaticTask_t s_wifi_tcb;
+static StackType_t s_wifi_stack[8192 / sizeof(StackType_t)];
+static TaskHandle_t s_wifi_task;
+static void *(*s_wifi_fn)(void *);
+static void *s_wifi_arg;
+
+static void wifi_panel_task_main(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        void *(*fn)(void *) = s_wifi_fn;
+        void *a = s_wifi_arg;
+        if (fn) fn(a);
+    }
+}
+#endif /* ESP_PLATFORM */
+
 static int panel_thread_start(void *(*fn)(void *), void *arg)
 {
+#ifdef ESP_PLATFORM
+    if (!s_wifi_task) {
+        s_wifi_task = xTaskCreateStatic(wifi_panel_task_main, "wifi_panel",
+                                        8192 / sizeof(StackType_t), NULL,
+                                        5, s_wifi_stack, &s_wifi_tcb);
+        if (!s_wifi_task) return -1; /* 仅 .bss 就绪前理论失败 */
+    }
+    s_wifi_fn = fn;
+    s_wifi_arg = arg;
+    xTaskNotifyGive(s_wifi_task); /* 串行执行：忙碌中投递会排队（通知计数） */
+    return 0;
+#else
+    /* 模拟器：直接 pthread（无内存约束） */
     static const size_t tiers[] = { 16 * 1024, 12 * 1024, 8 * 1024 };
     pthread_t t;
     pthread_attr_t a;
@@ -64,6 +100,7 @@ static int panel_thread_start(void *(*fn)(void *), void *arg)
         }
     }
     return -1;
+#endif
 }
 
 static lv_obj_t *panel_label(lv_obj_t *parent, const char *text,
