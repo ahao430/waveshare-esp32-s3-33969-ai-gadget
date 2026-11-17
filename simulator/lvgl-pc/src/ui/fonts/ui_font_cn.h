@@ -19,6 +19,9 @@ LV_FONT_DECLARE(lv_font_cn_20);
  * 四位数字 + 冒号在 340px 圆环内不压线） */
 LV_FONT_DECLARE(font_digits_84);
 
+/* 64px 档（番茄钟 v3：250px 渐变环内与吉祥物同处，四位数字收窄） */
+LV_FONT_DECLARE(font_digits_64);
+
 /* 番茄钟界面加粗字体（Noto Sans SC wght=700，只含该页字符串；见
  * scripts/gen_pomo_font.sh。用户反馈"文字要大、亮、粗"）。16px 档在
  * 2026-11-16 布局重做（统计改 20px）后不再使用，已从固件移除省 flash。 */

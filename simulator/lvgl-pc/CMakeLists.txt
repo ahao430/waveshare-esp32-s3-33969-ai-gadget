@@ -68,6 +68,8 @@ add_executable(gadget_sim
   src/ui/fonts/font_cn_20.c
   src/ui/fonts/font_cn_24.c
   src/ui/fonts/font_digits_84.c
+  src/ui/fonts/font_digits_64.c
+  src/ui/icons/pomo_mascot.c
   src/ui/fonts/font_pomo_20.c
 )
 target_include_directories(gadget_sim PRIVATE

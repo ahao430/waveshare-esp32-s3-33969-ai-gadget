@@ -175,8 +175,16 @@ if [ -f "$MONT_TTF" ]; then
     --format lvgl --lv-include "lvgl.h" \
     --lv-font-name "font_digits_84" \
     -o "$OUT_DIR/font_digits_84.c"
+  echo "== 生成 64px 倒计时数字字体（番茄钟 v3 250px 渐变环内）"
+  npx --yes lv_font_conv@1.5.3 \
+    --font "$MONT_TTF" \
+    --range "0x20,0x30-0x3A" \
+    --size 64 --bpp 4 --no-kerning \
+    --format lvgl --lv-include "lvgl.h" \
+    --lv-font-name "font_digits_64" \
+    -o "$OUT_DIR/font_digits_64.c"
 else
   echo "SKIP: 未找到 Montserrat（$MONT_TTF），番茄钟数字字体不重新生成" >&2
 fi
 
-echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c + font_cn_dyn_14.c + font_digits_84.c（请重编模拟器）"
+echo "完成：$OUT_DIR/font_cn_{12,14,16,20}.c + font_cn_dyn_14.c + font_digits_{84,64}.c（请重编模拟器）"
