@@ -81,7 +81,19 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			writeErr(w, logger, http.StatusInternalServerError, "list_failed", err.Error())
 			return
 		}
-		writeJSON(w, logger, http.StatusOK, map[string]any{"subscriptions": list})
+		// newapi 附加币种（非机密）回传，供编辑表单回填
+		type subView struct {
+			storage.Subscription
+			Currency string `json:"currency,omitempty"`
+		}
+		out := make([]subView, len(list))
+		for i, s := range list {
+			out[i] = subView{Subscription: s}
+			if s.Kind == "newapi" {
+				out[i].Currency = db.GetSubscriptionExtra(s.ID, d.MasterKey)["currency"]
+			}
+		}
+		writeJSON(w, logger, http.StatusOK, map[string]any{"subscriptions": out})
 	})
 
 	mux.HandleFunc("POST /api/v1/subscriptions", func(w http.ResponseWriter, r *http.Request) {
@@ -93,6 +105,7 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			Token        string `json:"token"`
 			SystemToken  string `json:"system_token"`   // newapi：控制台系统访问令牌（非 sk-）
 			SystemUserID string `json:"system_user_id"` // newapi：New-Api-User 头
+			Currency     string `json:"currency"`       // newapi：usd|cny（站点展示币种，仅标签）
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
@@ -127,6 +140,9 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 			}
 			if body.SystemUserID != "" {
 				extra["system_user_id"] = body.SystemUserID
+			}
+			if body.Currency == "usd" || body.Currency == "cny" {
+				extra["currency"] = body.Currency
 			}
 			if len(extra) > 0 {
 				if err := db.SaveSubscriptionExtra(id, extra, d.MasterKey); err != nil {

@@ -16,6 +16,7 @@ interface SubInfo {
   base_url?: string
   has_token: boolean
   updated_at: string
+  currency?: string // newapi：站点展示币种（usd/cny）
 }
 const subs = ref<SubInfo[]>([])
 const subKinds = ['zhipu', 'kimi', 'deepseek', 'gpt', 'claude', 'minimax', 'mimo', 'newapi', 'opencode', 'mock']
@@ -58,7 +59,7 @@ function fetchUrlFor(s: SubInfo): string {
   return officialUrls[s.kind] ?? ''
 }
 
-const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '' })
+const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '', currency: 'usd' })
 const editingId = ref('') // ''=新增；非空=编辑该实例（POST 同 id 覆盖）
 const subAdding = ref(false)
 const message = ref('')
@@ -196,7 +197,7 @@ async function loadSubs() {
 
 function resetForm() {
   editingId.value = ''
-  subForm.value = { kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '' }
+  subForm.value = { kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '', currency: 'usd' }
   onKindChange()
 }
 
@@ -211,6 +212,7 @@ function editSub(s: SubInfo) {
     token: '',
     system_token: '', // 不回显（留空=保留原值，Bridge 侧合并）
     system_user_id: '',
+    currency: s.currency || 'usd',
   }
   message.value = ''
 }
@@ -344,9 +346,13 @@ onMounted(() => {
              placeholder="系统访问令牌（留空=保留原值）" />
       <input v-model="subForm.system_user_id" class="input !w-32"
              placeholder="用户 ID" />
+      <select v-model="subForm.currency" class="input !w-36">
+        <option value="cny">余额币种：人民币（元）</option>
+        <option value="usd">余额币种：美元（$）</option>
+      </select>
       <span class="text-xs text-dim">
         查余额用「系统访问令牌」：站点控制台「个人设置」生成（不是 sk- API Key）；
-        用户 ID 在个人设置页可见（新版站点必需）。
+        用户 ID 在个人设置页可见（新版站点必需）。币种按站点控制台展示选。
       </span>
     </div>
   </div>

@@ -62,6 +62,27 @@ func TestFetchQuota_HeadersAndParse(t *testing.T) {
 	}
 }
 
+func TestFetchQuota_CNYCurrency(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"quota":2500000,"used_quota":125000}}`))
+	}))
+	defer srv.Close()
+	extra := baseExtra("sys-token-1", "42")
+	extra["base_url"] = srv.URL
+	extra["currency"] = "cny" // 国内中转站：余额以元展示
+	snap, err := New().FetchQuota(context.Background(), accountOf(extra, "sk-chat"))
+	if err != nil {
+		t.Fatalf("FetchQuota: %v", err)
+	}
+	if snap.PlanName != "NewAPI 中转站 · 余额（元）" {
+		t.Fatalf("plan = %s", snap.PlanName)
+	}
+	if len(snap.Credits) == 0 || snap.Credits[0].Unit != "CNY" {
+		t.Fatalf("credits unit = %+v（cny 应输出 CNY）", snap.Credits)
+	}
+}
+
 func TestFetchQuota_SiteErrorMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

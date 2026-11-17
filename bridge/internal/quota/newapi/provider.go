@@ -37,8 +37,11 @@ func (p *Provider) Capabilities() quota.ProviderCapabilities {
 	return quota.ProviderCapabilities{Trust: quota.TrustB, CanRefresh: true}
 }
 
-// FetchQuota 返回余额视图（credits[0]=剩余余额，credits[1]=本月已用）。
+// FetchQuota 返回余额视图（credits[0]=剩余余额，credits[1]=累计已用——
+// new-api 的 used_quota 是开户以来累计消耗，非月度）。
 // base_url 从 account.Extra["base_url"] 取（必填，无公共默认站点）。
+// 币种 Extra["currency"]："cny"=元（国内中转站常见），默认 "usd"=美元
+// （500000 配额/单位是 new-api 内部约定，两种币只是展示标签不同）。
 //
 // 鉴权修正（2026-11-17，对齐 AIVault newapi.dart）：/api/user/self 用
 // 的是 Web 控制台「系统访问令牌」（Extra["system_token"]），不是 sk-
@@ -94,6 +97,10 @@ func (p *Provider) FetchQuota(ctx context.Context, account quota.AccountRef) (*q
 		}
 		return nil, quota.ErrUnsupportedResponse
 	}
+	unit, unitName := "usd", "美元"
+	if account.Extra["currency"] == "cny" {
+		unit, unitName = "CNY", "元"
+	}
 	balUSD := 0.0
 	if root.Data.Quota != nil {
 		balUSD = *root.Data.Quota / QuotaPerDollar
@@ -104,17 +111,17 @@ func (p *Provider) FetchQuota(ctx context.Context, account quota.AccountRef) (*q
 	}
 	credits := []quota.CreditBalance{{
 		ID: "balance", Label: "剩余余额",
-		Balance: &balUSD, Unit: "usd",
+		Balance: &balUSD, Unit: unit,
 	}}
 	if usedUSD > 0 {
 		credits = append(credits, quota.CreditBalance{
-			ID: "used_month", Label: "本月已用",
-			Balance: &usedUSD, Unit: "usd",
+			ID: "used_total", Label: "累计已用",
+			Balance: &usedUSD, Unit: unit,
 		})
 	}
 	return &quota.QuotaSnapshot{
 		ProviderID: p.ID(), AccountID: account.ID,
-		PlanName:   "NewAPI 中转站 · 余额（美元）",
+		PlanName:   "NewAPI 中转站 · 余额（" + unitName + "）",
 		FetchedAt:  time.Now(), Status: quota.StatusOK,
 		Credits:    credits,
 		RawVersion: "newapi-v2",
