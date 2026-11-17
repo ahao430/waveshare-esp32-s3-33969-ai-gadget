@@ -266,6 +266,10 @@ void ui_open_app(int app_id) { app_manager_open(app_id); }
 
 /* ---------------- 订阅页（横滑范式） ---------------- */
 
+/* 本页弱化文字用更亮的灰：UI_TEXT_DIM(0x8A93AD) 在 AMOLED 上偏暗，
+ * 用户反馈"剩余额度/下次重置看不清"（2026-11-17） */
+#define UI_QUOTA_DIM lv_color_hex(0xC6CFE6)
+
 typedef struct {
     lv_obj_t *arc;
     lv_obj_t *arc_lbl;
@@ -390,17 +394,15 @@ static void quota_update_one(int idx)
         r->arc_used = used_pct; /* 自绘渐变取色（quota_arc_draw_cb） */
         lv_arc_set_value(r->arc, remain_pct);
         lv_obj_invalidate(r->arc);
-        /* 巨型数字：digits 字体无 % 字形 → % 用小号独立标签跟在右侧 */
-        lv_obj_set_style_text_font(r->arc_lbl, &font_digits_84, 0);
+        /* 数字 48px + 小 %：整组水平居中（% 紧贴数字右下，基线对齐） */
+        lv_obj_set_style_text_font(r->arc_lbl, &lv_font_montserrat_48, 0);
         snprintf(buf, sizeof(buf), "%d", remain_pct);
         lv_label_set_text(r->arc_lbl, buf);
-        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 119);
+        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, -9, 126);
         lv_obj_clear_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
         lv_obj_update_layout(lv_obj_get_parent(r->arc_lbl));
         int nw = lv_obj_get_width(r->arc_lbl);
-        int px = nw / 2 + 22;
-        if (px > 90) px = 90; /* "100" 时不越出环内缘 */
-        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, px, 147);
+        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, nw / 2 + 1, 142);
         lv_label_set_text(r->arc_sub, "剩余额度");
         lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
         /* 环外大倒计时（cd_big 由 1s timer 持续刷新，此处先落初值） */
@@ -595,7 +597,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_pad_hor(chip, 10, 0);
     lv_obj_set_style_pad_ver(chip, 2, 0);
     lv_obj_clear_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
-    r->plan_lbl = ui_label(chip, "--", &lv_font_cn_12, UI_TEXT_DIM);
+    r->plan_lbl = ui_label(chip, "--", &lv_font_cn_12, UI_QUOTA_DIM);
     lv_obj_center(r->plan_lbl);
 
     /* 居中大环（200px）：环心=巨型剩余百分比 + "剩余额度"副标 */
@@ -615,22 +617,22 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_arc_opa(r->arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
     lv_obj_add_event_cb(r->arc, quota_arc_draw_cb, LV_EVENT_DRAW_POST, r);
 
-    /* 环心：巨型剩余百分比（84px digits）+ 小号 % + 副标（环 200 缩后居中） */
-    r->arc_lbl = ui_label(tile, "0", &font_digits_84, UI_TEXT);
-    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 119);
-    r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_48, UI_TEXT);
-    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 40, 147);
-    r->arc_sub = ui_label(tile, "剩余额度", &lv_font_cn_16, UI_TEXT_DIM);
+    /* 环心：剩余百分比（48px）+ 小号 %（紧贴数字右下，整组居中）+ 副标 */
+    r->arc_lbl = ui_label(tile, "0", &lv_font_montserrat_48, UI_TEXT);
+    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 126);
+    r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_28, UI_TEXT);
+    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 10, 142);
+    r->arc_sub = ui_label(tile, "剩余额度", &lv_font_cn_16, UI_QUOTA_DIM);
     lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
 
     /* 环外：重置倒计时（设计稿：48px 大数字 + 说明行；说明行含更新时间） */
     r->cd_big = ui_label(tile, "0:00:00", &lv_font_montserrat_48, UI_TEXT);
     lv_obj_align(r->cd_big, LV_ALIGN_TOP_MID, 0, 276);
-    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_12, UI_TEXT_DIM);
+    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_12, UI_QUOTA_DIM);
     lv_obj_align(r->cd_cap, LV_ALIGN_TOP_MID, 0, 328);
 
     /* 周额度行（设计稿：周额度 [42%] [进度条] 剩余；无周限整行隐藏） */
-    r->week_cap = ui_label(tile, "周额度", &lv_font_cn_14, UI_TEXT_DIM);
+    r->week_cap = ui_label(tile, "周额度", &lv_font_cn_14, UI_QUOTA_DIM);
     lv_obj_align(r->week_cap, LV_ALIGN_TOP_MID, -150, 352);
     r->week_val = ui_label(tile, "--", &lv_font_montserrat_28, UI_ACCENT2);
     lv_obj_align(r->week_val, LV_ALIGN_TOP_MID, -90, 346);
@@ -642,7 +644,7 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
     lv_obj_set_style_bg_color(r->week_bar, UI_ACCENT2, LV_PART_INDICATOR);
     lv_obj_set_style_radius(r->week_bar, 5, 0);
     lv_obj_set_style_radius(r->week_bar, 5, LV_PART_INDICATOR);
-    r->week_right = ui_label(tile, "剩余", &lv_font_cn_14, UI_TEXT_DIM);
+    r->week_right = ui_label(tile, "剩余", &lv_font_cn_14, UI_QUOTA_DIM);
     lv_obj_align(r->week_right, LV_ALIGN_TOP_MID, 118, 352);
 
     /* 底部操作栏（设计稿：整条胶囊，左「刷新」| 竖线 | 右「手动预热」双行） */
