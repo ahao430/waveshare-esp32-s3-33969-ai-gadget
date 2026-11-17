@@ -731,13 +731,25 @@ static void quota_fetch_start(int app_id)
     d->gen = g_q_gen;
     d->before = ds_state()->sub_count;
     d->app_id = app_id;
-    /* 16KB 请求 + 12KB 回落：真机内部 RAM 碎片化时 16KB 栈 ENOMEM，
-     * 此前静默失败 → worker 不启动 → 订阅页永远空（2026-11-16 实测） */
+#ifdef ESP_PLATFORM
+    /* 真机：投常驻静态栈语音任务（坑 #15 模式）。pthread 走不通——
+     * 2026-11-17 实测 largest_int=12276（差 12 字节凑不齐 12KB 栈+TCB），
+     * 16KB/12KB 两档全灭 → "quota fetch: worker start failed" 每 60s
+     * 刷屏、订阅页永远显示 TF 旧缓存。busy（语音占用中）跳过本轮，
+     * 下一个自动刷新 tick 重试。 */
+    int rc = ui_bg_task_post(quota_fetch_worker, d);
+    if (rc != 0) {
+        UILOG("quota fetch: bg task busy/skip rc=%d", rc);
+        g_q_fetch = false;
+        free(d);
+    }
+#else
     if (ui_worker_start(quota_fetch_worker, d, 16 * 1024) != 0) {
         UILOG("quota fetch: worker start failed");
         g_q_fetch = false;
         free(d);
     }
+#endif
 }
 
 static void quota_auto_refresh_cb(lv_timer_t *t)
