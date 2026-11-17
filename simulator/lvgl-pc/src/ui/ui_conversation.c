@@ -574,8 +574,10 @@ static void poll_timer_cb(lv_timer_t *t)
             lv_obj_set_size(g_wave[i], 6, h);
             int side = i < WAVE_BARS_MAX / 2 ? -1 : 1;
             int idx = i < WAVE_BARS_MAX / 2 ? i : i - WAVE_BARS_MAX / 2;
-            lv_obj_align(g_wave[i], LV_ALIGN_BOTTOM_MID,
-                         side * (60 + idx * 9), -108);
+            /* 中心线对齐 PTT 按钮（按钮中心距底 70px；CENTER 基准使条
+             * 变高时向上下对称伸展，视觉始终骑在按钮中心线上） */
+            lv_obj_align(g_wave[i], LV_ALIGN_CENTER,
+                         side * (60 + idx * 9), 170);
             lv_obj_set_style_bg_opa(g_wave[i],
                                     vs_state() == VS_LISTENING ? LV_OPA_COVER : LV_OPA_30, 0);
         }
@@ -1091,8 +1093,8 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
         lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
         int side = i < WAVE_BARS_MAX / 2 ? -1 : 1;
         int idx = i < WAVE_BARS_MAX / 2 ? i : i - WAVE_BARS_MAX / 2;
-        lv_obj_align(bar, LV_ALIGN_BOTTOM_MID,
-                     side * (60 + idx * 9), -108);
+        /* 中心线对齐 PTT 按钮（距底 70px，同 poll 刷新路径） */
+        lv_obj_align(bar, LV_ALIGN_CENTER, side * (60 + idx * 9), 170);
         g_wave[i] = bar;
     }
 
