@@ -406,17 +406,17 @@ static void quota_update_one(int idx)
         lv_obj_set_style_text_font(r->arc_lbl, &lv_font_montserrat_48, 0);
         snprintf(buf, sizeof(buf), "%d", remain_pct);
         lv_label_set_text(r->arc_lbl, buf);
-        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, -9, 126);
+        lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, -9, 138);
         lv_obj_clear_flag(r->pct_sign, LV_OBJ_FLAG_HIDDEN);
         lv_obj_update_layout(lv_obj_get_parent(r->arc_lbl));
         int nw = lv_obj_get_width(r->arc_lbl);
-        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, nw / 2 + 1, 142);
+        lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, nw / 2 + 1, 154);
         lv_label_set_text(r->arc_sub, "剩余额度");
-        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
+        lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 194);
         /* 环外大倒计时（cd_big 由 1s timer 持续刷新，此处先落初值） */
         long reset_at = has_5h ? sub->reset_5h : sub->reset_week;
         long remain = reset_at > now ? reset_at - now : 0;
-        snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld",
+        snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld",
                  remain / 3600, (remain % 3600) / 60, remain % 60);
         lv_label_set_text(r->cd_big, buf);
         lv_obj_clear_flag(r->cd_big, LV_OBJ_FLAG_HIDDEN);
@@ -488,6 +488,10 @@ static void prewarm_modal_confirm_cb(lv_event_t *e)
     ds_prewarm_zhipu(msg, sizeof(msg));
     quota_update_all();
     lv_obj_delete(mask);
+    /* 预热会改变 5h 窗口/额度快照（用户 2026-11-17 反馈：关闭弹窗后
+     * 数据不刷新）——异步拉一次新数据，fetch_done 里自动回填页面；
+     * 忙（60s tick 在途）则下个 tick 自然覆盖 */
+    quota_fetch_start(g_q_app_id);
 
     /* 结果弹窗：冷却/失败/额度变化都醒目可见（原来只写卡片 12px 小字） */
     lv_obj_t *m2 = lv_obj_create(lv_layer_top());
@@ -627,16 +631,16 @@ static void quota_tile_build(lv_obj_t *tile, int idx)
 
     /* 环心：剩余百分比（48px）+ 小号 %（紧贴数字右下，整组居中）+ 副标 */
     r->arc_lbl = ui_label(tile, "0", &lv_font_montserrat_48, UI_TEXT);
-    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 126);
+    lv_obj_align(r->arc_lbl, LV_ALIGN_TOP_MID, 0, 138);
     r->pct_sign = ui_label(tile, "%", &lv_font_montserrat_28, UI_TEXT);
-    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 10, 142);
+    lv_obj_align(r->pct_sign, LV_ALIGN_TOP_MID, 10, 154);
     r->arc_sub = ui_label(tile, "剩余额度", &lv_font_cn_16, UI_QUOTA_DIM);
     lv_obj_align(r->arc_sub, LV_ALIGN_TOP_MID, 0, 207);
 
     /* 环外：重置倒计时（设计稿：48px 大数字 + 说明行；说明行含更新时间） */
     r->cd_big = ui_label(tile, "0:00:00", &lv_font_montserrat_48, UI_TEXT);
     lv_obj_align(r->cd_big, LV_ALIGN_TOP_MID, 0, 276);
-    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_12, UI_QUOTA_DIM);
+    r->cd_cap = ui_label(tile, "下次重置 · 5 小时周期", &lv_font_cn_14, UI_QUOTA_DIM);
     lv_obj_align(r->cd_cap, LV_ALIGN_TOP_MID, 0, 328);
 
     /* 周额度行（设计稿：周额度 [42%] [进度条] 剩余；无周限整行隐藏） */
@@ -816,7 +820,7 @@ static void quota_countdown_cb(lv_timer_t *t)
         }
         char buf[32];
         long remain = reset_at > now ? reset_at - now : 0;
-        snprintf(buf, sizeof(buf), "%ld:%02ld:%02ld",
+        snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld",
                  remain / 3600, (remain % 3600) / 60, remain % 60);
         lv_label_set_text(r->cd_big, buf);
     }
