@@ -3,6 +3,9 @@
 基于 [Waveshare ESP32-S3-Touch-AMOLED-2.16（SKU 33969）](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm)
 的社区定制多应用 AI Gadget。非 Waveshare 官方固件。
 
+**当前版本 v1.0.0（2026-11-17）**——固件 / Bridge / Web 后台统一版本号，
+配网 / 语音 / 字库 / 省电全链路真机验收通过。
+
 ![UI 定稿概念图](assets/ui/concepts/assistant-ui-final.png)
 
 > **UI 风格基准**（2026-11-14 定稿，不可变更）：三 AI 对话页
@@ -236,7 +239,7 @@ GADGET_DS=bridge GADGET_BRIDGE=http://127.0.0.1:8081 \
 scripts/gen_cn_font.sh
 ```
 
-## 状态（2026-11-16）
+## 状态（v1.0.0 · 2026-11-17）
 
 | 模块 | 状态 |
 |------|------|
@@ -245,7 +248,9 @@ scripts/gen_cn_font.sh
 | Bridge | ✅ 额度 + 凭据 + 订阅 + AstrBot 多实例（当前实例切换）+ 天气 + 设备文件 + 按键/排布 + 外观 + events(WS) + 语音链路（ASR/LLM/TTS、音色试听） |
 | Web 后台 | ✅ 总览 + 12 个配置页：外观/网络与配网/代理/按键/订阅中心/AstrBot/语音设置/Muse/小智/天气/设备文件 |
 | 固件 UI 移植（Phase 6 后半） | ✅ 主体已在真机运行（launcher/对话/设置/订阅/天气/文件/番茄钟；共享模拟器源码） |
-| 稳定性（2026-11-15 收敛） | ✅ 绘制缓冲内部 RAM + 语音静态栈任务 + LVGL 心跳看门狗；连续 6 轮完整语音回合零 NO_MEM/panic |
+| 稳定性（2026-11-17 收敛） | ✅ 绘制缓冲内部 RAM + 语音静态栈任务 + LVGL 心跳看门狗；内存策略对齐官方（ALWAYSINTERNAL=2048，LVGL 控件走 PSRAM）；配网链路四层加固（静态任务/PS 时序/SNTP 幂等/DMA 水位）；小智语音回合（公司 Wi-Fi + NAS Bridge）实测流畅 |
+| 字库（2026-11-17） | ✅ GB2312 全集 6763 字全字号（12/14/16/20/24px，bpp4）并入主库——生僻字（魅/薰等）任意字号正常渲染；24px 大字库就绪待用；flash 5.79MB/11.94MB（54%） |
+| 网络诊断与省电（2026-11-17） | ✅ 设备端一键诊断（门户劫持检测+认证页二维码 / 阻断型网络提示）；Wi-Fi 省电自动档（通电全速 / 电池按场景分档，息屏省电，1s 粒度热切） |
 | 小智官方服务（xiaozhi.me） | ✅ 已接入并真网验证：Bridge 模拟设备（OTA 激活 + WebSocket + Opus，官方 TTS 直通），未绑定自动回落本机链路，见 [ADR-005](docs/DECISIONS.md) |
 | TF 文件管理（ADR-010） | ✅ 文件 App（浏览/删除/上传/下载）+ 配网自动备份/恢复 + 订阅/天气离线缓存；真机 TF 挂载与备份写入实测，下载上限 2MB（1-bit SDMMC 吞吐待测） |
 | 设备运行期配网 | ✅ 设置→网络与连接：Wi-Fi 扫描/软键盘输密码存 NVS + Bridge 地址热改（`ds_bridge_rebind` 即时生效）；`wifi_secret.h` 退为出厂兜底 |

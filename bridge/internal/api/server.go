@@ -59,6 +59,8 @@ type Deps struct {
 }
 
 // fetchTimeout 单次抓取上限。
+const BridgeVersion = "1.0.0"
+
 const fetchTimeout = 15 * time.Second
 
 // maxChatRequestBytes 聊天请求体上限（对话历史可能较长）。
@@ -75,6 +77,7 @@ func NewHandler(d Deps) http.Handler {
 	mux.HandleFunc("GET /api/v1/device/status", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, logger, http.StatusOK, map[string]any{
 			"service":         "gadget-bridge",
+			"version":         BridgeVersion,
 			"status":          "ok",
 			"providers_count": len(d.Registry.List()),
 			"time":            time.Now().UTC(),

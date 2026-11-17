@@ -5,7 +5,7 @@
 
 ## 项目一句话
 
-Waveshare ESP32-S3 圆屏 AI Gadget 的完整自定义固件栈：
+Waveshare ESP32-S3 圆屏 AI Gadget 的完整自定义固件栈（**v1.0.0**）：
 **模拟器先行开发 UI（LVGL/C）→ Go Bridge（凭据/额度/AI 路由/配置）→
 Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟器与真机
 共用 UI 源码（ADR-001，移植进行中）。

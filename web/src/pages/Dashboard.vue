@@ -6,6 +6,7 @@ import { RouterLink } from 'vue-router'
 import { request } from '@/api/client'
 
 const bridgeOk = ref<boolean | null>(null)
+const bridgeVersion = ref('')
 const themeName = ref('')
 
 const adminUrl = typeof window !== 'undefined' ? window.location.origin : ''
@@ -14,8 +15,9 @@ const themes = ['星云紫', '极光青', '落日橙', '蔷薇粉']
 
 onMounted(async () => {
   try {
-    await request('/api/v1/device/status')
+    const r = await request<{ version?: string }>('/api/v1/device/status')
     bridgeOk.value = true
+    bridgeVersion.value = r.version ?? ''
   } catch {
     bridgeOk.value = false
   }
@@ -64,6 +66,7 @@ const groups = [
           {{ bridgeOk === null ? '检查中…' : bridgeOk ? '已连接' : '未连接（:8081）' }}
         </span>
         <template v-if="themeName"> · 当前主题：{{ themeName }}</template>
+        <template v-if="bridgeVersion"> · <span class="text-dim">v{{ bridgeVersion }}</span></template>
       </p>
     </header>
 
