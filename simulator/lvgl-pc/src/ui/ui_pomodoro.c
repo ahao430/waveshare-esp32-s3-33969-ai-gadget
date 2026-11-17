@@ -852,11 +852,11 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
     lv_arc_set_angles(g_arc, 0, 360);
     lv_obj_add_event_cb(g_arc, pomo_arc_draw_cb, LV_EVENT_DRAW_POST, NULL);
 
-    /* 环内：吉祥物（64px RGB565，随模式/完成态切换）。y=132 让黑底
-     * 方块完全离开描边（220px 环描边内缘 128，76px 版黑角曾切环）。 */
+    /* 环内：吉祥物（64px RGB565，随模式/完成态切换）。y=142：完全离开
+     * 描边内缘（128）后用户再要求下移一点（132→142，验收 2026-11-17）。 */
     g_mascot = lv_image_create(scr);
     lv_image_set_src(g_mascot, phase_mascot());
-    lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 132);
+    lv_obj_align(g_mascot, LV_ALIGN_TOP_MID, 0, 142);
 
     /* 环内倒计时（56px 逐位定宽）：位置绝对稳定不抖 */
     static const lv_coord_t DXS[4] = { -60, -24, 24, 60 };
@@ -864,16 +864,16 @@ void ui_pomodoro_build(lv_obj_t *scr, int app_id)
         g_digits[i] = ui_label(scr, "0", &font_digits_56, UI_TEXT);
         lv_obj_set_width(g_digits[i], 40);
         lv_obj_set_style_text_align(g_digits[i], LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 202);
+        lv_obj_align(g_digits[i], LV_ALIGN_TOP_MID, DXS[i], 210);
     }
     lv_obj_t *colon = ui_label(scr, ":", &font_digits_56, UI_TEXT);
     lv_obj_set_width(colon, 18);
     lv_obj_set_style_text_align(colon, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 202);
+    lv_obj_align(colon, LV_ALIGN_TOP_MID, 0, 210);
 
     /* 环内副题：白色（用户 2026-11-17：灰紫在黑底上看不清） */
     g_sub_lbl = ui_label(scr, "", &lv_font_cn_14, UI_TEXT);
-    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 258);
+    lv_obj_align(g_sub_lbl, LV_ALIGN_TOP_MID, 0, 266);
 
     /* 今日统计胶囊（320×34） */
     lv_obj_t *stbar = lv_obj_create(scr);
