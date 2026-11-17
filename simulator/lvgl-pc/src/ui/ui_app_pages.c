@@ -614,7 +614,8 @@ static void quota_build(lv_obj_t *scr, int app_id)
     g_q_cd_timer = app_manager_timer_create(quota_countdown_cb, 1000, NULL);
 
     /* 自动刷新 timer：间隔由 Web 下发（ds_config_refresh_interval，
-     * 默认 900s）；每次进页面重建，改设置后重开即生效 */
+     * 默认 900s）；每次进页面重建。改设置后重开页面或等下一次拉取
+     * 即热生效（worker 顺带回拉配置，见 quota_fetch_done），无需重启 */
     {
         int ivs = ds_config_refresh_interval();
         if (ivs < 60) ivs = 900;
@@ -673,6 +674,7 @@ typedef struct {
     int gen;
     int before;
     int app_id;
+    int new_ivs; /* 回拉的刷新间隔（0=未拉到）；变了就地改 timer 周期 */
 } quota_fetch_t;
 
 static void quota_fetch_done(void *arg)
@@ -680,6 +682,16 @@ static void quota_fetch_done(void *arg)
     quota_fetch_t *d = arg;
     g_q_fetch = false;
     if (d->gen == g_q_gen) { /* 页面还活着才动 UI（防悬垂控件） */
+        /* 间隔配置热更新（2026-11-17）：Web 改完不必重启设备——
+         * 每次拉数据顺带回拉 device config，变了就地改周期，
+         * 「重开订阅页生效」从此为真（页面开着等下一 tick 也自愈） */
+        if (d->new_ivs >= 60 && d->new_ivs != ds_config_refresh_interval()) {
+            ds_config_set_refresh_interval(d->new_ivs);
+            if (g_q_auto_timer) {
+                lv_timer_set_period(g_q_auto_timer, (uint32_t)d->new_ivs * 1000u);
+            }
+            UILOG("quota auto refresh: interval -> %ds", d->new_ivs);
+        }
         if (ds_state()->sub_count != d->before) {
             app_manager_open(d->app_id); /* 订阅数量变化：重建（空态↔列表） */
         } else {
@@ -692,6 +704,13 @@ static void quota_fetch_done(void *arg)
 static void *quota_fetch_worker(void *arg)
 {
     ds_refresh();
+    /* 顺带回拉运行配置：只在 worker 线程做阻塞 HTTP（坑 #11），
+     * 只取间隔；亮度/音量是开机语义，不在此应用 */
+    ds_device_config_t dc;
+    memset(&dc, 0, sizeof(dc));
+    if (ds_device_config_fetch(&dc) == 0 && dc.sub_refresh_interval_s >= 60) {
+        ((quota_fetch_t *)arg)->new_ivs = dc.sub_refresh_interval_s;
+    }
 #ifdef ESP_PLATFORM
     UILOG("quota fetch: done stack_free=%u",
           (unsigned)uxTaskGetStackHighWaterMark(NULL));
@@ -704,7 +723,7 @@ static void quota_fetch_start(int app_id)
 {
     if (g_q_fetch) return; /* 上一轮还在路上：忽略重入 */
     g_q_fetch = true;
-    quota_fetch_t *d = malloc(sizeof(*d));
+    quota_fetch_t *d = calloc(1, sizeof(*d)); /* new_ivs=0：未拉到 */
     if (!d) {
         g_q_fetch = false;
         return;

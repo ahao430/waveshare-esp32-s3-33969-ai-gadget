@@ -342,7 +342,7 @@ onMounted(() => {
   <div class="card mt-4">
     <h3 class="mb-1 font-semibold">设备订阅自动刷新</h3>
     <p class="mb-3 text-xs text-dim">
-      设备订阅页按此间隔自动拉取额度（1~60 分钟；查询本身不消耗额度，仅「预热」按钮会消耗约 1%——但高频查询可能触发上游接口限频，按需选择）。设备开机时拉取本配置，改完重开设备订阅页生效。
+      设备订阅页按此间隔自动拉取额度（1~60 分钟；查询本身不消耗额度，仅「预热」按钮会消耗约 1%——但高频查询可能触发上游接口限频，按需选择）。注意：配置存在设备所连的那台 Bridge 上——改完重开设备订阅页（或等一次自动刷新）即生效，无需重启设备。
     </p>
     <div class="flex flex-wrap items-center gap-2">
       <select v-model.number="devInterval" class="input !w-40">
