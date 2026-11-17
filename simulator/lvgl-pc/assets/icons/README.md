@@ -6,14 +6,19 @@
 |--------|------|
 | sub.png      | 订阅 |
 | weather.png  | 天气 |
-| pomodoro.png | 番茄钟（gpt-image 生成） |
+| pomodoro.png | 番茄钟 |
 | settings.png | 设置 |
 | music.png    | 音乐 |
+| files.png    | 文件 |
 
-要求：正方形 PNG（推荐 88×88，任意正方形尺寸均可——磁贴按实际尺寸自适应缩放）；
-全出血构图（四周留边会被裁掉一半视觉，介意的话画满画布）；
-不需要自己做圆角（渲染侧统一 26px 圆角裁切）。
-角色类头像（大肥鱼/小智/Muse）在 assets/avatars/ 下（88×88）。
+2026-11-18 全套换新（用户 AI 生成，源图在 `assets/ui/apps/`，
+转换脚本输出 216×216 到本目录 + `gen_icon_embed.sh` 预解码 108×108 入固件）。
+三个聊天 App（AstrBot/小智/Muse）的头像在 `assets/avatars/` 下同批换新。
 
-注：music.png 目前不嵌入固件（音乐是占位 App，桌面走符号磁贴）；
-`scripts/gen_icon_embed.sh` 的 SKIP 列表控制，接入播放器时再移除。
+未建 App 的备用图标（小说/图片/录音/calc）暂存 `assets/ui/apps/`，
+**不放本目录**——没有桌面入口消费，嵌入固件白占 ~23KB flash/张；
+建对应 App 时再落位。
+
+要求：正方形 PNG（任意尺寸，磁贴按实际尺寸自适应缩放）；
+全出血构图（四周留边会被裁掉一半视觉）；不需要自己做圆角
+（渲染侧统一 26px 圆角裁切）。
