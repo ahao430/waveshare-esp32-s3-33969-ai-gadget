@@ -468,6 +468,22 @@ int reader_render(reader_book_t *b, long off, int ch_hint,
             line_w = 2 * b->font_px;
         }
         int cw = char_w(b, cp);
+        /* 行尾禁则：开括号放入后若下一字符放不下（lookahead 一字符），
+         * 把开括号一起挪到下一行，避免开括悬挂行尾 */
+        if (cur_len > 0 && line_w + cw <= b->line_max_w && bad_tail(cp)) {
+            long mk2 = buf_tell(b);
+            uint32_t nx;
+            int nn = dec_next(b, &nx);
+            buf_rewind(b, mk2);
+            if (nn > 0 && nx != '\n' &&
+                line_w + cw + char_w(b, nx) > b->line_max_w) {
+                memcpy(out->lines[nlines++], cur, (size_t)cur_len + 1);
+                if (nlines >= cap) { next = mark; break; }
+                cur_len = 0;
+                line_w = 0;
+                prev_nl = 0;
+            }
+        }
         if (line_w + cw <= b->line_max_w || cur_len == 0) {
             /* 放入当前行 */
         } else if (bad_head(cp)) {

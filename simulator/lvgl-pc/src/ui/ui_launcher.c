@@ -521,8 +521,9 @@ void ui_launcher_build(void)
                 lv_obj_set_size(holder, ICON, ICON);
                 lv_obj_align(holder, LV_ALIGN_TOP_MID, 0, 10);
                 lv_obj_set_style_radius(holder, 26, 0);
-                lv_obj_set_style_bg_color(holder, UI_CARD, 0);
-                lv_obj_set_style_bg_opa(holder, LV_OPA_COVER, 0);
+                /* 图标直出：无底色（用户图标全出血自带视觉，2026-11-18
+                 * 反馈"外面多一层白色圆角背景"）；26px 圆角裁切保留 */
+                lv_obj_set_style_bg_opa(holder, LV_OPA_TRANSP, 0);
                 lv_obj_set_style_border_width(holder, 0, 0);
                 lv_obj_set_style_pad_all(holder, 0, 0);
                 lv_obj_set_style_clip_corner(holder, true, 0);
