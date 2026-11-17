@@ -58,7 +58,7 @@ function fetchUrlFor(s: SubInfo): string {
   return officialUrls[s.kind] ?? ''
 }
 
-const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '' })
+const subForm = ref({ kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '' })
 const editingId = ref('') // ''=新增；非空=编辑该实例（POST 同 id 覆盖）
 const subAdding = ref(false)
 const message = ref('')
@@ -196,7 +196,7 @@ async function loadSubs() {
 
 function resetForm() {
   editingId.value = ''
-  subForm.value = { kind: 'zhipu', label: '', base_url: '', token: '' }
+  subForm.value = { kind: 'zhipu', label: '', base_url: '', token: '', system_token: '', system_user_id: '' }
   onKindChange()
 }
 
@@ -209,6 +209,8 @@ function editSub(s: SubInfo) {
     label: s.label,
     base_url: s.base_url || defaultBase[s.kind] || '',
     token: '',
+    system_token: '', // 不回显（留空=保留原值，Bridge 侧合并）
+    system_user_id: '',
   }
   message.value = ''
 }
@@ -336,6 +338,16 @@ onMounted(() => {
         {{ subAdding ? '保存中…' : editingId ? '保存修改' : '添加订阅' }}
       </button>
       <button v-if="editingId" class="btn-ghost" @click="resetForm">取消</button>
+    </div>
+    <div v-if="subForm.kind === 'newapi'" class="mt-2 flex flex-wrap items-end gap-2">
+      <input v-model="subForm.system_token" class="input !w-64" type="password"
+             placeholder="系统访问令牌（留空=保留原值）" />
+      <input v-model="subForm.system_user_id" class="input !w-32"
+             placeholder="用户 ID" />
+      <span class="text-xs text-dim">
+        查余额用「系统访问令牌」：站点控制台「个人设置」生成（不是 sk- API Key）；
+        用户 ID 在个人设置页可见（新版站点必需）。
+      </span>
     </div>
   </div>
 

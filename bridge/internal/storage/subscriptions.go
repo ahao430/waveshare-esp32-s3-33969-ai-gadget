@@ -5,6 +5,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -76,6 +77,52 @@ func (d *DB) SaveSubscription(id, kind, label, baseURL, token string, masterKey 
 		return fmt.Errorf("storage: save subscription %s: %w", id, err)
 	}
 	return nil
+}
+
+// SaveSubscriptionExtra 存订阅实例的附加凭据（整体 JSON→加密→
+// extra_encrypted 列；2026-11-17 newapi 系统访问令牌/用户 ID 用。
+// 与 token 列分开：token 承载 sk- Key（聊天/语音），extra 承载
+// 控制台类凭据）。nil/空 map = 清空。行不存在时静默忽略（extra
+// 只随 SaveSubscription 生命周期）。
+func (d *DB) SaveSubscriptionExtra(id string, extra map[string]string, masterKey []byte) error {
+	if masterKey == nil {
+		return security.ErrNoMasterKey
+	}
+	enc := ""
+	if len(extra) > 0 {
+		raw, err := json.Marshal(extra)
+		if err != nil {
+			return fmt.Errorf("storage: marshal subscription extra: %w", err)
+		}
+		if enc, err = security.Encrypt(string(raw), masterKey); err != nil {
+			return fmt.Errorf("storage: encrypt subscription extra: %w", err)
+		}
+	}
+	_, err := d.sql.Exec(
+		`UPDATE subscriptions SET extra_encrypted = ? WHERE id = ?`, enc, id)
+	if err != nil {
+		return fmt.Errorf("storage: save subscription extra %s: %w", id, err)
+	}
+	return nil
+}
+
+// GetSubscriptionExtra 解密读取附加凭据（无/解密失败返回空 map）。
+func (d *DB) GetSubscriptionExtra(id string, masterKey []byte) map[string]string {
+	var enc string
+	if err := d.sql.QueryRow(
+		`SELECT COALESCE(extra_encrypted, '') FROM subscriptions WHERE id = ?`, id).
+		Scan(&enc); err != nil || enc == "" {
+		return map[string]string{}
+	}
+	raw, err := security.Decrypt(enc, masterKey)
+	if err != nil {
+		return map[string]string{}
+	}
+	var out map[string]string
+	if json.Unmarshal([]byte(raw), &out) != nil {
+		return map[string]string{}
+	}
+	return out
 }
 
 // SetSubscriptionOrder 按传入顺序写 sort=1..n。id 集合与表现有不一致

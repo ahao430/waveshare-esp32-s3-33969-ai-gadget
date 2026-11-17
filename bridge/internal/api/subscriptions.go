@@ -49,9 +49,14 @@ func fetchOne(ctx context.Context, d Deps, sub storage.Subscription) subEntry {
 			token = key
 		}
 	}
+	extra := map[string]string{"base_url": baseURL}
+	// newapi 附加凭据：系统访问令牌/用户 ID（/api/user/self 专用）
+	for k, v := range d.SubscriptionsDB.GetSubscriptionExtra(sub.ID, d.MasterKey) {
+		extra[k] = v
+	}
 	acc := quota.AccountRef{
 		ID: sub.ID, DisplayName: sub.Label, APIKey: token,
-		Extra: map[string]string{"base_url": baseURL},
+		Extra: extra,
 	}
 	sctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
@@ -81,11 +86,13 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 
 	mux.HandleFunc("POST /api/v1/subscriptions", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ID      string `json:"id"`
-			Kind    string `json:"kind"`
-			Label   string `json:"label"`
-			BaseURL string `json:"base_url"`
-			Token   string `json:"token"`
+			ID           string `json:"id"`
+			Kind         string `json:"kind"`
+			Label        string `json:"label"`
+			BaseURL      string `json:"base_url"`
+			Token        string `json:"token"`
+			SystemToken  string `json:"system_token"`   // newapi：控制台系统访问令牌（非 sk-）
+			SystemUserID string `json:"system_user_id"` // newapi：New-Api-User 头
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&body); err != nil {
 			writeErr(w, logger, http.StatusBadRequest, "bad_request", "read body failed")
@@ -110,6 +117,23 @@ func serveSubscriptions(mux *http.ServeMux, d Deps, logger *slog.Logger) {
 		if err := db.SaveSubscription(id, body.Kind, body.Label, body.BaseURL, token, d.MasterKey); err != nil {
 			writeErr(w, logger, http.StatusInternalServerError, "save_failed", err.Error())
 			return
+		}
+		// newapi 附加凭据（留空=保留旧值，与 token 同语义）；其它 kind
+		// 传了也忽略（存了无消费方）。全空且原本无值时不写。
+		if body.Kind == "newapi" {
+			extra := db.GetSubscriptionExtra(id, d.MasterKey)
+			if body.SystemToken != "" {
+				extra["system_token"] = body.SystemToken
+			}
+			if body.SystemUserID != "" {
+				extra["system_user_id"] = body.SystemUserID
+			}
+			if len(extra) > 0 {
+				if err := db.SaveSubscriptionExtra(id, extra, d.MasterKey); err != nil {
+					writeErr(w, logger, http.StatusInternalServerError, "save_extra_failed", err.Error())
+					return
+				}
+			}
 		}
 		// Key 投影到凭据表：订阅实例是唯一编辑入口，但语音 ASR/智谱预热
 		// 仍从凭据表动态解析（resolveAccount）——实例里改 Key 两处同步。

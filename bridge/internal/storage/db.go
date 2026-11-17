@@ -88,6 +88,8 @@ func Open(path string) (*DB, error) {
 	ensureColumn(sqlDB, "bots", "tts_provider", "TEXT NOT NULL DEFAULT ''") // deepseek|edge|''=自动
 	ensureColumn(sqlDB, "bots", "tts_voice", "TEXT NOT NULL DEFAULT ''")    // 音色 id/名字
 	ensureColumn(sqlDB, "subscriptions", "sort", "INTEGER NOT NULL DEFAULT 0") // 用户排序（2026-11-16）
+	// 附加凭据（2026-11-17 newapi 系统访问令牌/用户 ID；JSON→加密）
+	ensureColumn(sqlDB, "subscriptions", "extra_encrypted", "TEXT NOT NULL DEFAULT ''")
 	return &DB{sql: sqlDB}, nil
 }
 
