@@ -41,6 +41,16 @@ scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归�
 
 全绿才提交。只改 docs 可以豁免。
 
+**改了 `web/` 必须同步部署产物再提交**（2026-11-17 起 `bridge/webdist/`
+随仓库分发——NAS/他人 git pull 即得后台页面，无需 node）：
+
+```bash
+cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
+```
+
+注意 `.gitignore` 只忽略 `web/dist/`（构建中间产物），
+`bridge/webdist/` 是有意入库的（`-webdir` 缺省探测目录）。
+
 ## 固件环境（本机现状）
 
 - ESP-IDF **v6.0.3** at `~/esp/esp-idf-v6.0.3`，venv `~/esp/idf-buildenv`
