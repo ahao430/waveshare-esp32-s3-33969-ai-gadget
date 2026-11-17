@@ -761,15 +761,23 @@ static void wifi_evt(void *arg, esp_event_base_t base, int32_t id, void *data)
 static void net_task(void *arg)
 {
     (void)arg;
+    bool sntp_started = false; /* SNTP 只初始化一次：重连网络会再次 GOT_IP，
+                                * 客户端运行中再 setoperatingmode 会触发
+                                * lwIP assert（'Operating mode must not be
+                                * set while SNTP client is running'，
+                                * 2026-11-17 配网重连实测 abort 重启） */
     for (;;) {
         xEventGroupWaitBits(g_ev, EV_NET_BIT, pdTRUE, pdFALSE, portMAX_DELAY);
-        /* SNTP 对时（屏保时钟/会话时间戳） */
         setenv("TZ", "CST-8", 1);
         tzset();
-        esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-        esp_sntp_setservername(0, "ntp.aliyun.com");
-        esp_sntp_setservername(1, "pool.ntp.org");
-        esp_sntp_init();
+        if (!sntp_started) {
+            sntp_started = true;
+            /* SNTP 对时（屏保时钟/会话时间戳） */
+            esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+            esp_sntp_setservername(0, "ntp.aliyun.com");
+            esp_sntp_setservername(1, "pool.ntp.org");
+            esp_sntp_init();
+        }
     }
 }
 
