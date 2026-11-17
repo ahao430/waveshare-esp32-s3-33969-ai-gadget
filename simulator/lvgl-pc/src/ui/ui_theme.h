@@ -7,7 +7,7 @@
 #include "fonts/ui_font_cn.h"
 #include "lvgl.h"
 
-#define UI_BG        lv_color_hex(0x0B1020) /* 深蓝黑背景 */
+#define UI_BG        lv_color_hex(0x000000) /* AMOLED 纯黑背景 */
 #define UI_CARD      lv_color_hex(0x161D31) /* 玻璃拟态卡片底 */
 #define UI_CARD_HI   lv_color_hex(0x1F2A47) /* 卡片高亮（按下/悬停） */
 #define UI_LINE      lv_color_hex(0x212A44) /* 描边/分隔线（与 Web --line 一致） */

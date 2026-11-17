@@ -156,7 +156,7 @@ void app_manager_open(int app_id)
     appmem_log("open-before", def);
 
     lv_obj_t *scr = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0B1020), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0); /* AMOLED 纯黑 */
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(scr, 16, 0);
     lv_obj_set_style_border_width(scr, 0, 0);
