@@ -121,21 +121,25 @@ static void lib_async(void *arg)
     for (int i = 0; i < n; i++) {
         const music_track_t *t = music_player_track(i);
         lv_obj_t *row = lv_obj_create(g_lib_rows);
-        lv_obj_set_size(row, 400, 46);
+        lv_obj_set_size(row, LV_PCT(100), 46);
         ui_style_card(row);
+        lv_obj_set_style_pad_all(row, 0, 0);
         lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(row, lib_row_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         lv_obj_t *ic = ui_label(row, t->fmt[0] == 'M' ? LV_SYMBOL_AUDIO : LV_SYMBOL_DRIVE,
                                 &lv_font_montserrat_16, lv_color_hex(MM_SUB));
-        lv_obj_align(ic, LV_ALIGN_LEFT_MID, 8, 0);
+        lv_obj_align(ic, LV_ALIGN_LEFT_MID, 12, 0);
         lv_obj_t *nm = ui_label(row, t->title, &lv_font_cn_14,
                                 lv_color_hex(MM_TXT));
-        lv_obj_align(nm, LV_ALIGN_LEFT_MID, 34, 0);
-        lv_obj_set_width(nm, 240);
+        lv_obj_set_width(nm, 280);
         lv_label_set_long_mode(nm, LV_LABEL_LONG_DOT);
-        lv_obj_t *du = ui_label(row, "…", &lv_font_cn_12, lv_color_hex(MM_DIM2));
-        lv_obj_align(du, LV_ALIGN_RIGHT_MID, -8, 0);
+        lv_obj_align(nm, LV_ALIGN_LEFT_MID, 38, 0);
+        char dur[16];
+        snprintf(dur, sizeof(dur), "%d:%02d", t->duration_s / 60,
+                 t->duration_s % 60);
+        lv_obj_t *du = ui_label(row, dur, &lv_font_cn_12, lv_color_hex(MM_DIM2));
+        lv_obj_align(du, LV_ALIGN_RIGHT_MID, -12, 0);
     }
 }
 
@@ -249,7 +253,7 @@ static void show_view(int v)
         lv_obj_add_flag(g_vlib, LV_OBJ_FLAG_HIDDEN);
         lv_obj_t *tgt = v == 0 ? g_vp : g_vlib;
         lv_obj_clear_flag(tgt, LV_OBJ_FLAG_HIDDEN);
-        if (v == 1 && music_player_count() == 0) lib_start();
+        if (v == 1) lib_start(); /* 每次进曲库都重扫+重渲染（worker 异步） */
     }
 }
 
@@ -437,34 +441,34 @@ static void build_player(lv_obj_t *parent)
 
 static void build_lib(lv_obj_t *parent)
 {
-    lv_obj_t *top = lv_obj_create(parent);
-    lv_obj_set_size(top, 448, 44);
-    lv_obj_align(top, LV_ALIGN_TOP_MID, 0, 4);
-    lv_obj_set_style_bg_opa(top, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(top, 0, 0);
-    lv_obj_clear_flag(top, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *back = lv_obj_create(top);
-    lv_obj_set_size(back, 96, 32);
-    lv_obj_align(back, LV_ALIGN_LEFT_MID, 0, 0);
+    /* ui_files.c 同构：标题/按钮直接挂容器（不套 top 卡），列表容器
+     * TRANSP + flex column；行 LV_PCT(100)+clear SCROLLABLE */
+    lv_obj_t *back = lv_obj_create(parent);
+    lv_obj_set_size(back, 108, 36);
+    lv_obj_align(back, LV_ALIGN_TOP_LEFT, 6, 4);
     ui_style_card(back);
     lv_obj_set_style_radius(back, 16, 0);
+    lv_obj_clear_flag(back, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(back, show_view0_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *bl = ui_label(back, LV_SYMBOL_LEFT " 返回", &lv_font_cn_14, lv_color_hex(MM_DIM));
+    lv_obj_t *bl = ui_label(back, LV_SYMBOL_LEFT " 返回", &lv_font_cn_14,
+                            lv_color_hex(MM_DIM));
     lv_obj_center(bl);
-    lv_obj_t *tt = ui_label(top, "曲库", &lv_font_cn_16, lv_color_hex(MM_TXT));
-    lv_obj_align(tt, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_t *hint = ui_label(parent, "", &lv_font_cn_14, lv_color_hex(MM_DIM));
-    lv_obj_center(hint);
+
+    lv_obj_t *tt = ui_label(parent, "曲库", &lv_font_cn_16, lv_color_hex(MM_TXT));
+    lv_obj_align(tt, LV_ALIGN_TOP_MID, 26, 12);
+
+    g_lib_hint = ui_label(parent, "", &lv_font_cn_14, lv_color_hex(MM_DIM));
+    lv_obj_center(g_lib_hint);
 
     g_lib_rows = lv_obj_create(parent);
-    lv_obj_set_size(g_lib_rows, 440, 396);
-    lv_obj_align(g_lib_rows, LV_ALIGN_TOP_MID, 0, 52);
+    lv_obj_set_size(g_lib_rows, 440, 400);
+    lv_obj_align(g_lib_rows, LV_ALIGN_TOP_MID, 0, 48);
+    lv_obj_set_style_bg_opa(g_lib_rows, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(g_lib_rows, 0, 0);
-    lv_obj_set_style_pad_all(g_lib_rows, 8, 0);
+    lv_obj_set_style_pad_all(g_lib_rows, 0, 0);
     lv_obj_set_style_pad_row(g_lib_rows, 6, 0);
     lv_obj_set_flex_flow(g_lib_rows, LV_FLEX_FLOW_COLUMN);
-    lv_obj_add_flag(g_lib_rows, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(g_lib_rows, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(g_lib_rows, LV_SCROLLBAR_MODE_OFF);
 }
@@ -479,6 +483,10 @@ static void show_view0_cb(lv_event_t *e)
 
 static void demo_hooks(void)
 {
+    if (getenv("GADGET_DEMO_MUSIC_LIB")) {
+        music_player_scan();
+        show_view(1);
+    }
     const char *p = getenv("GADGET_DEMO_MUSIC_PLAY");
     if (p && p[0] == '1') {
         music_player_scan();
@@ -504,6 +512,7 @@ void ui_music_build(lv_obj_t *scr, int app_id)
     lv_obj_set_style_border_width(g_vp, 0, 0);
     lv_obj_clear_flag(g_vp, LV_OBJ_FLAG_SCROLLABLE);
     g_vlib = lv_obj_create(scr);
+    lv_obj_set_size(g_vlib, 480, 480);
     lv_obj_set_style_bg_opa(g_vlib, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(g_vlib, 0, 0);
     lv_obj_clear_flag(g_vlib, LV_OBJ_FLAG_SCROLLABLE);
