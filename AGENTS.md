@@ -182,6 +182,15 @@ scripts/regress-sim.sh   # UI 改动建议加跑：8 App headless 截帧回归�
     （'tts buffer alloc failed' 刷屏 → 有字幕无声音）。768KB
     （24s@16k）实测稳，覆盖实际回复 272KB/16.8s。**PSRAM 大块
     分配上限经验值 ~768KB**（碎片化后 1MB+ 不可靠）。
+24. **智谱 Coding Plan 额度仅官方工具内消耗（2026-11-17 双向实证）**：
+    裸 API（/api/paas/v4/chat/completions）调套餐模型（glm-5.3）→ 智谱
+    直接 **429**；调免费模型（glm-4-flash）→ 200 但 **before/after 的
+    5h 窗口均 0%/100%**，不消耗套餐、不启动 5 小时积分窗口。官方文档
+    原文："套餐仅限在官方支持的指定工具（Claude Code/Codex/OpenCode/
+    ZCode 等）中使用"。**设备端'预热'按钮无法达成启动窗口**——已改为
+    使用说明弹窗（引导去 ZCode 发一条消息）。Bridge 的 prewarm 端点
+    保留（Web/脚本调试用），默认模型 glm-4-flash→glm-5.3（至少真发
+    真实请求，代价是套餐 key 会 429——按需用 ZHIPU_PREWARM_MODEL 覆盖）。
 23. **公司访客网可达性因目标而异（2026-11-17 修正）**：GYJX-GUEST
     对旧 VPS 域名（wavesharebridge.ahao430.site，80）TCP 超时，但
     对 NAS Bridge（route.ahao430.site:8081）完全正常（语音 40KB

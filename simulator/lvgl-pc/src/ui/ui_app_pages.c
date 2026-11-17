@@ -373,62 +373,48 @@ static void prewarm_modal_close_cb(lv_event_t *e)
     lv_obj_delete(modal);
 }
 
-static int g_prewarm_idx; /* 触发预热的 tile（结果回写到同一张卡） */
 
-static void prewarm_modal_confirm_cb(lv_event_t *e)
-{
-    lv_obj_t *modal = lv_event_get_user_data(e);
-    char msg[160];
-    ds_prewarm_zhipu(msg, sizeof(msg));
-    quota_update_all();
 
-    lv_obj_t *lbl = g_q[g_prewarm_idx].updated_lbl; /* 结果回触发卡（原写死 g_q[0]） */
-    if (lbl) {
-        char buf[192];
-        snprintf(buf, sizeof(buf), "预热：%s", msg);
-        lv_label_set_text(lbl, buf);
-    }
-    lv_obj_delete(modal);
-}
-
+/* 预热按钮（2026-11-17 重构为使用说明）：智谱实测——Coding Plan 额度
+ * 仅官方工具（ZCode/Claude Code 等）内消耗；裸 API 调套餐模型直接
+ * 429（glm-5.3 实证），调免费模型（glm-4-flash）虽 200 但不计套餐、
+ * 不启动 5 小时窗口（before/after 5h 窗口均 0%/100% 实证）。因此
+ * 设备端不再发无效请求，改为明确引导。 */
 static void quota_prewarm_cb(lv_event_t *e)
 {
-    g_prewarm_idx = (int)(uintptr_t)lv_event_get_user_data(e);
-    lv_obj_t *root = lv_layer_top();
-    lv_obj_t *modal = lv_obj_create(root);
-    lv_obj_set_size(modal, 380, 176);
-    lv_obj_center(modal);
-    ui_style_card(modal);
-    lv_obj_set_style_bg_color(modal, UI_CARD, 0);
-    lv_obj_set_style_radius(modal, 20, 0);
-    lv_obj_clear_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
+    (void)e;
+    lv_obj_t *mask = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(mask, 480, 480);
+    lv_obj_align(mask, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_bg_color(mask, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(mask, LV_OPA_50, 0);
+    lv_obj_set_style_border_width(mask, 0, 0);
+    lv_obj_clear_flag(mask, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(mask, prewarm_modal_close_cb, LV_EVENT_CLICKED, mask);
 
-    lv_obj_t *title = ui_label(modal, "预热确认", &lv_font_cn_16, UI_TEXT);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_t *card = lv_obj_create(mask);
+    lv_obj_set_size(card, 400, 240);
+    lv_obj_center(card);
+    ui_style_card(card);
+    lv_obj_set_style_bg_color(card, UI_CARD, 0);
+    lv_obj_set_style_radius(card, 20, 0);
+
+    lv_obj_t *title = ui_label(card, "如何启动 5 小时窗口", &lv_font_cn_16, UI_TEXT);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
 
     lv_obj_t *text = ui_label(
-        modal, "发起一次轻量模型请求？\n预热不会重置 5 小时窗口。",
-        &lv_font_cn_14, UI_TEXT_DIM);
-    lv_obj_align(text, LV_ALIGN_CENTER, 0, -8);
+        card,
+        "智谱 Coding Plan 的套餐额度\n"
+        "仅限官方工具（ZCode / Claude Code 等）内消耗。\n"
+        "请用官方工具发送一条消息，\n"
+        "即可启动 5 小时积分窗口；\n"
+        "本机发出的请求不计入套餐额度。",
+        &lv_font_cn_14, UI_TEXT);
+    lv_obj_set_style_text_align(text, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(text, LV_ALIGN_CENTER, 0, 2);
 
-    lv_obj_t *cancel = lv_button_create(modal);
-    lv_obj_set_size(cancel, 120, 44);
-    lv_obj_align(cancel, LV_ALIGN_BOTTOM_LEFT, 12, 10);
-    ui_style_card(cancel);
-    lv_obj_set_style_radius(cancel, 14, 0);
-    lv_obj_add_event_cb(cancel, prewarm_modal_close_cb, LV_EVENT_CLICKED, modal);
-    lv_obj_t *cl = ui_label(cancel, "取消", &lv_font_cn_14, UI_TEXT);
-    lv_obj_center(cl);
-
-    lv_obj_t *confirm = lv_button_create(modal);
-    lv_obj_set_size(confirm, 120, 44);
-    lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, -12, 10);
-    ui_style_card(confirm);
-    lv_obj_set_style_bg_color(confirm, UI_ACCENT, 0);
-    lv_obj_set_style_radius(confirm, 14, 0);
-    lv_obj_add_event_cb(confirm, prewarm_modal_confirm_cb, LV_EVENT_CLICKED, modal);
-    lv_obj_t *kl = ui_label(confirm, "确认预热", &lv_font_cn_14, UI_TEXT);
-    lv_obj_center(kl);
+    lv_obj_t *hint = ui_label(card, "点击任意处关闭", &lv_font_cn_12, UI_TEXT_DIM);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -8);
 }
 
 /* 每条订阅一个 tile 的内容构造。

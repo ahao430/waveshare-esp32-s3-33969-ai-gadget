@@ -71,7 +71,11 @@ type Prewarmer struct {
 // ZHIPU_PREWARM_MODEL 覆盖）。
 func NewPrewarmer(p *Provider, account func() quota.AccountRef, model string) *Prewarmer {
 	if model == "" {
-		model = "glm-4-flash"
+		/* 套餐主模型：glm-4-flash 是免费模型，发请求也不消耗 Coding
+		 * Plan 额度、不启动 5h 窗口（2026-11-17 实测余额恒 100%）。
+		 * 注意：智谱限制套餐额度仅在官方工具内消耗，裸 API 即使换
+		 * 模型也不计套餐——此默认值保证至少是真实计费模型。 */
+		model = "glm-5.3"
 	}
 	return &Prewarmer{
 		provider: p,

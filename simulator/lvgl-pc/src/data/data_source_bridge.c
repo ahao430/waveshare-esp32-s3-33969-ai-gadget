@@ -430,17 +430,54 @@ static ds_prewarm_result_t bridge_prewarm(gadget_state_t *st, char *msg, int msg
     }
 
     const char *state = "unknown";
-    char detail[128] = "";
     const cJSON *s = cJSON_GetObjectItem(root, "status");
     if (cJSON_IsString(s)) state = s->valuestring;
-    const cJSON *m = cJSON_GetObjectItem(root, "message");
-    if (cJSON_IsString(m) && m->valuestring[0]) {
-        const cJSON *dur = cJSON_GetObjectItem(root, "duration_ms");
-        if (cJSON_IsNumber(dur)) {
-            snprintf(detail, sizeof(detail), "（%s · %dms）", m->valuestring, dur->valueint);
-        } else {
-            snprintf(detail, sizeof(detail), "（%s）", m->valuestring);
+
+    /* 从 before/after 快照提取 5h 窗口剩余百分比（弹窗显示"额度 X%→Y%"） */
+    double pct_before = -1, pct_after = -1;
+    const cJSON *b = cJSON_GetObjectItem(root, "before");
+    const cJSON *a = cJSON_GetObjectItem(root, "after");
+    const cJSON *wins = b ? cJSON_GetObjectItem(b, "windows") : NULL;
+    const cJSON *it = NULL;
+    cJSON_ArrayForEach(it, wins) {
+        const cJSON *id = cJSON_GetObjectItem(it, "id");
+        if (cJSON_IsString(id) && strcmp(id->valuestring, "5h") == 0) {
+            const cJSON *rp = cJSON_GetObjectItem(it, "remaining_pct");
+            if (cJSON_IsNumber(rp)) pct_before = rp->valuedouble;
         }
+    }
+    wins = a ? cJSON_GetObjectItem(a, "windows") : NULL;
+    cJSON_ArrayForEach(it, wins) {
+        const cJSON *id = cJSON_GetObjectItem(it, "id");
+        if (cJSON_IsString(id) && strcmp(id->valuestring, "5h") == 0) {
+            const cJSON *rp = cJSON_GetObjectItem(it, "remaining_pct");
+            if (cJSON_IsNumber(rp)) pct_after = rp->valuedouble;
+        }
+    }
+    const cJSON *jmsg = cJSON_GetObjectItem(root, "message");
+    const char *wmsg = (cJSON_IsString(jmsg) && jmsg->valuestring[0]) ? jmsg->valuestring : "";
+    const cJSON *dur = cJSON_GetObjectItem(root, "duration_ms");
+
+    if (strcmp(state, "executed") == 0) {
+        if (pct_before >= 0 && pct_after >= 0) {
+            snprintf(msg, (size_t)msg_len,
+                     "已发送轻量请求%s\n5h 额度 %d%% → %d%%\n卡片倒计时已刷新",
+                     cJSON_IsNumber(dur) ? "" : "", (int)pct_before, (int)pct_after);
+        } else {
+            snprintf(msg, (size_t)msg_len, "已发送轻量请求\n卡片额度与倒计时已刷新");
+        }
+    } else if (strcmp(state, "skipped_cooldown") == 0) {
+        const cJSON *cd = cJSON_GetObjectItem(root, "cooldown_remain_s");
+        int mnt = cJSON_IsNumber(cd) ? (int)(cd->valuedouble / 60) + 1 : 0;
+        snprintf(msg, (size_t)msg_len, "冷却中\n约 %d 分钟后可再次预热", mnt);
+    } else if (strcmp(state, "skipped_low_quota") == 0) {
+        snprintf(msg, (size_t)msg_len, "周额度不足，保护性跳过\n%s", wmsg);
+    } else if (strcmp(state, "duplicate") == 0) {
+        snprintf(msg, (size_t)msg_len, "重复请求已忽略（幂等）");
+    } else if (strcmp(state, "failed") == 0) {
+        snprintf(msg, (size_t)msg_len, "轻量请求失败\n%s", wmsg[0] ? wmsg : "见 Bridge 日志");
+    } else {
+        snprintf(msg, (size_t)msg_len, "预热状态：%s\n%s", state, wmsg);
     }
     cJSON_Delete(root);
 
@@ -449,7 +486,6 @@ static ds_prewarm_result_t bridge_prewarm(gadget_state_t *st, char *msg, int msg
                       &st->zhipu_used_week, st->zhipu_plan,
                       sizeof(st->zhipu_plan), &st->updated_unix, NULL, NULL, NULL);
 
-    snprintf(msg, (size_t)msg_len, "%s%s", state, detail);
     return DS_PREWARM_OK;
 }
 
