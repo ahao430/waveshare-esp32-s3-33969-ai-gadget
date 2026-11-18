@@ -21,6 +21,7 @@ Vue3 Web 后台 → ESP-IDF v6 固件**。四件套共享一份契约，模拟�
 | UI 提示音 | `simulator/lvgl-pc/src/ui/ui_sound.*` | `ui_sound_click/alert()` 双平台封装；真机=audio_esp32 正弦合成短任务，模拟器=仅日志；LVGL 线程可直接调 |
 | 数据源抽象 | `simulator/lvgl-pc/src/data_source.*` | mock / bridge 两实现；新字段三处同步（.h/两 .c） |
 | TF 卡文件 | `simulator/lvgl-pc/src/data/data_source_files.c`、`sd_paths.h`、`ui/ui_files.c` | 单文件双平台（固件 /sdcard，模拟器 `GADGET_SD_DIR` 默认 `sdcard/`）；阻塞 IO 只能在 16KB worker 线程 |
+| 图片解码/相册核心层 | `simulator/lvgl-pc/src/photo/`（scan/decode/config + vendor tjpgd） | 双端共用；JPEG=vendor TJpgDec（JD_USE_SCALE=1）、PNG=lodepng 直调（输出 lv_draw_buf_t 须 lv_draw_buf_destroy）、BMP 自研；worker 线程调用 [ADR-018] |
 | Bridge API | `bridge/internal/api/` | 标准库 net/http，Go 1.22+ 路由模式 `GET /api/v1/...` |
 | Bridge 配置存储 | `bridge/internal/storage/` | bots/app_settings 表；密钥字段 Encrypt 后存 JSON |
 | AI 上游（AstrBot/OpenAI 兼容） | `bridge/internal/ai/` | astrbot payload 契约见 astrbot.go 头注释；会话身份 per-bot（`gadget-<botID>`，「新对话」=轮换代，持久化于 app_settings.astrbot_sessions） |
@@ -244,6 +245,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     stat/fopen 全链路 UTF-8 round-trip，文件管理里中文名显示同时修复。配套观测：
     `ds_files_list` 打 stat-fail 计数、`music_player_scan` 打扫描汇总日志
     （`music` TAG）。
+29. **sdkconfig.defaults 只对 sdkconfig 中不存在的符号生效（2026-11-18 图片 App 实证）**：给 defaults 加 `CONFIG_LV_USE_LODEPNG=y` 后固件仍链不开——sdkconfig 里已存在的 `# CONFIG_LV_USE_LODEPNG is not set` 不会被 defaults 翻转（defaults 只填缺失符号）。**翻转已有符号必须直接改 firmware/sdkconfig**（两处同写防漂移）。另：新开 Kconfig 后首编会全量重跑 kconfgen，历史 build 日志里的老报错（如 DRAM overflow）会混进 grep——判错先 `ls -t build/log/` 取最新。
 
 ### 内存 / flash 账本（2026-11-18 实测，音乐播放器版）
 
@@ -254,7 +256,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |----|------|------|
 | bootloader | 21.2KB / 32KB | |
 | nvs | 88KB | 配网/凭据/小智身份（ADR-013 扩容自 24KB） |
-| factory(app) | **5.97MiB 已用 / 11.94MiB（50%，余 50%）** | 2026-11-18：音乐 + 小说阅读器（GBK codepoint 表 16KB rodata + 阅读器代码；字体重生成补 U+3000）；字体同 2026-11-17 账（全集主库） |
+| factory(app) | **6.06MiB 已用 / 11.94MiB（51%，余 49%）** | 2026-11-18：+图片 App（photo 代码/tjpgd vendor/图标嵌入 ~+84KB flash，rodata 零增长）；前账：音乐+阅读器+GBK 表 |
 | assets | ≤3584KB | 伴宠动画资源包（gen_companion_bin.sh） |
 | storage | 448KB | FATFS（TF 卡不存在时的兜底分区） |
 
@@ -347,6 +349,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 | 番茄钟 | **lv_timer 常驻后台计时**（on_exit 只清 UI 引用，不删 timer）；阶段归零三连滴提示音（后台也响，`ui_sound_alert`） |
 | 音乐 | **后台常驻播放**（BG_TIMER\|STATUSBAR，ADR-016）：解码任务自主跑不随页面停；退出前台继续响+状态栏药丸（曲名）；音频输出 owner 互斥——音乐持有期间语音回复静音（流程照常走完）、提示音丢弃、PTT 拒绝+提示 |
 | 小说 | **退出即停**（ADR-017）：on_exit 进度强落盘（worker）+ 释放 UI 引用；`g_book` 保留内存缓存（重进秒开）；KEY3 短按=下一页（App 注册 handler，on_exit 置 NULL） |
+| 图片 | **退出即停**（ADR-018）：on_exit `photo_cache_clear`（thumb LRU+解码缓冲全释放，PSRAM 让位 TTS；在途 worker 有守卫）+ 释放 UI 引用/池；KEY3 短按=下一张 |
 
 - App 级后台任务（如番茄钟）的 timer 不能随屏幕销毁；回调必须用
   `g_root==NULL` 守卫跳过所有 LVGL 调用（屏幕已被 app_manager 删除）。

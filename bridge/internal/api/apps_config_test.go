@@ -322,10 +322,10 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatalf("get: %d", code)
 	}
 	order, _ := out["order"].([]any)
-	if len(order) != 10 || order[0] != "chat" || order[9] != "reader" {
+	if len(order) != 11 || order[0] != "chat" || order[9] != "reader" || order[10] != "photo" {
 		t.Fatalf("default order wrong: %v", order)
 	}
-	if cat, _ := out["catalog"].([]any); len(cat) != 10 {
+	if cat, _ := out["catalog"].([]any); len(cat) != 11 {
 		t.Fatalf("catalog wrong: %v", cat)
 	}
 
@@ -337,7 +337,7 @@ func TestLauncherLayout(t *testing.T) {
 	}
 	_, out = doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	order, _ = out["order"].([]any)
-	if len(order) != 10 || order[0] != "settings" || order[4] != "music" {
+	if len(order) != 11 || order[0] != "settings" || order[4] != "music" {
 		t.Fatalf("order not persisted/normalized: %v", order)
 	}
 
@@ -358,7 +358,7 @@ func TestLauncherLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, out = doJSON(t, "GET", srv2.URL+"/api/v1/launcher", "")
-	if order, _ = out["order"].([]any); len(order) != 10 || order[0] != "chat" {
+	if order, _ = out["order"].([]any); len(order) != 11 || order[0] != "chat" {
 		t.Fatalf("corrupt setting should fall back to default, got %v", order)
 	}
 }
@@ -377,7 +377,7 @@ func TestLauncherLegacyOrderMigrates(t *testing.T) {
 	}
 	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	order, _ := out["order"].([]any)
-	if len(order) != 10 || order[0] != "chat" || order[1] != "settings" {
+	if len(order) != 11 || order[0] != "chat" || order[1] != "settings" {
 		t.Fatalf("legacy order should filter retired keys then append new, got %v", order)
 	}
 	has := map[string]bool{}
@@ -403,14 +403,14 @@ func TestLauncherIgnoresLegacyHidden(t *testing.T) {
 	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
 	order, _ := out["order"].([]any)
 	// settings/chat 原序 → 其余内置 App（含曾标记 hidden 的）全部追加
-	if len(order) != 10 || order[0] != "settings" || order[1] != "chat" {
+	if len(order) != 11 || order[0] != "settings" || order[1] != "chat" {
 		t.Fatalf("builtin apps must all be visible, got %v", order)
 	}
 	has := map[string]bool{}
 	for _, k := range order {
 		has[k.(string)] = true
 	}
-	if !has["weather"] || !has["music"] || !has["files"] || !has["reader"] {
+	if !has["weather"] || !has["music"] || !has["files"] || !has["reader"] || !has["photo"] {
 		t.Fatalf("legacy hidden must be ignored, got %v", order)
 	}
 }
@@ -434,11 +434,11 @@ func TestLauncherSaveNormalizesOrder(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Order) != 10 || saved.Order[0] != "chat" || saved.Order[1] != "settings" {
+	if len(saved.Order) != 11 || saved.Order[0] != "chat" || saved.Order[1] != "settings" {
 		t.Fatalf("save should normalize to full order, got %s", raw)
 	}
 	_, out := doJSON(t, "GET", srv.URL+"/api/v1/launcher", "")
-	if order, _ := out["order"].([]any); len(order) != 10 {
+	if order, _ := out["order"].([]any); len(order) != 11 {
 		t.Fatalf("all builtin apps should be visible after save, got %v", order)
 	}
 }

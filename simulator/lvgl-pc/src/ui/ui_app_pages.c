@@ -1034,6 +1034,7 @@ static void register_apps_layout(const char *layout_csv, int lay_n)
         { UI_APP_SETTINGS, "settings", "设置",    LV_SYMBOL_SETTINGS, 0x5C6B8A, "A:simulator/lvgl-pc/assets/icons/settings.png",  true,  ui_settings_build,     ui_settings_on_exit, 0 },
         { UI_APP_MUSIC,    "music",    "音乐",    LV_SYMBOL_AUDIO,    0x7C6CFF, "A:simulator/lvgl-pc/assets/icons/music.png",     true, ui_music_build,        ui_music_on_exit, APP_FLAG_BG_TIMER | APP_FLAG_STATUSBAR },
         { UI_APP_READER,   "reader",   "小说",    LV_SYMBOL_LIST,     0x5C8AFF, "A:simulator/lvgl-pc/assets/icons/reader.png",    true, ui_reader_build,       ui_reader_on_exit, 0 },
+        { UI_APP_PHOTO,    "photo",    "图片",    LV_SYMBOL_IMAGE,    0x38BDF8, "A:simulator/lvgl-pc/assets/icons/photo.png",     true, ui_photo_build,        ui_photo_on_exit, 0 },
     };
     const int def_n = (int)(sizeof(defs) / sizeof(defs[0]));
 

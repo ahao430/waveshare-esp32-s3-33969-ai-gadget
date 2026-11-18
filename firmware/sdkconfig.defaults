@@ -95,3 +95,7 @@ CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
 # LFN 不匹配 → ds_files_list 静默跳过 → 中文名 MP3 全部隐形。UTF-8 API 下
 # readdir/stat/fopen 同编码 round-trip，中文名全链路通（显示也修复）。
 CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# 图片 App（ADR-018）：photo_decode 直调 lodepng 解 PNG
+# （输出为 lv_draw_buf_t，释放走 lv_draw_buf_destroy/lv_free）
+CONFIG_LV_USE_LODEPNG=y

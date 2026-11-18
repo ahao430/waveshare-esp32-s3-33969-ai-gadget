@@ -52,7 +52,7 @@ int sd_resolve(char *out, size_t cap, const char *rel)
 
 void sd_ensure_dirs(void)
 {
-    static const char *subs[] = { "backup", "cache", "data", "appearance", "downloads", "music" };
+    static const char *subs[] = { "backup", "cache", "data", "appearance", "downloads", "music", "Pictures" };
     char path[160];
     (void)mkdir(sd_root(), 0777); /* 模拟器根目录可能不存在；固件是挂载点（已存在） */
     for (size_t i = 0; i < sizeof(subs) / sizeof(subs[0]); i++) {

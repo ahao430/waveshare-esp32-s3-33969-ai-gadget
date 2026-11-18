@@ -13,6 +13,9 @@
  *   music/     本地音乐库（音乐播放器扫描 .mp3/.wav）
  *   Books/     本地小说库（阅读器扫描 .txt，递归深度 3；进度/配置存
  *              data/reader/ 下 JSON 文件，不修改原始 TXT）  [ADR-017]
+ *   Pictures/  本地相册（图片 App 扫描 JPG/PNG/BMP；一级子目录=分类
+ *              chips，根目录图片=未分类；JPEG 任意尺寸，PNG 超 16 万
+ *              像素明确提示转 JPG；BMP 24/32bpp 非压缩）  [ADR-018]
  */
 #ifndef SD_PATHS_H
 #define SD_PATHS_H

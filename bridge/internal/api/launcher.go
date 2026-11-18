@@ -21,7 +21,7 @@ var launcherCatalog = []struct {
 	Name string `json:"name"`
 }{
 	{"chat", "AstrBot"}, {"xiaozhi", "小智"}, {"muse", "Muse"}, {"sub", "订阅"},
-	{"weather", "天气"}, {"pomodoro", "番茄钟"}, {"files", "文件"}, {"settings", "设置"}, {"music", "音乐"}, {"reader", "小说"},
+	{"weather", "天气"}, {"pomodoro", "番茄钟"}, {"files", "文件"}, {"settings", "设置"}, {"music", "音乐"}, {"reader", "小说"}, {"photo", "图片"},
 }
 
 func defaultLauncherOrder() []string {

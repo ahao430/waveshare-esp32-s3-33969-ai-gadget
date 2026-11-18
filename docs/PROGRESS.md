@@ -168,3 +168,23 @@
   子集（gen_cn_font.sh 保险集，全档重生成）。
 - 验证：独立 C 单测双书全绿（18/12 章识别+禁则排版）；regress 10 App；
   check.sh 全绿；真机刷入开机健康（flash 5.97MB/50% 余）。
+
+
+## 2026-11-18 晚：本地图片 App（迷你照片管理器，ADR-018）
+
+- **首个运行时图片解码应用**：src/photo/ 双端核心层（scan/decode/
+  config）+ vendor TJpgDec R0.03（JD_USE_SCALE=1，12MP 1/8 档 0.2s 级）
+  + lodepng 直调（PNG ≤16 万像素）+ BMP 自研（24/32bpp）。UI 侧
+  ui_photo.c 三视图（网格/全屏/设置）+ 分类 chips（Pictures/ 一级
+  子目录动态）+ 幻灯片 + EXIF 方向（全屏 lv_image_set_rotation）。
+- 独立 C 单测 80 断言全 PASS（像素级对照 PIL），揪出核心层 11 处
+  bug（3 崩溃级：lodepng draw_buf 误当裸缓冲坏 free、BMP 累加器
+  越界写 2.4MB、conv fit 输出越界 480²；JPEG/BMP BGR 序反色等）。
+- 接线 11 App 全套：enum/defs/图标嵌入/catalog/tests/regress 基线
+  11；flash 6.06MB/51%（余 49%），rodata 零增长；固件编译过。
+- 坑沉淀：AGENTS #29（sdkconfig.defaults 只填缺失符号，翻转已有
+  not-set 必须直改 sdkconfig）；GCC format-truncation 照 reader
+  解法（name_copy 有界拷贝）。
+- 验证：check.sh 全绿；模拟器 headless 三视图截帧通过（布局越界
+  修复中：顶栏避状态栏/底栏收进 480/设置 chips 收缘）；真机解码
+  速度/PSRAM 水位/幻灯片待验收。

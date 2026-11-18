@@ -621,3 +621,55 @@ UTF-8/GBK 双书 18/12 章识别 + 禁则排版全对）；模拟器 headless �
 **已知边界（v1）**：无搜索/书签/图片封面；UTF-16 文件提示不支持；
 单文件 >512 章截断；自动翻页实现但无速度滑条（三档 5/15/30s）；
 文件管理器联动打开 TXT（ADR-018）待做。
+
+
+## ADR-018：本地图片 App（迷你照片管理器，2026-11-18）
+
+背景：图片 App 定位"迷你照片管理器"（网格/全屏/设置三视图，深色
+AMOLED+蓝紫霓虹），TF 卡 Pictures/ 为源。这是项目第一个**运行时
+解码图片**的应用——此前所有图片素材都是构建期预解码（icon_embed）。
+
+决策：
+1. **双端解码核心层 `src/photo/`**（scan/decode/config 三件套，
+   worker 线程调用；JPEG=vendor TJpgDec R0.03（src/photo/tjpgd/，
+   JD_USE_SCALE=1）+ PNG=LVGL 内置 lodepng 直调（CONFIG_LV_USE_
+   LODEPNG=y，输出 lv_draw_buf_t 须 lv_draw_buf_destroy）+ BMP 自研
+   （24/32bpp 非压缩）。BGR→RGB 换序在 JPEG/BMP 解码层做。
+2. **vendor TJpgDec 而非 LVGL 内置 TJpgDec**：LVGL 的 tjpgdcnf.h
+   写死 JD_USE_SCALE=0，12MP 全解码 @S3 ≈2-4s，缩略图不可行；managed
+   component 不可改。1/8 缩放解码 12MP ≈0.2s（实测 13ms @模拟器，
+   真机待测）。缩放档按"最大边 ≥480（全屏）/最小边 ≥100（缩略图）"
+   自动选 + 画布字节 ≤716KB 逐档放宽。
+3. **缩略图动态解码 + 双池**：核心层 LRU 12 槽（100²×2=20KB/槽）+
+   UI 侧拷贝池 24 槽——UI 直指 LRU 指针会被驱逐花屏，必须拷贝。
+   /Thumbnails 预生成不做（spec 允许"预生成或动态缩放"取后者）。
+4. **EXIF 方向**：解析 JPEG APP1/TIFF IFD0 tag 0x0112（只读文件头
+   32KB 窗口）；旋转在 UI 层 lv_image_set_rotation（行流解码管线
+   无法转置），5/7 镜像档近似为 90/270；**缩略图不做 EXIF 修正**
+   （v1 边界，网格里带 EXIF 的竖拍图会横着显示）。
+5. **PSRAM 账**（ADR-018 口径）：全屏 canvas 460KB（480²×2 常驻）+
+   解码画布 ≤716KB 瞬时 + PNG RGBA 中转 ≤640KB（与 canvas 并存
+   ~1.1MB 瞬时）+ thumb LRU 240KB + UI 拷贝池 ≤480KB，峰值 ~2MB
+   全惰性；on_exit 全释放（在途 worker 守卫防竞争）——PSRAM 让位
+   语音 TTS 768KB 大块分配。与 TTS 并存时偏紧（坑 #22 同款风险：
+   TTS 分配失败=语音无字幕无声音），验收时留意。
+6. **边界（v1）**：PNG >16 万像素明确拒绝（提示转 JPG）；BMP 仅
+   24/32bpp 非压缩；单分类 >24 张超出 UI 池的 cell 显示占位符；
+   GIF/WebP 不支持。SD 契约：Pictures/ 一级子目录=分类 chips
+   （≤4 个，按名排序），根目录图片=未分类，不递归子目录的子目录。
+7. **flash 账**：app 6.06MB/12.5MB（51%，余 49%）——photo 代码
+   +40KB、tjpgd vendor +20KB、photo 图标嵌入 +23KB；rodata 无增长
+   （解码缓冲全走堆）。sdkconfig 新增 CONFIG_LV_USE_LODEPNG=y
+   （defaults+sdkconfig 双写——defaults 只填新符号，已存在的
+   "not set" 不会翻转，这个坑要记）。
+
+验证：独立 C 单测 /tmp/phtest（80 断言全 PASS，像素级对照 PIL；
+子代理揪出核心层 11 处 bug 含 3 个崩溃级：lodepng 返回 draw_buf
+误当裸缓冲坏 free、BMP 累加器越界写 2.4MB、conv fit 输出越界
+480²——**画布类/缓冲所有权必须过单测**）；模拟器 headless 三视图
+截帧；regress 11 App；check.sh 全绿。真机解码速度/PSRAM 水位/
+幻灯片流畅度待验收。
+
+已知边界（v1）：无搜索/收藏/分享/删除重命名（文件管理器升级
+ADR-019 待做）；EXIF 缩略图不修正；缩略图池上限 24；幻灯片无
+过渡动画。

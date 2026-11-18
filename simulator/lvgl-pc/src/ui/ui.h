@@ -35,6 +35,7 @@ enum ui_app_id {
     UI_APP_WEATHER, /* 天气（ADR-005 清单，Phase 5+） */
     UI_APP_POMODORO, /* 番茄钟（25/5 循环，2026-11-16） */
     UI_APP_READER, /* 小说阅读器（ADR-017，TXT） */
+    UI_APP_PHOTO,  /* 图片（ADR-018，JPEG/PNG/BMP） */
     UI_APP_COUNT,
 };
 
@@ -71,6 +72,8 @@ void ui_music_build(lv_obj_t *screen, int app_id);
 void ui_music_on_exit(void);
 void ui_reader_build(lv_obj_t *screen, int app_id);
 void ui_reader_on_exit(void);
+void ui_photo_build(lv_obj_t *screen, int app_id);
+void ui_photo_on_exit(void);
 void ui_pomodoro_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);
