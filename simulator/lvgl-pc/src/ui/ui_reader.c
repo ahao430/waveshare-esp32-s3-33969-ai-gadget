@@ -11,6 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 
 #include "lvgl.h"
 #include "ui.h"
@@ -361,7 +364,10 @@ static void build_menu(lv_obj_t *parent)
 
 /* ---------------- 书架 ---------------- */
 
-#define RD_MAX_SHELF 64
+/* 书架容量：用户 book/ 实测 112 本（含三层子目录），64 会截断一半。
+ * 256×~420B≈105KB，malloc 大块落 PSRAM（ALWAYSINTERNAL=0 口径），
+ * 行对象也在 PSRAM，不占内部 RAM。 */
+#define RD_MAX_SHELF 256
 
 /* 大小格式化（KB/MB） */
 static const char *fmt_size(long sz)
@@ -376,17 +382,37 @@ static const char *fmt_size(long sz)
     return buf;
 }
 
+static void shelf_retry_async(void *arg)
+{
+    (void)arg;
+    if (g_root) shelf_start();
+}
+
 static void *shelf_worker(void *arg)
 {
     int gen = (int)(intptr_t)arg;
+    if (gen != g_gen) { /* 页面已退出（或已重进）：丢弃并让新页面补扫 */
+        g_shelf_busy = 0;
+        if (g_root) lv_async_call(shelf_retry_async, NULL);
+        return NULL;
+    }
     if (!g_shelf) {
-        /* 64 × 368B ≈ 23KB：libc malloc 大块自动落 PSRAM（固件
-         * SPIRAM_MALLOC_ALWAYSINTERNAL=2048，坑 #26 口径） */
+        /* 256 × ~420B ≈ 105KB：libc malloc 大块落 PSRAM
+         * （固件 SPIRAM_MALLOC_ALWAYSINTERNAL=0，优先 PSRAM） */
         g_shelf = malloc(sizeof(reader_shelf_t) * RD_MAX_SHELF);
     }
-    if (gen == g_gen && g_shelf)
+    if (g_shelf)
         reader_scan_shelf(g_shelf, RD_MAX_SHELF, &g_shelf_n);
-    if (gen == g_gen) lv_async_call(shelf_async, (void *)(intptr_t)gen);
+#ifdef ESP_PLATFORM
+    ESP_LOGI("reader", "shelf: %d books (cap %d)", g_shelf_n, RD_MAX_SHELF);
+#endif
+    if (gen == g_gen) {
+        lv_async_call(shelf_async, (void *)(intptr_t)gen);
+    } else {
+        /* 扫描期间页面退出/重进：busy 复位，重进则补扫 */
+        g_shelf_busy = 0;
+        if (g_root) lv_async_call(shelf_retry_async, NULL);
+    }
     return NULL;
 }
 
@@ -436,9 +462,7 @@ static void shelf_async(void *arg)
         lv_obj_t *mt = ui_label(row, meta, &lv_font_cn_12,
                                 lv_color_hex(RD_DIM));
         lv_obj_align(mt, LV_ALIGN_LEFT_MID, 14, 10);
-        lv_obj_t *sz = ui_label(row, fmt_size(t->size), &lv_font_cn_12,
-                                lv_color_hex(RD_DIM));
-        lv_obj_align(sz, LV_ALIGN_RIGHT_MID, -14, 0);
+        /* 右侧不再重复大小（meta 已含 size · 已读%，112 行省 ~1/4 对象） */
     }
     /* 文件管理器联动：pending 命中书架即开书（ADR-019，优先于 demo） */
     if (s_open_pending[0]) {
@@ -463,6 +487,9 @@ void ui_reader_open_path(const char *rel)
 {
     snprintf(s_open_pending, sizeof(s_open_pending), "%s", rel ? rel : "");
 }
+
+/* 无触摸自检（GADGET_SELFTEST_READER）：读取当前书架条数 */
+int ui_reader_debug_shelf_n(void) { return g_shelf_n; }
 
 /* ---------------- 开书 / 进度保存 ---------------- */
 
@@ -875,9 +902,20 @@ static void shelf_start(void)
 {
     if (g_shelf_busy) return;
     g_shelf_busy = 1;
+    /* 100+ 本 + 三层子目录的扫描不是瞬时的：先给提示 */
+    if (g_hint) {
+        lv_obj_clear_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(g_hint, "正在整理书架…");
+    }
     if (ui_worker_start(shelf_worker, (void *)(intptr_t)g_gen,
-                        16 * 1024) != 0)
+                        16 * 1024) != 0) {
         g_shelf_busy = 0;
+        if (g_hint) {
+            lv_obj_clear_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(g_hint,
+                              "内存紧张，书架扫描未启动\n退出重进再试");
+        }
+    }
 }
 
 /* worker：读配置 + 扫书架（build 后异步执行） */
@@ -949,6 +987,8 @@ void ui_reader_on_exit(void)
     for (int i = 0; i < RD_MAX_LINES; i++) g_txt[i] = NULL;
     /* 退出即清 RAM（2026-11-18 用户要求）：gen++ 作废在途翻页，zombie
      * 移交 teardown worker（进度落盘 + 延迟释放） */
+    reader_scan_cancel(); /* 在途书架扫描（100+ 本）快速中止，防 UAF */
+    if (!g_shelf_busy) reader_progress_cache_clear();
     g_gen++;
     g_busy = 0;
     if (g_book || g_page || g_shelf) {

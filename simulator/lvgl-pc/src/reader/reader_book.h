@@ -63,6 +63,13 @@ typedef struct reader_book reader_book_t;
  * 返回条数（*n），无卡/无目录返回 0。 */
 int  reader_scan_shelf(reader_shelf_t *out, int max, int *n);
 
+/* 取消在途书架扫描（退出页面时调用）：扫描在文件之间检查标志，快速
+ * 返回，避免 UI 已释放缓冲后 worker 仍写入。 */
+void reader_scan_cancel(void);
+
+/* 释放 progress.json 解析缓存（退出 App 时调；书架扫描在途时勿调） */
+void reader_progress_cache_clear(void);
+
 /* ---------------- 打开/关闭（worker 调用） ---------------- */
 
 /* 打开 + 编码检测 + 全文章节扫描（大文件秒级：一次流式全文扫描）。

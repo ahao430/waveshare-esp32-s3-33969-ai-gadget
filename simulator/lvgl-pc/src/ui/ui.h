@@ -82,6 +82,7 @@ void ui_reader_open_path(const char *rel);   /* 书架命中即开书 */
 void ui_photo_open_path(const char *rel);    /* 相册命中即进全屏 */
 void ui_music_open_path(const char *rel);    /* 曲库命中即切播 */
 void ui_music_debug_lib(void);               /* 自检：直接进曲库并触发扫描 */
+int  ui_reader_debug_shelf_n(void);          /* 自检：当前书架条数 */
 void ui_pomodoro_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);

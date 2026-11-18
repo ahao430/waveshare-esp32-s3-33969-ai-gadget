@@ -617,6 +617,10 @@ void reader_close(reader_book_t *b)
 /* 需要 dirent.h —— 头部 include 未含，这里补（POSIX 目录遍历） */
 #include <dirent.h>
 
+static volatile int s_scan_cancel;
+
+void reader_scan_cancel(void) { s_scan_cancel = 1; }
+
 static int shelf_cmp(const void *a, const void *b)
 {
     const reader_shelf_t *x = a, *y = b;
@@ -632,6 +636,7 @@ static void shelf_walk(const char *abs_dir, const char *rel_dir, int depth,
     if (!d) return;
     struct dirent *de;
     while ((de = readdir(d)) != NULL && *n < max) {
+        if (s_scan_cancel) break; /* 页面已退出：快速返回 */
         if (de->d_name[0] == '.') continue;
         char abs[RD_PATH_MAX], rel[RD_PATH_MAX];
         snprintf(abs, sizeof(abs), "%s/%s", abs_dir, de->d_name);
@@ -665,11 +670,13 @@ static void shelf_walk(const char *abs_dir, const char *rel_dir, int depth,
 int reader_scan_shelf(reader_shelf_t *out, int max, int *n)
 {
     *n = 0;
+    s_scan_cancel = 0;
     char abs[RD_PATH_MAX];
     /* book/ 递归（书库目录与文件管理器根目录分离） */
     if (sd_resolve(abs, sizeof(abs), "book") == 0) {
         shelf_walk(abs, "book", 3, out, max, n);
     }
+    if (s_scan_cancel) return 0;
     qsort(out, (size_t)*n, sizeof(out[0]), shelf_cmp);
     return 0;
 }
@@ -707,6 +714,28 @@ static cJSON *load_json_file(const char *path)
     return root;
 }
 
+/* progress.json 缓存：书架 100+ 本时逐本 open/parse 8KB 太慢
+ * （1-bit SD 实测秒级），扫描期间复用一份解析结果；写入后失效。 */
+static cJSON *s_prog_cache;
+
+void reader_progress_cache_clear(void)
+{
+    if (s_prog_cache) {
+        cJSON_Delete(s_prog_cache);
+        s_prog_cache = NULL;
+    }
+}
+
+static cJSON *progress_root(void)
+{
+    if (!s_prog_cache) {
+        char p[RD_PATH_MAX];
+        reader_json_path(p, sizeof(p), "progress.json");
+        s_prog_cache = load_json_file(p);
+    }
+    return s_prog_cache;
+}
+
 int reader_progress_get(const char *rel, long *off, int *ch, int *pg,
                         long *ts)
 {
@@ -714,9 +743,7 @@ int reader_progress_get(const char *rel, long *off, int *ch, int *pg,
     if (ch) *ch = 0;
     if (pg) *pg = 0;
     if (ts) *ts = 0;
-    char p[RD_PATH_MAX];
-    reader_json_path(p, sizeof(p), "progress.json");
-    cJSON *root = load_json_file(p);
+    cJSON *root = progress_root();
     if (!root) return -1;
     const cJSON *it;
     cJSON_ArrayForEach(it, cJSON_GetObjectItem(root, "books")) {
@@ -731,10 +758,8 @@ int reader_progress_get(const char *rel, long *off, int *ch, int *pg,
             if (pg) *pg = (int)j->valuedouble;
         if ((j = cJSON_GetObjectItem(it, "ts")) && cJSON_IsNumber(j))
             if (ts) *ts = (long)j->valuedouble;
-        cJSON_Delete(root);
         return 0;
     }
-    cJSON_Delete(root);
     return -1;
 }
 
@@ -779,6 +804,11 @@ int reader_progress_set(const char *rel, long off, int ch, int pg)
         rename(tmp, p);
     }
     cJSON_free(s);
+    /* 进度已变：丢掉读缓存，下次书架扫描重新加载 */
+    if (s_prog_cache) {
+        cJSON_Delete(s_prog_cache);
+        s_prog_cache = NULL;
+    }
     return 0;
 }
 

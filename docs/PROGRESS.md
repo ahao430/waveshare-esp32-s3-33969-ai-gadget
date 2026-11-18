@@ -215,3 +215,14 @@
   post-ui internal 136KB、tick largest_psram 1.44MB；Wi-Fi 正常。
 - 验证：check.sh 全绿；regress 11/11；真机自检播放跑通。
   音频主观听感（音质/音量/耳机）待用户验收。
+
+## 2026-11-18 晚：阅读器书架容量修正（真机 112 本 / 子目录）
+
+- 用户指出 book/ 里放了很多书且有多层子目录。真机清点：**112 个 TXT**
+  （音乐 23 首），而书架上限只有 64——近一半书籍被截断。
+- 修复：RD_MAX_SHELF 64→256；`progress.json` 解析缓存（原本逐本
+  open/parse 8KB，1-bit SD 上秒级）；扫描取消标志（退出时快速中止防
+  UAF）；进书架显示"正在整理书架…"；删除行尾重复大小 label。
+- 真机自检：自动进阅读器，`reader: shelf: 112 books (cap 256)`，
+  全部扫出、无崩溃；打开时 internal ~85KB、largest_psram 1.08MB。
+- 验证：check.sh 全绿；regress 11/11。翻页/续读主观体验待用户验收。

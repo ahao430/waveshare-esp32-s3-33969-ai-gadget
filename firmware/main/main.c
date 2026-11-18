@@ -44,7 +44,10 @@
 
 #include <math.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 /* bring-up Wi-Fi 凭据（gitignore，不进仓库）；缺文件则跳过联网 */
 #if __has_include("wifi_secret.h")
@@ -142,6 +145,24 @@ static void net_probe_once(void)
 /* 开机 12s 自动进音乐页并切曲库（验证曲库扫描/渲染/播放链路），平时保持 0 */
 #ifndef GADGET_SELFTEST_MUSIC
 #define GADGET_SELFTEST_MUSIC 0
+#endif
+/* 开机 12s 自动进阅读器（验证 100+ 本书架扫描/渲染），平时保持 0 */
+#ifndef GADGET_SELFTEST_READER
+#define GADGET_SELFTEST_READER 0
+#endif
+#if GADGET_SELFTEST_READER
+static void selftest_reader_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(12000));
+    display_lock();
+    ui_open_app(UI_APP_READER);
+    display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(10000));
+    ESP_LOGW(TAG, "SELFTEST reader: shelf=%d books",
+             ui_reader_debug_shelf_n());
+    vTaskDelete(NULL);
+}
 #endif
 #if GADGET_SELFTEST_MUSIC
 static void selftest_music_task(void *arg)
@@ -377,6 +398,31 @@ static void probe_pmu_raw(void)
     }
 }
 
+/* 书库/曲库清点（开机一行日志；排查"目录里明明有文件"）：递归计数，
+ * depth=1 只看目录本身，depth=3 覆盖 book/ 三层子目录。 */
+static void count_ext(const char *dir, int depth, const char *ext, int *n)
+{
+    DIR *d = opendir(dir);
+    if (!d) return;
+    size_t el = strlen(ext);
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.') continue;
+        char p[300];
+        if (snprintf(p, sizeof(p), "%s/%s", dir, de->d_name)
+            >= (int)sizeof(p)) continue;
+        struct stat st;
+        if (stat(p, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) {
+            if (depth > 1) count_ext(p, depth - 1, ext, n);
+            continue;
+        }
+        size_t L = strlen(de->d_name);
+        if (L > el && strcasecmp(de->d_name + L - el, ext) == 0) (*n)++;
+    }
+    closedir(d);
+}
+
 static void probe_sdcard(void)
 {
     esp_err_t err = bsp_sdcard_mount();
@@ -400,6 +446,12 @@ static void probe_sdcard(void)
         }
     }
     ds_files_ensure_dirs(); /* backup/cache/appearance/downloads（ADR-010） */
+    int n_mp3 = 0, n_wav = 0, n_txt = 0;
+    count_ext("/sdcard/music", 1, ".mp3", &n_mp3);
+    count_ext("/sdcard/music", 1, ".wav", &n_wav);
+    count_ext("/sdcard/book", 3, ".txt", &n_txt);
+    ESP_LOGI(TAG, "tf inventory: music mp3=%d wav=%d; book txt=%d (深≤3)",
+             n_mp3, n_wav, n_txt);
 }
 
 /* ---- 自建显示管线（复刻 bsp_display_start，两处真机调优） ----
@@ -1146,6 +1198,9 @@ void app_main(void)
 #endif
 #if GADGET_SELFTEST_MUSIC
     xTaskCreate(selftest_music_task, "st_music", 12288, NULL, 3, NULL);
+#endif
+#if GADGET_SELFTEST_READER
+    xTaskCreate(selftest_reader_task, "st_reader", 6144, NULL, 3, NULL);
 #endif
 
     heap_report("post-display");
