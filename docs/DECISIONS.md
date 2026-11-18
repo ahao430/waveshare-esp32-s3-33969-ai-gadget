@@ -635,8 +635,11 @@ PASS；固件 post-ui internal 64.7KB（>56KB 底线）、Wi-Fi 正常、心跳�
    章+页+unix 时间戳，temp+rename 原子写）+ `config.json`（字号/行距/
    主题/自动翻页）。书架按最近阅读排序。**不修改原始 TXT**。
 6. **交互**：点击左 1/3 上一页/右 1/3 下一页/中央菜单 overlay
-   （目录/设置/书架）；KEY3 短按=下一页（App 注册 handler，on_exit
-   置 NULL）；BOOT=返回。阅读页零 chrome，正文 16 行 label 复用
+   （目录/设置/书架）；**四向快甩翻页**（2026-11-18 用户实测后补：
+   阅读页上滑/左滑=下一页、下滑/右滑=上一页，书架/目录/设置保留上滑
+   返回；ui_gesture 扩展 direction flick，点击与滑动用按下-释放位移
+   >24px 区分，避免滑动翻两页）；KEY3 短按=下一页（App 注册 handler，
+   on_exit 置 NULL）；BOOT=返回。阅读页零 chrome，正文 16 行 label 复用
    （setText，无重建）。
 7. **字体子集重生成注意**：gen_cn_font.sh 重跑会全量重写 5 档（生成器
    格式漂移大 diff）——本次为补 U+3000 全量重生成（+U+3000 一字，

@@ -264,16 +264,35 @@ static void page_goto(int ch, int pg)
 static void menu_toggle(void);
 
 /* 阅读页点击分区（背景容器 clicked：左 1/3 上一页/右 1/3 下一页/
- * 中央呼出菜单） */
+ * 中央呼出菜单）。滑动会同时触发 CLICKED，用按下点到释放点距离区分：
+ * >24px 视为滑动（翻页由 reader_flick_cb 处理，避免一次滑动翻两页）。 */
+static lv_point_t g_press_pt;
+static bool g_press_valid;
+
+static void read_press_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_indev_get_point(NULL, &g_press_pt);
+    g_press_valid = true;
+}
+
 static void read_click_cb(lv_event_t *e)
 {
     (void)e;
+    lv_point_t p;
+    lv_indev_get_point(NULL, &p);
+    if (g_press_valid) {
+        g_press_valid = false;
+        int dx = p.x - g_press_pt.x;
+        int dy = p.y - g_press_pt.y;
+        if (dx < 0) dx = -dx;
+        if (dy < 0) dy = -dy;
+        if (dx > 24 || dy > 24) return; /* 滑动：交给快甩翻页 */
+    }
     if (g_menu_open) {
         menu_toggle();
         return;
     }
-    lv_point_t p;
-    lv_indev_get_point(NULL, &p);
     if (p.x < 160) page_next(-1);
     else if (p.x > 320) page_next(+1);
     else menu_toggle();
@@ -305,6 +324,7 @@ static void build_read(lv_obj_t *parent)
     lv_obj_remove_style_all(click);
     lv_obj_set_size(click, 480, 480);
     lv_obj_add_flag(click, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(click, read_press_cb, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(click, read_click_cb, LV_EVENT_CLICKED, NULL);
 }
 
@@ -815,6 +835,27 @@ static void gear_cb(lv_event_t *e)
 
 static void key3_next(void) { page_next(+1); }
 
+/* 四向快甩（ui_gesture_flick_add）：阅读页翻页；书架/目录/设置保持
+ * 上滑返回。上滑/左滑=下一页，下滑/右滑=上一页。 */
+static void reader_flick_cb(void *user, int dir)
+{
+    (void)user;
+    if (g_view == 1) {
+        if (g_menu_open) return; /* 菜单开着：点按关闭，不翻页 */
+        if (dir == UI_GESTURE_UP || dir == UI_GESTURE_LEFT)
+            page_next(+1);
+        else if (dir == UI_GESTURE_DOWN || dir == UI_GESTURE_RIGHT)
+            page_next(-1);
+        return;
+    }
+    if (dir == UI_GESTURE_UP) {
+        if (g_view == 2 || g_view == 3)
+            show_view(1);      /* 目录/设置 → 回阅读页 */
+        else
+            app_manager_back(); /* 书架 → 退出到桌面 */
+    }
+}
+
 static void reader_tick_cb(lv_timer_t *t)
 {
     (void)t;
@@ -940,7 +981,9 @@ static void init_async(void *arg)
 void ui_reader_build(lv_obj_t *scr, int app_id)
 {
     (void)app_id;
-    ui_gesture_back_add(scr);
+    /* 阅读器要四向快甩翻页：用 flick 监听替代全局"上滑返回"
+     * （否则上滑翻页会直接退出 App，用户 2026-11-18 实测反馈） */
+    ui_gesture_flick_add(scr, reader_flick_cb, NULL);
     g_root = scr;
     g_gen++;
     g_view = 0;

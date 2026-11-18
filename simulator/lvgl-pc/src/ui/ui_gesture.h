@@ -17,6 +17,18 @@ void ui_gesture_back_add(lv_obj_t *scr);
 /* 自定义上滑行为（如设置子页上滑 = 回设置首页的层级返回） */
 void ui_gesture_back_add_ex(lv_obj_t *scr, void (*cb)(void *), void *user);
 
+/* 方向快甩回调（阅读器等需要四向手势的页面）。
+ * 注册后该屏的「上滑返回」由回调自行处理（不再自动 app_manager_back）。
+ * dir：UI_GESTURE_UP/DOWN/LEFT/RIGHT（快甩 ≥70px、≤400ms、单轴主导）。 */
+enum {
+    UI_GESTURE_UP = 0,
+    UI_GESTURE_DOWN,
+    UI_GESTURE_LEFT,
+    UI_GESTURE_RIGHT,
+};
+void ui_gesture_flick_add(lv_obj_t *scr, void (*cb)(void *user, int dir),
+                          void *user);
+
 /* 页点组：count 个点（current 高亮拉伸）。
  * dots 数组由调用方持有（容量 >= count），页切换时调 ui_dots_update。 */
 void ui_dots_create(lv_obj_t *parent, lv_obj_t *dots[], int max_dots, int count,

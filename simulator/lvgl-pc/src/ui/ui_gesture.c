@@ -16,6 +16,7 @@
 typedef struct {
     lv_obj_t *scr;
     void (*cb)(void *);
+    void (*flick)(void *user, int dir);
     void *user;
 } gb_entry_t;
 static gb_entry_t g_gb[GB_MAX_SCREENS];
@@ -31,14 +32,17 @@ static uint32_t g_last_fire;
 #define GB_SWIPE_MAX_MS 400
 #define GB_SWIPE_DOMINANCE 2
 
-static void gb_fire(void)
+static void gb_fire(int dir)
 {
     lv_obj_t *scr = lv_screen_active();
     for (int i = 0; i < GB_MAX_SCREENS; i++) {
-        if (g_gb[i].scr == scr && g_gb[i].cb) {
+        if (g_gb[i].scr != scr) continue;
+        if (g_gb[i].flick) {
+            g_gb[i].flick(g_gb[i].user, dir);
+        } else if (dir == UI_GESTURE_UP && g_gb[i].cb) {
             g_gb[i].cb(g_gb[i].user);
-            return;
         }
+        return;
     }
 }
 
@@ -74,12 +78,26 @@ static void gb_timer_cb(lv_timer_t *t)
         int32_t dx = g_last.x - g_start.x;
         int32_t dy = g_last.y - g_start.y;
         int32_t adx = dx < 0 ? -dx : dx;
+        int32_t ady = dy < 0 ? -dy : dy;
         uint32_t dt = lv_tick_elaps(g_t0);
-        if (dy <= -GB_SWIPE_MIN_DY && dt <= GB_SWIPE_MAX_MS &&
-            -dy >= GB_SWIPE_DOMINANCE * adx &&
-            lv_tick_elaps(g_last_fire) > 400) {
+        int dir = -1;
+        if (dt <= GB_SWIPE_MAX_MS) {
+            if (dy <= -GB_SWIPE_MIN_DY &&
+                -dy >= GB_SWIPE_DOMINANCE * adx)
+                dir = UI_GESTURE_UP;
+            else if (dy >= GB_SWIPE_MIN_DY &&
+                     dy >= GB_SWIPE_DOMINANCE * adx)
+                dir = UI_GESTURE_DOWN;
+            else if (dx <= -GB_SWIPE_MIN_DY &&
+                     -dx >= GB_SWIPE_DOMINANCE * ady)
+                dir = UI_GESTURE_LEFT;
+            else if (dx >= GB_SWIPE_MIN_DY &&
+                     dx >= GB_SWIPE_DOMINANCE * ady)
+                dir = UI_GESTURE_RIGHT;
+        }
+        if (dir >= 0 && lv_tick_elaps(g_last_fire) > 250) {
             g_last_fire = lv_tick_get();
-            gb_fire();
+            gb_fire(dir);
         }
     }
 }
@@ -92,20 +110,24 @@ static void gb_unregister(lv_event_t *e)
     }
 }
 
-static void gb_register(lv_obj_t *scr, void (*cb)(void *), void *user)
+static void gb_register(lv_obj_t *scr, void (*cb)(void *),
+                        void (*flick)(void *user, int dir), void *user)
 {
-    /* 同屏重复注册：覆盖（back_add 与 back_add_ex 不同时用） */
+    /* 同屏重复注册：覆盖（back/flick 二选一） */
     int slot = -1;
+    bool existed = false;
     for (int i = 0; i < GB_MAX_SCREENS; i++) {
-        if (g_gb[i].scr == scr) { slot = i; break; }
+        if (g_gb[i].scr == scr) { slot = i; existed = true; break; }
         if (g_gb[i].scr == NULL && slot < 0) slot = i;
     }
     if (slot < 0) return; /* 表满：详情页等场景不会超 6 屏 */
 
     g_gb[slot].scr = scr;
     g_gb[slot].cb = cb;
+    g_gb[slot].flick = flick;
     g_gb[slot].user = user;
-    lv_obj_add_event_cb(scr, gb_unregister, LV_EVENT_DELETE, NULL);
+    if (!existed)
+        lv_obj_add_event_cb(scr, gb_unregister, LV_EVENT_DELETE, NULL);
 
     if (!g_gb_timer) g_gb_timer = lv_timer_create(gb_timer_cb, 30, NULL);
 }
@@ -118,12 +140,18 @@ static void gb_back_cb(void *user)
 
 void ui_gesture_back_add(lv_obj_t *scr)
 {
-    gb_register(scr, gb_back_cb, NULL);
+    gb_register(scr, gb_back_cb, NULL, NULL);
 }
 
 void ui_gesture_back_add_ex(lv_obj_t *scr, void (*cb)(void *), void *user)
 {
-    gb_register(scr, cb, user);
+    gb_register(scr, cb, NULL, user);
+}
+
+void ui_gesture_flick_add(lv_obj_t *scr, void (*cb)(void *user, int dir),
+                          void *user)
+{
+    gb_register(scr, NULL, cb, user);
 }
 
 /* 页点未选中色：UI_CARD_HI(0x1F2A47) 在暗背景上近不可见（真机目视
