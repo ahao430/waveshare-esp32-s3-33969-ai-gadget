@@ -57,9 +57,25 @@ typedef struct {
     char text[CONV_TEXT];
 } conv_msg_t;
 
-/* 每 App 独立历史 */
-static conv_msg_t g_hist[UI_APP_COUNT][CONV_MSGS];
+/* 每 App 独立历史：行指针惰性分配（坑 #19：UI_APP_COUNT 每加一个 App，
+ * 双维静态数组就多吃 ~4.7KB .bss；图片 App（11 个）曾因此把 Wi-Fi RX
+ * 缓冲挤破 → 无限重启。惰性后每 App 首次访问才 4.7KB PSRAM）。 */
+static conv_msg_t *g_hist[UI_APP_COUNT];
 static int g_hist_n[UI_APP_COUNT];
+
+static conv_msg_t *hist_row_ensure(int app_id)
+{
+    if (app_id < 0 || app_id >= UI_APP_COUNT) return NULL;
+    if (g_hist[app_id]) return g_hist[app_id];
+    size_t bytes = (size_t)CONV_MSGS * sizeof(conv_msg_t);
+#ifdef ESP_PLATFORM
+    g_hist[app_id] = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+#else
+    g_hist[app_id] = malloc(bytes);
+#endif
+    if (g_hist[app_id]) memset(g_hist[app_id], 0, bytes);
+    return g_hist[app_id];
+}
 
 /* AstrBot 多实例：聊天记录再按机器人实例分槽（用户 2026-11-16 反馈
  * "不同机器人对话历史共享"）。每 App 4.6KB×12 条放静态数组会把内部
@@ -113,7 +129,7 @@ static void conv_hist_slot(int app_id, conv_msg_t **h, int **n)
             return;
         }
     }
-    *h = g_hist[app_id];
+    *h = hist_row_ensure(app_id);
     *n = &g_hist_n[app_id];
 }
 
@@ -619,9 +635,10 @@ static void hist_open_cb(lv_event_t *e)
     int *np = NULL;
     conv_hist_slot(g_app_id, &h, &np);
     if (!h || !np) { /* 防御：不该发生 */
-        h = g_hist[g_app_id];
+        h = hist_row_ensure(g_app_id);
         np = &g_hist_n[g_app_id];
     }
+    if (!h) return; /* 行分配失败（PSRAM 紧张）：不展示历史 */
     for (int i = 0; i < *np; i++) {
         add_bubble(list, h[i].role, h[i].text);
     }
@@ -922,7 +939,8 @@ static void hist_wipe_cb(lv_event_t *e)
                 }
             }
         } else if (id >= 0 && id < UI_APP_COUNT) {
-            memset(g_hist[id], 0, bytes);
+            conv_msg_t *row = hist_row_ensure(id);
+            if (row) memset(row, 0, bytes);
         }
     }
     if (mask) lv_obj_delete(mask); /* 直接销毁弹窗（hist_close_cb 走 event 取参，不复用） */

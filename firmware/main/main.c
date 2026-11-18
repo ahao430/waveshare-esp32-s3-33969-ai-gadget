@@ -943,7 +943,23 @@ static void wifi_start(void)
 {
     net_stack_init();
     wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&wcfg));
+    /* 坑 #19 软着陆（2026-11-18 图片 App 版无限重启实证）：内部 RAM
+     * 紧张时静态 RX 缓冲分不满 10 个，esp_wifi_init 报 NO_MEM 被
+     * ESP_ERROR_CHECK abort → 无限重启。降级路径：把静态 RX/管理缓冲
+     * 减半重试（吞吐降但可用），再失败才 abort。日志留痕水位。 */
+    esp_err_t err = esp_wifi_init(&wcfg);
+    if (err != ESP_OK) {
+        ESP_LOGE("wifi", "esp_wifi_init rc=%x，降级重试（RX 减半）", err);
+        wcfg.static_rx_buf_num = 4;
+        wcfg.rx_mgmt_buf_num = 2;
+        wcfg.dynamic_rx_buf_num = 16;
+        err = esp_wifi_init(&wcfg);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE("wifi", "esp_wifi_init 降级仍失败 rc=%x", err);
+        /* 不 abort：无 Wi-Fi 也能进桌面（配网页可再试）。*/
+        return;
+    }
     /* 驱动配置只存 RAM（我们自己管 NVS 凭据，每次开机显式 apply）：
      * 默认 FLASH 存储会让每次 set_config/重连都翻写 NVS，把 24KB 分区
      * 磨成 164 条垃圾后所有写入静默失败——凭据保存不上（2026-11-16

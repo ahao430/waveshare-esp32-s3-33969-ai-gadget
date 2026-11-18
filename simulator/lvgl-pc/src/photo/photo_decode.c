@@ -58,16 +58,32 @@ void photo_stats_reset(void)
 /* ---------------- 缩略图 LRU 缓存（12 槽 x 100^2 RGB565） ---------- */
 
 #define PH_THUMB_SLOTS 12
-static struct {
+/* 缓存槽表惰性分配（坑 #19：2.7KB .bss 会挤 Wi-Fi RX 底线，
+ * 2026-11-18 图片 App 版无限重启实证） */
+struct ph_thslot {
     char path[PH_PATH_MAX];
     uint16_t *buf;              /* PH_THUMB_PX^2 RGB565 */
     long stamp;
-} s_thcache[PH_THUMB_SLOTS];
+};
+static struct ph_thslot *s_thcache;
 static long s_thstamp;
+
+/* 槽表按需建（PSRAM；失败返回 NULL=缓存停用，直通解码） */
+static struct ph_thslot *thcache_tbl(void)
+{
+    if (!s_thcache) {
+        s_thcache = PHMALLOC(sizeof(struct ph_thslot) * PH_THUMB_SLOTS);
+        if (s_thcache)
+            memset(s_thcache, 0,
+                   sizeof(struct ph_thslot) * PH_THUMB_SLOTS);
+    }
+    return s_thcache;
+}
 
 /* 命中返回槽位，未命中返回 -1 */
 static int thcache_find(const char *abs)
 {
+    if (!s_thcache) return -1;
     for (int i = 0; i < PH_THUMB_SLOTS; i++)
         if (s_thcache[i].buf && strcmp(s_thcache[i].path, abs) == 0)
             return i;
@@ -77,6 +93,7 @@ static int thcache_find(const char *abs)
 /* 取 LRU 槽位（优先空闲，其次最旧）；返回时 buf 已备好 */
 static uint16_t *thcache_slot(const char *abs)
 {
+    if (!thcache_tbl()) return NULL;
     int slot = -1;
     for (int i = 0; i < PH_THUMB_SLOTS; i++)
         if (!s_thcache[i].buf) { slot = i; break; }
@@ -98,8 +115,11 @@ static uint16_t *thcache_slot(const char *abs)
 
 void photo_cache_clear(void)
 {
+    if (!s_thcache) return;
     for (int i = 0; i < PH_THUMB_SLOTS; i++)
         if (s_thcache[i].buf) { PHFREE(s_thcache[i].buf); s_thcache[i].buf = NULL; }
+    PHFREE(s_thcache);
+    s_thcache = NULL;
 }
 
 /* ---------------- 画布 -> RGB565 转换 ---------------- */

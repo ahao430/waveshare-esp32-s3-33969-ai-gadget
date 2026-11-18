@@ -209,7 +209,14 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     对 NAS Bridge（route.ahao430.site:8081）完全正常（语音 40KB
     上传）。"访客网阻断"不能一概而论——设备地址簿多地址备案、
     网络诊断逐地址探测才是正解。
-19. **Wi-Fi 驱动初始化有内部 RAM 底线（2026-11-17 开机 abort 循环实证）**：
+19. **Wi-Fi 驱动初始化有内部 RAM 底线 ~56KB（2026-11-17/18 两次无限重启实证）**：
+    **2026-11-18 图片 App 版事故**：post-ui internal 50.2KB 时 `static rx buffer` 只成 5/10
+    → `esp_wifi_init` rc=101 → abort 无限重启；同机 58.3KB 版本 10/10 正常。**修法双层**：
+    ① `wifi_start` 软着陆（main.c）：init 失败降级 RX 减半重试、再失败也不 abort（进桌面无网，
+    配网页可重试）；② 挖出元凶——`ui_conversation.c` 的 `g_hist[UI_APP_COUNT][CONV_MSGS]`
+    按 App 数展开，**每加一个 App 白吃 ~4.7KB .bss**（52KB 静态）；改行指针惰性 PSRAM 后
+    .bss 128K→74K、post-ui 回到 102KB。**规则：任何以 UI_APP_COUNT 为维度的静态数组都是雷，
+    一律指针+惰性；新增 App 后先看 post-ui internal 是否仍 >56KB。**（原坑 #19 正文如下）
     post-ui 内部 free <~56KB 时 `esp_wifi_init` 静态 RX 缓冲分配不足
     （`Expected to init 10 rx buffer, actual is 7/8`）→ ESP_ERROR_CHECK
     abort → 开机无限重启。改任何静态 .bss/保留额度前先算这本账：
