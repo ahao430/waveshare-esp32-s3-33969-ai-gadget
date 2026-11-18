@@ -53,6 +53,7 @@ static lv_obj_t *g_lib_hint;    /* 空态/错误提示 */
 static lv_timer_t *g_timer;     /* 后台常驻（ADR-011，番茄钟模式） */
 static int g_gen;               /* 曲库 worker 代际 */
 static volatile int g_lib_busy;
+static char s_open_pending[MUSIC_PATH_MAX]; /* 文件管理器联动（ADR-019） */
 static int g_rot_deg;           /* 光点轨道角（0..359） */
 static lv_obj_t *g_dot;         /* 旋转高光点（模拟唱片反光） */
 static int g_view;              /* 0=播放 1=曲库（前向声明防重复） */
@@ -108,6 +109,17 @@ static void lib_async(void *arg)
     if (g_lib_rows) {
         lv_obj_clean(g_lib_rows);
         g_lib_busy = 0;
+        /* 文件管理器联动：曲库命中即切播（ADR-019） */
+        if (s_open_pending[0]) {
+            for (int i = 0; i < music_player_count(); i++) {
+                const music_track_t *tk = music_player_track(i);
+                if (tk && strstr(tk->path, s_open_pending)) {
+                    music_player_play(i);
+                    break;
+                }
+            }
+            s_open_pending[0] = 0;
+        }
     }
     int n = music_player_count();
     if (n == 0) {
@@ -539,4 +551,10 @@ void ui_music_on_exit(void)
     g_btn_shuf = g_btn_loop = NULL;
     g_btn_shuf_lbl = g_btn_loop_lbl = NULL;
     /* timer 常驻不删（后台播放继续刷药丸，番茄钟模式） */
+}
+
+/* 文件管理器联动入口（ADR-019） */
+void ui_music_open_path(const char *rel)
+{
+    snprintf(s_open_pending, sizeof(s_open_pending), "%s", rel ? rel : "");
 }

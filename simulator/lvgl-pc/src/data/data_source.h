@@ -297,6 +297,33 @@ int ds_files_remote_list(char *out, int cap);
 /* Bridge → TF downloads/<name>（≤2MB；msg 回显结果文案）：0/-1 */
 int ds_files_download(const char *name, char *msg, int msg_cap);
 
+/* ---- 文件管理器操作（ADR-019，全部 worker 线程调用；rel 都是
+ * sd 相对路径，如 "Pictures/a.jpg"；失败 -1 且 msg 填原因） ---- */
+/* 新建目录（幂等失败）：0/-1 */
+int ds_files_mkdir(const char *dir_rel, char *msg, int msg_cap);
+/* 同目录改名（new_name 仅文件名，不含路径）：0/-1 */
+int ds_files_rename(const char *rel, const char *new_name,
+                    char *msg, int msg_cap);
+/* 移动（FATFS rename 跨目录）/ 复制（16KB 分块读写，≤8MB）：0/-1 */
+int ds_files_move(const char *src_rel, const char *dst_dir_rel,
+                  char *msg, int msg_cap);
+int ds_files_copy(const char *src_rel, const char *dst_dir_rel,
+                  char *msg, int msg_cap);
+/* 删除；recursive=1 时空目录也删（非空目录仍拒绝，防误删整树）：
+ * 0/-1（msg 填原因，如"目录非空"） */
+int ds_files_delete2(const char *rel, int recursive, char *msg, int msg_cap);
+/* TF 容量（字节）：0=成功（total/free 填充；未插卡 -1） */
+int ds_files_capacity(long *total, long *free_b);
+
+/* ---- 收藏夹（data/files/fav.json，rel 路径数组，原子写） ---- */
+#define DS_FAV_MAX 64
+/* 加/移收藏（toggle，返回操作后是否收藏；-1=存盘失败/满） */
+int ds_files_fav_toggle(const char *rel);
+/* 是否已收藏 */
+int ds_files_fav_has(const char *rel);
+/* 列出全部收藏（rel 拷进 out；返回条数） */
+int ds_files_fav_list(char out[][DS_FILE_NAME_MAX * 2], int max);
+
 /* ---------------- 设备状态采集（设置→系统状态仪表盘） ----------------
  * 阻塞采集（TF FATFS 扫描/Flash 分区遍历，~几十毫秒到几百毫秒），
  * 必须在 worker 线程调用（坑 #11），不在 LVGL 线程。

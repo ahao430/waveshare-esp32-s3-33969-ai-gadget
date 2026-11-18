@@ -10,6 +10,7 @@
  */
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "lvgl.h"
 #include "ui.h"
@@ -72,6 +73,7 @@ static int g_menu_open;
 static int g_save_dirty;                   /* 进度待落盘 */
 static int g_demo_open;                    /* demo：书架就绪自动开书 */
 static int g_demo_idx;                     /* demo 开书序号 */
+static char s_open_pending[RD_PATH_MAX];   /* 文件管理器联动（ADR-019） */
 static int g_auto_left;                    /* 自动翻页倒计时（tick 计数） */
 static reader_config_t g_cfg;
 static reader_page_t *g_page_pending;      /* worker 产物交接（双缓冲） */
@@ -438,11 +440,28 @@ static void shelf_async(void *arg)
                                 lv_color_hex(RD_DIM));
         lv_obj_align(sz, LV_ALIGN_RIGHT_MID, -14, 0);
     }
+    /* 文件管理器联动：pending 命中书架即开书（ADR-019，优先于 demo） */
+    if (s_open_pending[0]) {
+        for (int i = 0; i < g_shelf_n; i++) {
+            if (strcmp(g_shelf[i].path, s_open_pending) == 0) {
+                s_open_pending[0] = 0;
+                open_book(i);
+                return;
+            }
+        }
+        s_open_pending[0] = 0; /* 未命中（不在 Books/ 扫描范围）则丢弃 */
+    }
     /* demo：书架就绪后自动开第一本（headless 截帧用） */
     if (g_demo_open) {
         g_demo_open = 0;
         open_book(g_demo_idx);
     }
+}
+
+/* 文件管理器联动入口（ADR-019） */
+void ui_reader_open_path(const char *rel)
+{
+    snprintf(s_open_pending, sizeof(s_open_pending), "%s", rel ? rel : "");
 }
 
 /* ---------------- 开书 / 进度保存 ---------------- */
@@ -521,6 +540,37 @@ static void *save_worker(void *arg)
         reader_progress_set(reader_path(b), g_page->page_off, g_cur_ch,
                         g_cur_pg);
     }
+    return NULL;
+}
+
+/* 退出即清 RAM（2026-11-18 用户要求）：先进度落盘，再延迟 500ms
+ * 等在途渲染 worker 收尾（单页排版百 ms 级），最后释放 book/页缓冲/
+ * 书架缓存。zombie 经 heap 交给 worker；worker 起不来退化为同步释放。 */
+typedef struct {
+    reader_book_t *b;
+    reader_page_t *pg;
+    reader_shelf_t *sh;
+    int dirty;
+} rd_zombie_t;
+
+static void rd_zombie_free(rd_zombie_t *z)
+{
+    if (!z) return;
+    if (z->b) reader_close(z->b);
+    free(z->pg);
+    free(z->sh);
+    free(z);
+}
+
+static void *reader_teardown_worker(void *arg)
+{
+    rd_zombie_t *z = (rd_zombie_t *)arg;
+    if (z->b && z->dirty && z->pg) {
+        reader_progress_set(reader_path(z->b), z->pg->page_off,
+                            g_cur_ch, g_cur_pg);
+    }
+    usleep(500 * 1000);
+    rd_zombie_free(z);
     return NULL;
 }
 
@@ -897,10 +947,26 @@ void ui_reader_on_exit(void)
     g_cfg_rows = NULL;
     g_menu = NULL;
     for (int i = 0; i < RD_MAX_LINES; i++) g_txt[i] = NULL;
-    /* 退出前进度强落盘（worker） */
-    if (g_book && g_save_dirty) {
+    /* 退出即清 RAM（2026-11-18 用户要求）：gen++ 作废在途翻页，zombie
+     * 移交 teardown worker（进度落盘 + 延迟释放） */
+    g_gen++;
+    g_busy = 0;
+    if (g_book || g_page || g_shelf) {
+        rd_zombie_t *z = malloc(sizeof(*z));
+        if (z) {
+            z->b = g_book;
+            z->pg = g_page;
+            z->sh = g_shelf;
+            z->dirty = g_save_dirty;
+        }
+        g_book = NULL;
+        g_page = NULL;
+        g_shelf = NULL;
+        g_shelf_n = 0;
         g_save_dirty = 0;
-        ui_worker_start(save_worker, NULL, 12 * 1024);
+        if (ui_worker_start(reader_teardown_worker, z, 12 * 1024) != 0) {
+            rd_zombie_free(z); /* 退化为同步释放 */
+        }
     }
     ui_key_set_key3_handler(NULL);
     g_rtimer = NULL; /* app_manager 登记 timer，切走自动删 */

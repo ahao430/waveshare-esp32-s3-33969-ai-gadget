@@ -94,6 +94,7 @@ static uint16_t *g_full_buf;                /* 全屏解码缓冲 480² RGB565 �
 static lv_image_dsc_t g_full_dsc;
 
 /* demo 钩子（headless 截帧回归） */
+static char s_open_pending[PH_PATH_MAX];   /* 文件管理器联动（ADR-019） */
 static int g_demo_scan;                     /* GADGET_DEMO_PHOTO=1（默认行为） */
 static int g_demo_open;                     /* GADGET_DEMO_PHOTO_OPEN=N */
 static int g_demo_idx;
@@ -1219,6 +1220,20 @@ static void init_async(void *arg)
     }
     chips_rebuild();
     grid_rebuild();
+    /* 文件管理器联动：命中即进全屏（优先于 demo） */
+    if (g_items_n > 0 && s_open_pending[0]) {
+        for (int i = 0; i < g_items_n; i++) {
+            if (strcmp(g_items[i].rel, s_open_pending) == 0) {
+                g_sel = i;
+                break;
+            }
+        }
+        s_open_pending[0] = 0;
+        sel_borders_refresh();
+        info_refresh();
+        show_view(1);
+        return;
+    }
     if (g_items_n > 0 && g_demo_open) {
         g_demo_open = 0;
         g_sel = (g_demo_idx >= 0 && g_demo_idx < g_items_n) ? g_demo_idx : 0;
@@ -1367,4 +1382,10 @@ static void demo_hooks(void)
     /* GADGET_DEMO_PHOTO_VIEW=2：scan 完成直接进设置页 */
     const char *vw = getenv("GADGET_DEMO_PHOTO_VIEW");
     if (vw && vw[0] == '2') g_demo_view2 = 1;
+}
+
+/* 文件管理器联动入口（ADR-019） */
+void ui_photo_open_path(const char *rel)
+{
+    snprintf(s_open_pending, sizeof(s_open_pending), "%s", rel ? rel : "");
 }

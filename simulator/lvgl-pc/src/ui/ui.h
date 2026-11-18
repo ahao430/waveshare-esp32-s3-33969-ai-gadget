@@ -74,6 +74,13 @@ void ui_reader_build(lv_obj_t *screen, int app_id);
 void ui_reader_on_exit(void);
 void ui_photo_build(lv_obj_t *screen, int app_id);
 void ui_photo_on_exit(void);
+
+/* ---- 跨 App 联动（ADR-019：文件管理器点文件 → 目标 App 打开） ----
+ * 调用方（文件管理器）先设 pending 再 ui_open_app(id)；目标 App 在
+ * 数据就绪后消费（匹配 rel 失败则静默忽略/提示）。rel 为 sd 相对路径。 */
+void ui_reader_open_path(const char *rel);   /* 书架命中即开书 */
+void ui_photo_open_path(const char *rel);    /* 相册命中即进全屏 */
+void ui_music_open_path(const char *rel);    /* 曲库命中即切播 */
 void ui_pomodoro_on_exit(void);
 void ui_settings_build(lv_obj_t *screen, int app_id);
 void ui_settings_on_exit(void);

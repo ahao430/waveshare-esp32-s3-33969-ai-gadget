@@ -17,6 +17,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "app_manager.h"
 
@@ -27,7 +29,10 @@
 #endif
 
 #include "companion.h"
+#include "cJSON.h"
 #include "data_source.h"
+#include "sd_paths.h"
+#include "ui_worker.h"
 #include "voice_session.h"
 #include "ui.h"
 #include "ui_gesture.h"
@@ -62,6 +67,14 @@ typedef struct {
  * 缓冲挤破 → 无限重启。惰性后每 App 首次访问才 4.7KB PSRAM）。 */
 static conv_msg_t *g_hist[UI_APP_COUNT];
 static int g_hist_n[UI_APP_COUNT];
+
+/* ---- 历史落盘（2026-11-18：App 退出即清 RAM，重进再加载）----
+ * 文件 data/chat/hist.json：{"apps":{"<id>":[{"r","t"}..]},"bots":[..]}。
+ * 读写都在 worker（LVGL 线程禁 IO）；g_hist_io 互斥退出存盘与进入
+ * 加载（退出后立刻重进时，load 等 save 完成）。 */
+#define CHAT_HIST_PATH "data/chat/hist.json"
+static volatile int g_hist_io;      /* 0=空闲 1=保存中 2=加载中 */
+static volatile int g_hist_loaded;  /* 本进程已加载过 */
 
 static conv_msg_t *hist_row_ensure(int app_id)
 {
@@ -98,6 +111,196 @@ static void bot_hist_ensure(void)
 #endif
     if (s_bot_hist) memset(s_bot_hist, 0, bytes);
 }
+
+/* ---------------- 历史 保存/加载/释放（worker 线程） ---------------- */
+
+static void hist_clear_ram(void)
+{
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        if (g_hist[i]) {
+#ifdef ESP_PLATFORM
+            heap_caps_free(g_hist[i]);
+#else
+            free(g_hist[i]);
+#endif
+            g_hist[i] = NULL;
+        }
+        g_hist_n[i] = 0;
+    }
+    if (s_bot_hist) {
+#ifdef ESP_PLATFORM
+        heap_caps_free(s_bot_hist);
+#else
+        free(s_bot_hist);
+#endif
+        s_bot_hist = NULL;
+    }
+    for (int i = 0; i < BOT_HIST_BOTS; i++) {
+        s_bot_hist_n[i] = 0;
+        s_bot_hist_id[i][0] = '\0';
+    }
+}
+
+/* msg 数组 -> cJSON 数组 */
+static cJSON *msgs_to_json(const conv_msg_t *h, int n)
+{
+    cJSON *arr = cJSON_CreateArray();
+    if (!arr) return NULL;
+    for (int i = 0; i < n; i++) {
+        cJSON *o = cJSON_CreateObject();
+        if (!o) break;
+        cJSON_AddStringToObject(o, "r", h[i].role);
+        cJSON_AddStringToObject(o, "t", h[i].text);
+        cJSON_AddItemToArray(arr, o);
+    }
+    return arr;
+}
+
+static void *hist_save_worker(void *arg)
+{
+    (void)arg;
+    /* 抢占互斥：等进入时的 load（或上一轮 save）完成，避免空表覆盖 */
+    for (int i = 0; i < 600 && g_hist_io != 0; i++) usleep(5000);
+    g_hist_io = 1;
+    char abs[128], tmp[136], dir[128];
+    if (sd_resolve(abs, sizeof(abs), CHAT_HIST_PATH) != 0) goto free_ram;
+    snprintf(tmp, sizeof(tmp), "%s.tmp", abs);
+    if (sd_resolve(dir, sizeof(dir), "data/chat") == 0) mkdir(dir, 0777);
+    cJSON *root = cJSON_CreateObject();
+    if (root) {
+        cJSON *apps = cJSON_CreateObject();
+        for (int i = 0; i < UI_APP_COUNT && apps; i++) {
+            if (!g_hist[i] || g_hist_n[i] <= 0) continue;
+            cJSON *arr = msgs_to_json(g_hist[i], g_hist_n[i]);
+            char key[8];
+            snprintf(key, sizeof(key), "%d", i);
+            if (arr) cJSON_AddItemToObject(apps, key, arr);
+        }
+        cJSON_AddItemToObject(root, "apps", apps);
+        cJSON *bots = cJSON_CreateArray();
+        if (bots) {
+            for (int i = 0; i < BOT_HIST_BOTS; i++) {
+                if (!s_bot_hist || s_bot_hist_id[i][0] == '\0'
+                    || s_bot_hist_n[i] <= 0)
+                    continue;
+                cJSON *o = cJSON_CreateObject();
+                if (!o) continue;
+                cJSON_AddStringToObject(o, "id", s_bot_hist_id[i]);
+                cJSON *arr = msgs_to_json(
+                    &s_bot_hist[(size_t)i * CONV_MSGS], s_bot_hist_n[i]);
+                if (arr) cJSON_AddItemToObject(o, "msgs", arr);
+                cJSON_AddItemToArray(bots, o);
+            }
+            cJSON_AddItemToObject(root, "bots", bots);
+        }
+        char *s = cJSON_PrintUnformatted(root);
+        if (s) {
+            FILE *f = fopen(tmp, "wb");
+            if (f) {
+                fwrite(s, 1, strlen(s), f);
+                fclose(f);
+                rename(tmp, abs);
+            }
+            free(s);
+        }
+        cJSON_Delete(root);
+    }
+free_ram:
+    hist_clear_ram();
+    g_hist_loaded = 0; /* RAM 已清：下次进入重从 TF 加载 */
+    g_hist_io = 0;
+    return NULL;
+}
+
+static int bot_slot_for(const char *bot_id)
+{
+    if (!bot_id || !bot_id[0]) return -1;
+    for (int i = 0; i < BOT_HIST_BOTS; i++)
+        if (s_bot_hist_id[i][0] && strcmp(s_bot_hist_id[i], bot_id) == 0)
+            return i;
+    return -1;
+}
+
+/* JSON 数组 -> msg 行；返回条数（截断到 max） */
+static int json_to_msgs(const cJSON *arr, conv_msg_t *row, int max)
+{
+    int n = 0;
+    const cJSON *it = NULL;
+    if (!cJSON_IsArray(arr) || !row) return 0;
+    cJSON_ArrayForEach(it, arr) {
+        if (n >= max) break;
+        const cJSON *r = cJSON_GetObjectItem(it, "r");
+        const cJSON *tx = cJSON_GetObjectItem(it, "t");
+        if (!cJSON_IsString(r) || !cJSON_IsString(tx)) continue;
+        snprintf(row[n].role, sizeof(row[n].role), "%s", r->valuestring);
+        snprintf(row[n].text, sizeof(row[n].text), "%s", tx->valuestring);
+        n++;
+    }
+    return n;
+}
+
+/* 进入 App 时把历史从 TF 读回（等退出存盘完成） */
+static void *hist_load_worker(void *arg)
+{
+    (void)arg;
+    for (int i = 0; i < 200 && g_hist_io == 1; i++) usleep(5000);
+    char abs[128];
+    if (sd_resolve(abs, sizeof(abs), CHAT_HIST_PATH) == 0) {
+        FILE *f = fopen(abs, "rb");
+        if (f) {
+            fseek(f, 0, SEEK_END);
+            long sz = ftell(f);
+            fseek(f, 0, SEEK_SET);
+            if (sz > 0 && sz < 256 * 1024) {
+                char *buf = malloc((size_t)sz + 1);
+                if (buf && fread(buf, 1, (size_t)sz, f) == (size_t)sz) {
+                    buf[sz] = 0;
+                    cJSON *root = cJSON_Parse(buf);
+                    if (root) {
+                        const cJSON *apps = cJSON_GetObjectItem(root, "apps");
+                        const cJSON *it = NULL;
+                        cJSON_ArrayForEach(it, apps) {
+                            int id = it->string ? atoi(it->string) : -1;
+                            if (id < 0 || id >= UI_APP_COUNT) continue;
+                            conv_msg_t *row = hist_row_ensure(id);
+                            if (row)
+                                g_hist_n[id] = json_to_msgs(it, row, CONV_MSGS);
+                        }
+                        const cJSON *bots = cJSON_GetObjectItem(root, "bots");
+                        cJSON_ArrayForEach(it, bots) {
+                            const cJSON *bid = cJSON_GetObjectItem(it, "id");
+                            if (!cJSON_IsString(bid) || !bid->valuestring[0])
+                                continue;
+                            bot_hist_ensure();
+                            if (!s_bot_hist) break;
+                            int slot = -1;
+                            for (int i = 0; i < BOT_HIST_BOTS; i++)
+                                if (s_bot_hist_id[i][0] == 0) { slot = i; break; }
+                            if (slot < 0) break;
+                            snprintf(s_bot_hist_id[slot],
+                                     sizeof(s_bot_hist_id[slot]), "%s",
+                                     bid->valuestring);
+                            s_bot_hist_n[slot] = json_to_msgs(
+                                cJSON_GetObjectItem(it, "msgs"),
+                                &s_bot_hist[(size_t)slot * CONV_MSGS],
+                                CONV_MSGS);
+                        }
+                        cJSON_Delete(root);
+                    }
+                    free(buf);
+                } else if (buf) {
+                    free(buf);
+                }
+            }
+            fclose(f);
+        }
+    }
+    g_hist_loaded = 1;
+    g_hist_io = 0;
+    return NULL;
+}
+
+/* <<APPEND>> */
 
 static int bot_hist_slot(const char *bot_id)
 {
@@ -959,6 +1162,14 @@ static void hist_wipe_cb(lv_event_t *e)
 void ui_conversation_build(lv_obj_t *scr, int app_id)
 {
     g_app_id = app_id;
+    /* 进 App 从 TF 读回历史（上次退出已清 RAM） */
+    if (!g_hist_loaded && g_hist_io == 0) {
+        g_hist_io = 2;
+        if (ui_worker_start(hist_load_worker, NULL, 16 * 1024) != 0) {
+            g_hist_io = 0;
+            g_hist_loaded = 1;
+        }
+    }
     g_voice_enabled = g_meta[app_id].voice;
     /* KEY3 短按：无动作（连续对话已移除，2026-11-16 用户拍板）；
      * 长按=语音说话（Web keys 配置 ptt） */
@@ -1161,6 +1372,12 @@ void ui_conversation_build(lv_obj_t *scr, int app_id)
 
 void ui_conversation_on_exit(void)
 {
+    /* 退出即清 RAM（2026-11-18 用户要求）：历史先落盘再释放；
+     * 下次进入由 hist_load_worker 读回。分配失败则就地清。 */
+    if (ui_worker_start(hist_save_worker, NULL, 16 * 1024) != 0) {
+        hist_clear_ram();
+        g_hist_loaded = 0;
+    }
     if (g_poll_timer) {
         lv_timer_del(g_poll_timer);
         g_poll_timer = NULL;

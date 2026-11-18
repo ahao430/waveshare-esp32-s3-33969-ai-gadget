@@ -11,16 +11,24 @@
 #include "data_source.h"
 
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "cJSON.h"
 #include "http_client.h"
 #include "sd_paths.h"
+
+#ifdef ESP_PLATFORM
+#include "esp_vfs_fat.h"
+#else
+#include <sys/statvfs.h>
+#endif
 
 #ifdef ESP_PLATFORM
 #include "esp_heap_caps.h"
@@ -305,3 +313,316 @@ int ds_sd_resolve(char *out, int cap, const char *rel)
 }
 
 void ds_files_ensure_dirs(void) { sd_ensure_dirs(); }
+
+/* ---------------- 文件管理器操作（ADR-019，worker 线程） ---------------- */
+
+/* 新文件名里的路径分隔符拒绝（防逃逸当前目录） */
+static int name_is_safe(const char *name)
+{
+    if (!name[0] || !strcmp(name, ".") || !strcmp(name, "..")) return 0;
+    return !strchr(name, '/') && !strchr(name, '\\');
+}
+
+int ds_files_mkdir(const char *dir_rel, char *msg, int msg_cap)
+{
+    char abs[220];
+    if (sd_resolve(abs, sizeof(abs), dir_rel) != 0) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "路径过长");
+        return -1;
+    }
+    /* mkdir -p 语义：逐层建（FATFS mkdir 单层） */
+    for (char *p = abs + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = 0;
+        struct stat st;
+        if (stat(abs, &st) != 0) mkdir(abs, 0777);
+        *p = '/';
+    }
+    if (mkdir(abs, 0777) == 0) return 0;
+    if (errno == EEXIST) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "目录已存在");
+    } else {
+        if (msg) snprintf(msg, (size_t)msg_cap, "创建失败");
+    }
+    return -1;
+}
+
+int ds_files_rename(const char *rel, const char *new_name,
+                    char *msg, int msg_cap)
+{
+    if (!name_is_safe(new_name)) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "名字不合法");
+        return -1;
+    }
+    char abs[220], abs2[220], dir[220];
+    if (sd_resolve(abs, sizeof(abs), rel) != 0) return -1;
+    /* 同目录改名：截出父目录再拼新名 */
+    snprintf(dir, sizeof(dir), "%s", rel);
+    char *slash = strrchr(dir, '/');
+    if (slash) *slash = 0;
+    else dir[0] = 0; /* rel 无斜杠=根下文件 */
+    char nrel[220];
+    if (dir[0]) snprintf(nrel, sizeof(nrel), "%s/%s", dir, new_name);
+    else snprintf(nrel, sizeof(nrel), "%s", new_name);
+    if (sd_resolve(abs2, sizeof(abs2), nrel) != 0) return -1;
+    if (rename(abs, abs2) == 0) return 0;
+    if (msg) snprintf(msg, (size_t)msg_cap,
+                      errno == EEXIST ? "目标已存在" : "重命名失败");
+    return -1;
+}
+
+int ds_files_move(const char *src_rel, const char *dst_dir_rel,
+                  char *msg, int msg_cap)
+{
+    const char *base = strrchr(src_rel, '/');
+    base = base ? base + 1 : src_rel;
+    char nrel[220];
+    if (dst_dir_rel[0])
+        snprintf(nrel, sizeof(nrel), "%s/%s", dst_dir_rel, base);
+    else
+        snprintf(nrel, sizeof(nrel), "%s", base);
+    if (strcmp(nrel, src_rel) == 0) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "已在同一目录");
+        return -1;
+    }
+    char abs[220], abs2[220];
+    if (sd_resolve(abs, sizeof(abs), src_rel) != 0
+        || sd_resolve(abs2, sizeof(abs2), nrel) != 0) return -1;
+    if (rename(abs, abs2) == 0) return 0;
+    if (msg) snprintf(msg, (size_t)msg_cap,
+                      errno == EEXIST ? "目标已存在" : "移动失败");
+    return -1;
+}
+
+#define DS_COPY_MAX (8L * 1024 * 1024)
+int ds_files_copy(const char *src_rel, const char *dst_dir_rel,
+                  char *msg, int msg_cap)
+{
+    const char *base = strrchr(src_rel, '/');
+    base = base ? base + 1 : src_rel;
+    char nrel[220];
+    if (dst_dir_rel[0])
+        snprintf(nrel, sizeof(nrel), "%s/%s", dst_dir_rel, base);
+    else
+        snprintf(nrel, sizeof(nrel), "%s", base);
+    char abs[220], abs2[220];
+    if (sd_resolve(abs, sizeof(abs), src_rel) != 0
+        || sd_resolve(abs2, sizeof(abs2), nrel) != 0) return -1;
+    struct stat st;
+    if (stat(abs, &st) != 0 || S_ISDIR(st.st_mode)) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "仅支持文件");
+        return -1;
+    }
+    if (st.st_size > DS_COPY_MAX) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "超过 8MB");
+        return -1;
+    }
+    FILE *src = fopen(abs, "rb");
+    FILE *dst = fopen(abs2, "wb");
+    if (!src || !dst) {
+        if (src) fclose(src);
+        if (dst) fclose(dst);
+        if (msg) snprintf(msg, (size_t)msg_cap, "打开失败");
+        return -1;
+    }
+    char *buf = malloc(16 * 1024);
+    long left = st.st_size;
+    while (left > 0 && buf) {
+        size_t want = left > 16 * 1024 ? 16 * 1024 : (size_t)left;
+        if (fread(buf, 1, want, src) != want) break;
+        if (fwrite(buf, 1, want, dst) != want) break;
+        left -= (long)want;
+    }
+    free(buf);
+    fclose(src);
+    fclose(dst);
+    if (left != 0) {
+        remove(abs2);
+        if (msg) snprintf(msg, (size_t)msg_cap, "复制中断");
+        return -1;
+    }
+    return 0;
+}
+
+int ds_files_delete2(const char *rel, int recursive, char *msg, int msg_cap)
+{
+    char abs[220];
+    if (sd_resolve(abs, sizeof(abs), rel) != 0) return -1;
+    struct stat st;
+    if (stat(abs, &st) != 0) return -1;
+    if (!S_ISDIR(st.st_mode)) {
+        if (remove(abs) == 0) return 0;
+        if (msg) snprintf(msg, (size_t)msg_cap, "删除失败");
+        return -1;
+    }
+    if (!recursive) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "目录需勾选递归");
+        return -1;
+    }
+    /* 空目录才删（非空拒绝，防误删整树——spec 二次确认语义） */
+    DIR *d = opendir(abs);
+    if (!d) return -1;
+    struct dirent *e;
+    int empty = 1;
+    while ((e = readdir(d)) != NULL) {
+        if (e->d_name[0] != '.') { empty = 0; break; }
+    }
+    closedir(d);
+    if (!empty) {
+        if (msg) snprintf(msg, (size_t)msg_cap, "目录非空");
+        return -1;
+    }
+    if (rmdir(abs) == 0) return 0;
+    if (msg) snprintf(msg, (size_t)msg_cap, "删除失败");
+    return -1;
+}
+
+int ds_files_capacity(long *total, long *free_b)
+{
+#ifdef ESP_PLATFORM
+    uint64_t t = 0, f = 0;
+    if (esp_vfs_fat_info(sd_root(), &t, &f) != ESP_OK || t == 0)
+        return -1;
+    *total = (long)t;
+    *free_b = (long)f;
+    return 0;
+#else
+    struct statvfs vfs;
+    if (statvfs(sd_root(), &vfs) != 0 || vfs.f_blocks == 0) return -1;
+    *total = (long)vfs.f_blocks * (long)vfs.f_frsize;
+    *free_b = (long)vfs.f_bavail * (long)vfs.f_frsize;
+    return 0;
+#endif
+}
+
+/* ---------------- 收藏夹（data/files/fav.json，原子写） ---------------- */
+
+static void fav_path(char *out, size_t cap)
+{
+    snprintf(out, cap, "%s", "data/files/fav.json");
+}
+
+/* 读全部收藏到 heap 数组（调用方 free）；返回条数。
+ * 无文件/解析失败也返回空数组（条数 0），调用方统一 free。 */
+static int fav_load(char ***out_arr)
+{
+    char abs[220];
+    char rel[40];
+    fav_path(rel, sizeof(rel));
+    char **arr = calloc(1, sizeof(char *));
+    *out_arr = arr;
+    if (sd_resolve(abs, sizeof(abs), rel) != 0) return 0;
+    FILE *f = fopen(abs, "rb");
+    if (!f) return 0;
+    char buf[16 * 1024];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    cJSON *root = cJSON_Parse(buf);
+    if (!root || !cJSON_IsArray(root)) {
+        cJSON_Delete(root);
+        return 0; /* 解析失败按空表处理（顶部已发空数组） */
+    }
+    int cnt = cJSON_GetArraySize(root);
+    if (cnt > DS_FAV_MAX) cnt = DS_FAV_MAX;
+    if (cnt > 0) {
+        char **grown = calloc((size_t)cnt, sizeof(char *));
+        if (!grown) {
+            cJSON_Delete(root);
+            return 0;
+        }
+        free(arr);
+        arr = grown;
+        *out_arr = arr;
+    }
+    int m = 0;
+    for (int i = 0; i < cnt; i++) {
+        const cJSON *it = cJSON_GetArrayItem(root, i);
+        if (cJSON_IsString(it) && it->valuestring[0]) {
+            arr[m++] = strdup(it->valuestring);
+        }
+    }
+    cJSON_Delete(root);
+    return m;
+}
+
+static int fav_save(char **arr, int n)
+{
+    char abs[220], tmp[230];
+    char rel[40];
+    fav_path(rel, sizeof(rel));
+    if (sd_resolve(abs, sizeof(abs), rel) != 0) return -1;
+    /* data/files/ 目录幂等补建（同 photo_config 纪律） */
+    char dabs[220];
+    if (sd_resolve(dabs, sizeof(dabs), "data/files") == 0)
+        mkdir(dabs, 0777);
+    snprintf(tmp, sizeof(tmp), "%s.tmp", abs);
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return -1;
+    cJSON *root = cJSON_CreateArray();
+    for (int i = 0; i < n; i++)
+        cJSON_AddItemToArray(root, cJSON_CreateString(arr[i]));
+    char *s = cJSON_PrintUnformatted(root);
+    if (s) fwrite(s, 1, strlen(s), f);
+    free(s);
+    cJSON_Delete(root);
+    fclose(f);
+    rename(tmp, abs);
+    return 0;
+}
+
+int ds_files_fav_toggle(const char *rel)
+{
+    char **arr = NULL;
+    int n = fav_load(&arr);
+    int found = -1;
+    for (int i = 0; i < n; i++)
+        if (strcmp(arr[i], rel) == 0) { found = i; break; }
+    int now_fav;
+    if (found >= 0) {
+        free(arr[found]);
+        arr[found] = NULL;
+        for (int i = found; i < n - 1; i++) arr[i] = arr[i + 1];
+        n--;
+        now_fav = 0;
+    } else {
+        if (n >= DS_FAV_MAX) {
+            for (int i = 0; i < n; i++) free(arr[i]);
+            free(arr);
+            return -1;
+        }
+        arr[n++] = strdup(rel);
+        now_fav = 1;
+    }
+    fav_save(arr, n);
+    for (int i = 0; i < n; i++) free(arr[i]);
+    free(arr);
+    return now_fav;
+}
+
+int ds_files_fav_has(const char *rel)
+{
+    char **arr = NULL;
+    int n = fav_load(&arr);
+    int found = 0;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(arr[i], rel) == 0) found = 1;
+        free(arr[i]);
+    }
+    free(arr);
+    return found;
+}
+
+int ds_files_fav_list(char out[][DS_FILE_NAME_MAX * 2], int max)
+{
+    char **arr = NULL;
+    int n = fav_load(&arr);
+    int m = 0;
+    for (int i = 0; i < n && m < max; i++) {
+        snprintf(out[m], DS_FILE_NAME_MAX * 2, "%s", arr[i]);
+        m++;
+    }
+    for (int i = 0; i < n; i++) free(arr[i]);
+    free(arr);
+    return m;
+}
