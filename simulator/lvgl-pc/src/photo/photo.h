@@ -1,7 +1,7 @@
 /* photo — 本地相册核心层（双端：固件/模拟器，ADR-018）。
  *
  * 职责：
- *   - 扫描 Pictures/（根 + 一级子目录=分类），mtime 降序
+ *   - 扫描 picture/（根 + 一级子目录=分类），mtime 降序
  *   - 解码：JPEG（vendor TJpgDec R0.03，1/2..1/8 缩放解码）/
  *     PNG（lvgl 内置 lodepng，像素数上限 150K）/
  *     BMP（自研 24/32bpp 非压缩行流解析）
@@ -47,7 +47,7 @@ typedef struct {
     char name[PH_NAME_MAX];     /* 文件名（去目录） */
     long size;
     long mtime;                 /* unix 秒 */
-    int  cat;                   /* 分类索引（-1=Pictures 根，未分类） */
+    int  cat;                   /* 分类索引（-1=picture 根，未分类） */
 } photo_item_t;
 
 typedef struct {
@@ -57,7 +57,7 @@ typedef struct {
 
 /* ---------------- 扫描（worker 调用） ---------------- */
 
-/* 扫 Pictures/：根 + 一级子目录（≤PH_CAT_MAX 个，按名排序），
+/* 扫 picture/：根 + 一级子目录（≤PH_CAT_MAX 个，按名排序），
  * 图片条目按 mtime 降序。返回 0=成功（未插卡/空目录也 0）；
  * 条数填进两个计数指针参数（n_items / n_cats）。 */
 int photo_scan(photo_item_t *items, int max_items, int *n_items,

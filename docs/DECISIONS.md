@@ -626,7 +626,8 @@ UTF-8/GBK 双书 18/12 章识别 + 禁则排版全对）；模拟器 headless �
 ## ADR-018：本地图片 App（迷你照片管理器，2026-11-18）
 
 背景：图片 App 定位"迷你照片管理器"（网格/全屏/设置三视图，深色
-AMOLED+蓝紫霓虹），TF 卡 Pictures/ 为源。这是项目第一个**运行时
+AMOLED+蓝紫霓虹），TF 卡 picture/ 为源（2026-11-18 晚由 Pictures/
+更名，与卡实况对齐）。这是项目第一个**运行时
 解码图片**的应用——此前所有图片素材都是构建期预解码（icon_embed）。
 
 决策：
@@ -655,7 +656,7 @@ AMOLED+蓝紫霓虹），TF 卡 Pictures/ 为源。这是项目第一个**运行
    TTS 分配失败=语音无字幕无声音），验收时留意。
 6. **边界（v1）**：PNG >16 万像素明确拒绝（提示转 JPG）；BMP 仅
    24/32bpp 非压缩；单分类 >24 张超出 UI 池的 cell 显示占位符；
-   GIF/WebP 不支持。SD 契约：Pictures/ 一级子目录=分类 chips
+   GIF/WebP 不支持。SD 契约：picture/ 一级子目录=分类 chips
    （≤4 个，按名排序），根目录图片=未分类，不递归子目录的子目录。
 7. **flash 账**：app 6.06MB/12.5MB（51%，余 49%）——photo 代码
    +40KB、tjpgd vendor +20KB、photo 图标嵌入 +23KB；rodata 无增长

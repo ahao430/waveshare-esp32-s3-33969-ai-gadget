@@ -11,11 +11,15 @@
  *   appearance/ Web 自定义背景落盘（真机屏显需 LV_USE_PNG，暂只落盘）
  *   downloads/ 从 Bridge 下载的设备文件
  *   music/     本地音乐库（音乐播放器扫描 .mp3/.wav）
- *   Books/     本地小说库（阅读器扫描 .txt，递归深度 3；进度/配置存
+ *   book/      本地小说库（阅读器扫描 .txt，递归深度 3；进度/配置存
  *              data/reader/ 下 JSON 文件，不修改原始 TXT）  [ADR-017]
- *   Pictures/  本地相册（图片 App 扫描 JPG/PNG/BMP；一级子目录=分类
+ *   picture/   本地相册（图片 App 扫描 JPG/PNG/BMP；一级子目录=分类
  *              chips，根目录图片=未分类；JPEG 任意尺寸，PNG 超 16 万
  *              像素明确提示转 JPG；BMP 24/32bpp 非压缩）  [ADR-018]
+ *
+ * App 目录边界（2026-11-18 按 TF 卡实况定）：文件管理器从卡根浏览；
+ * 阅读器只扫 book/、相册只扫 picture/、音乐只扫 music/——库目录互不
+ * 串用，根目录只归文件管理器。
  */
 #ifndef SD_PATHS_H
 #define SD_PATHS_H

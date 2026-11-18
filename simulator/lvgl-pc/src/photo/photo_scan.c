@@ -1,5 +1,5 @@
-/* photo_scan - Pictures/ 目录扫描（双端；FATFS UTF-8 API 后中文名可见，
- * 坑 #28 已修）。只列 Pictures 根 + 一级子目录（<=4，按名排序）作为
+/* photo_scan - picture/ 目录扫描（双端；FATFS UTF-8 API 后中文名可见，
+ * 坑 #28 已修）。只列 picture 根 + 一级子目录（<=4，按名排序）作为
  * 分类 chips 数据源；每目录只列一层不递归（"按目录扫描、不整卡扫描"）。
  * 条目 mtime 降序（最新优先）。 */
 #include <stdlib.h>
@@ -68,11 +68,11 @@ static int collect_dir(const char *dir_rel, int cat,
     return added;
 }
 
-/* 收集 Pictures 一级子目录名（<=max，按名排序）。返回个数。 */
+/* 收集 picture 一级子目录名（<=max，按名排序）。返回个数。 */
 static int list_subdirs(char names[][40], int max)
 {
     char root[PH_PATH_MAX];
-    if (sd_resolve(root, sizeof(root), "Pictures") != 0) return 0;
+    if (sd_resolve(root, sizeof(root), "picture") != 0) return 0;
     DIR *d = opendir(root);
     if (!d) return 0;
     struct dirent *ent;
@@ -80,7 +80,7 @@ static int list_subdirs(char names[][40], int max)
     while ((ent = readdir(d)) != NULL) {
         if (ent->d_name[0] == '.') continue;
         char rel[64];
-        if (snprintf(rel, sizeof(rel), "Pictures/%s", ent->d_name)
+        if (snprintf(rel, sizeof(rel), "picture/%s", ent->d_name)
             >= (int)sizeof(rel)) continue;
         char abs[PH_PATH_MAX];
         struct stat st;
@@ -116,14 +116,14 @@ int photo_scan(photo_item_t *items, int max_items, int *n_items,
     char names[PH_CAT_MAX][40];
     int nc = list_subdirs(names, max_cats > PH_CAT_MAX ? PH_CAT_MAX : max_cats);
     /* 根目录未分类图片 + 各分类目录图片 */
-    collect_dir("Pictures", -1, items, max_items, n_items, NULL, -1);
+    collect_dir("picture", -1, items, max_items, n_items, NULL, -1);
     for (int i = 0; i < nc; i++) {
         name_copy(cats[i].name, (int)sizeof(cats[i].name), names[i]);
         (*n_cats)++;
     }
     for (int i = 0; i < *n_cats; i++) {
         char rel[PH_PATH_MAX];
-        if (snprintf(rel, sizeof(rel), "Pictures/%s", cats[i].name)
+        if (snprintf(rel, sizeof(rel), "picture/%s", cats[i].name)
             >= (int)sizeof(rel)) continue;
         collect_dir(rel, i, items, max_items, n_items, cats, i);
     }

@@ -1,7 +1,7 @@
 /* reader_book — TXT 小说阅读器核心层（双端：固件/模拟器，ADR-001）。
  *
  * 职责：
- *   - 书架扫描（Books/ + 根目录，递归深度 3，只列 .txt）
+ *   - 书架扫描（book/，递归深度 3，只列 .txt）
  *   - 打开书：编码检测（UTF-8 BOM/严格校验 → GB2312 换码表）+ 章节扫描
  *   - 分页排版：按字体度量逐行填充（行首禁则标点/首行缩进），页起点
  *     byte offset 表缓存（当前章），上一页 O(1) 回退
@@ -59,7 +59,7 @@ typedef struct reader_book reader_book_t;
 
 /* ---------------- 书架（worker 调用） ---------------- */
 
-/* 扫 Books/ + SD 根目录 .txt（递归深度 3），按最近阅读时间排序；
+/* 扫 book/ 下 .txt（递归深度 3，不含 SD 根目录），按最近阅读时间排序；
  * 返回条数（*n），无卡/无目录返回 0。 */
 int  reader_scan_shelf(reader_shelf_t *out, int max, int *n);
 

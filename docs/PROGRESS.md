@@ -157,7 +157,8 @@
 | Wi-Fi 修复链落地（配网/凭据/自动切网） | ✅ | 今晚直连排查期间连带收敛的三件存量 bug：①`wifi_secret.h` 残留 WIFI_ACTIVATE_SSID 每次开机强制切回公司网与自动切网互殴——置空（"凭据保存不上"真凶）；②配网页扫描与自动重连抢驱动（返回 OK 但 0 结果）——`wifi_prov_manual_mode` 包裹扫描、空结果重试 3 次；③prov_auto 任务 6KB 栈溢出（连上后崩溃凭据没落盘）——8192 + 备份大缓冲移堆；NVS 88K 扩容 + `esp_wifi_set_storage(RAM)` 消驱动翻写。真机：开机自动连 6-2-3401、扫描出全量 AP、凭据落盘重启保持。 |
 
 ### 2026-11-18（下午）小说阅读器 App（ADR-017）
-- 本地 TXT 阅读器 v1：书架（Books/ 递归+根目录，最近阅读排序）/阅读页
+- 本地 TXT 阅读器 v1：书架（book/ 递归，最近阅读排序；2026-11-18 晚
+  由 Books/ 更名并去掉卡根目录兜底）/阅读页
   （零 chrome、左中右分区点击翻页、KEY3 下一页、菜单 overlay）/目录
   （章节跳转）/设置（字号 16/20/24、行距三档、主题三档、自动翻页）。
 - 核心：流式 offset 分页（全书不进 RAM）、BOM→UTF-8 校验→GBK 换码
@@ -175,8 +176,8 @@
 - **首个运行时图片解码应用**：src/photo/ 双端核心层（scan/decode/
   config）+ vendor TJpgDec R0.03（JD_USE_SCALE=1，12MP 1/8 档 0.2s 级）
   + lodepng 直调（PNG ≤16 万像素）+ BMP 自研（24/32bpp）。UI 侧
-  ui_photo.c 三视图（网格/全屏/设置）+ 分类 chips（Pictures/ 一级
-  子目录动态）+ 幻灯片 + EXIF 方向（全屏 lv_image_set_rotation）。
+  ui_photo.c 三视图（网格/全屏/设置）+ 分类 chips（picture/ 一级
+  子目录动态，2026-11-18 晚由 Pictures/ 更名）+ 幻灯片 + EXIF 方向（全屏 lv_image_set_rotation）。
 - 独立 C 单测 80 断言全 PASS（像素级对照 PIL），揪出核心层 11 处
   bug（3 崩溃级：lodepng draw_buf 误当裸缓冲坏 free、BMP 累加器
   越界写 2.4MB、conv fit 输出越界 480²；JPEG/BMP BGR 序反色等）。
@@ -188,3 +189,14 @@
 - 验证：check.sh 全绿；模拟器 headless 三视图截帧通过（布局越界
   修复中：顶栏避状态栏/底栏收进 480/设置 chips 收缘）；真机解码
   速度/PSRAM 水位/幻灯片待验收。
+
+## 2026-11-18 晚：TF 卡目录标准化（四 App 目录边界）
+
+- 按 TF 卡实况统一：图片 App 只扫 `picture/`（原 Pictures/）、小说
+  阅读器只扫 `book/`（原 Books/，并移除"卡根目录 .txt"兜底）、音乐
+  只扫 `music/`；文件管理器从卡根浏览（三个库目录都在根下）。
+- `sd_ensure_dirs` 预建目录同步为 backup/cache/data/appearance/
+  downloads/music/book/picture——首次挂卡自动建齐两个新库目录。
+- 模拟器 `sdcard/` 测试数据同步改名；真机若还留着旧 `Pictures/`、
+  `Books/`，把文件移进新目录即可（旧目录不再被 App 读取）。
+- 验证：两处编译 + regress 11 App。

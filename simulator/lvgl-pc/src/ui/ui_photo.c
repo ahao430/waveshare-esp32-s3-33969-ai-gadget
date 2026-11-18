@@ -1213,7 +1213,7 @@ static void init_async(void *arg)
         if (g_hint) {
             lv_obj_clear_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text(g_hint,
-                              "未插卡或无图片\n把图片放进 TF 卡 Pictures/");
+                              "未插卡或无图片\n把图片放进 TF 卡 picture/");
         }
     } else if (g_hint) {
         lv_obj_add_flag(g_hint, LV_OBJ_FLAG_HIDDEN);

@@ -665,41 +665,10 @@ static void shelf_walk(const char *abs_dir, const char *rel_dir, int depth,
 int reader_scan_shelf(reader_shelf_t *out, int max, int *n)
 {
     *n = 0;
-    char abs[RD_PATH_MAX], rel0[8];
-    /* Books/ 递归 + 根目录一层 .txt（不强制整理） */
-    if (sd_resolve(abs, sizeof(abs), "Books") == 0) {
-        shelf_walk(abs, "Books", 3, out, max, n);
-    }
-    char root_abs[RD_PATH_MAX];
-    if (sd_resolve(root_abs, sizeof(root_abs), "") == 0) {
-        DIR *d = opendir(root_abs);
-        if (d) {
-            struct dirent *de;
-            while ((de = readdir(d)) != NULL && *n < max) {
-                if (de->d_name[0] == '.') continue;
-                size_t L = strlen(de->d_name);
-                if (L <= 4 || strcasecmp(de->d_name + L - 4, ".txt")) continue;
-                char abs2[RD_PATH_MAX];
-                snprintf(abs2, sizeof(abs2), "%.200s/%.95s", root_abs,
-                        de->d_name);
-                struct stat st;
-                if (stat(abs2, &st) != 0 || S_ISDIR(st.st_mode)) continue;
-                snprintf(out[*n].path, RD_PATH_MAX, "%s", de->d_name);
-                char t[RD_TITLE_MAX];
-                snprintf(t, sizeof(t), "%s", de->d_name);
-                char *dot = strrchr(t, '.');
-                if (dot) *dot = 0;
-                utf8_trunc(t, RD_TITLE_MAX, out[*n].title);
-                out[*n].size = (long)st.st_size;
-                long off = 0;
-                int ch = 0, pg = 0;
-                reader_progress_get(out[*n].path, &off, &ch, &pg, &out[*n].ts);
-                out[*n].percent =
-                    out[*n].size > 0 ? (int)(off * 100 / out[*n].size) : 0;
-                (*n)++;
-            }
-            closedir(d);
-        }
+    char abs[RD_PATH_MAX];
+    /* book/ 递归（书库目录与文件管理器根目录分离） */
+    if (sd_resolve(abs, sizeof(abs), "book") == 0) {
+        shelf_walk(abs, "book", 3, out, max, n);
     }
     qsort(out, (size_t)*n, sizeof(out[0]), shelf_cmp);
     return 0;

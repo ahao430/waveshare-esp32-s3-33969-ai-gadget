@@ -298,7 +298,7 @@ int ds_files_remote_list(char *out, int cap);
 int ds_files_download(const char *name, char *msg, int msg_cap);
 
 /* ---- 文件管理器操作（ADR-019，全部 worker 线程调用；rel 都是
- * sd 相对路径，如 "Pictures/a.jpg"；失败 -1 且 msg 填原因） ---- */
+ * sd 相对路径，如 "picture/a.jpg"；失败 -1 且 msg 填原因） ---- */
 /* 新建目录（幂等失败）：0/-1 */
 int ds_files_mkdir(const char *dir_rel, char *msg, int msg_cap);
 /* 同目录改名（new_name 仅文件名，不含路径）：0/-1 */

@@ -409,7 +409,7 @@ static void shelf_async(void *arg)
         if (g_hint) {
             lv_obj_clear_flag(g_hint, LV_OBJ_FLAG_HIDDEN);
             lv_label_set_text(g_hint,
-                              g_root ? "TF 卡 Books/ 目录没有 TXT 文件\n把小说放进 Books/ 或卡根目录"
+                              g_root ? "TF 卡 book/ 目录没有 TXT 文件\n把小说放进 book/"
                                      : "");
         }
         return;
@@ -449,7 +449,7 @@ static void shelf_async(void *arg)
                 return;
             }
         }
-        s_open_pending[0] = 0; /* 未命中（不在 Books/ 扫描范围）则丢弃 */
+        s_open_pending[0] = 0; /* 未命中（不在 book/ 扫描范围）则丢弃 */
     }
     /* demo：书架就绪后自动开第一本（headless 截帧用） */
     if (g_demo_open) {
