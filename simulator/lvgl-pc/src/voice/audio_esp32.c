@@ -41,6 +41,7 @@ static atomic_bool g_inited;
 
 static atomic_bool g_cap_run;
 static TaskHandle_t g_cap_task;
+static volatile int s_cap_busy; /* 在途 esp_codec_dev_read（切采样率前要等它退出） */
 
 static void capture_task(void *arg)
 {
@@ -48,7 +49,15 @@ static void capture_task(void *arg)
     static int16_t chunk[PCM_CHUNK_FRAMES];
     unsigned long frames = 0;
     while (atomic_load(&g_cap_run)) {
+        s_cap_busy = 1;
+        if (s_media_owner) {
+            /* 音乐占用/切换中：I2S 与 mic codec 被重配置，暂停读 */
+            s_cap_busy = 0;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
         int rc = esp_codec_dev_read(g_mic, chunk, sizeof(chunk));
+        s_cap_busy = 0;
         if (rc != 0) {
             /* 读失败退避，避免死循环刷日志 */
             ESP_LOGW(TAG, "mic read rc=%d", rc);
@@ -385,21 +394,32 @@ int audio_esp32_media_active(void) { return s_media_owner; }
 
 int audio_esp32_media_acquire(int sample_rate, int channels)
 {
-    if (!atomic_load(&g_inited) || !g_spk) return -1;
+    if (!atomic_load(&g_inited) || !g_spk || !g_mic) return -1;
     if (s_media_owner) return -1;
     esp_codec_dev_sample_info_t fs = {
         .bits_per_sample = 16,
         .channel = channels,
         .sample_rate = sample_rate,
     };
-    /* esp_codec_dev 1.5 无 set_fs：close+open 切采样率（TX 通道独立于 mic） */
+    esp_codec_dev_sample_info_t fs16 = {
+        .bits_per_sample = 16, .channel = 1, .sample_rate = 16000
+    };
+    /* 共享 I2S 时钟：TX/RX 不能不同采样率（driver 报 conflict 且 TX 停在
+     * 16k → 音乐变速/失真）。播放期间关闭 mic（PTT 已被 owner 拒绝），
+     * 只把 spk 开到音乐格式；释放时两边一起回 16k。 */
+    s_media_owner = 2; /* 切换中：采集任务暂停进入新 read */
+    while (s_cap_busy) vTaskDelay(pdMS_TO_TICKS(1));
+    esp_codec_dev_close(g_mic);
     esp_codec_dev_close(g_spk);
     if (esp_codec_dev_open(g_spk, &fs) != 0) {
         ESP_LOGE(TAG, "media open %dHz/%dch failed", sample_rate, channels);
+        esp_codec_dev_open(g_spk, &fs16);
+        esp_codec_dev_open(g_mic, &fs16);
+        s_media_owner = 0;
         return -1;
     }
     s_media_owner = 1;
-    ESP_LOGI(TAG, "media owner on (%dHz/%dch)", sample_rate, channels);
+    ESP_LOGI(TAG, "media owner on (%dHz/%dch, mic off)", sample_rate, channels);
     return 0;
 }
 
@@ -412,11 +432,14 @@ int audio_esp32_media_write(const void *pcm, int len)
 void audio_esp32_media_release(void)
 {
     if (!s_media_owner) return;
-    s_media_owner = 0;
+    s_media_owner = 2; /* 切换中：采集任务暂停 */
+    while (s_cap_busy) vTaskDelay(pdMS_TO_TICKS(1));
     esp_codec_dev_sample_info_t fs = {
         .bits_per_sample = 16, .channel = 1, .sample_rate = 16000
     };
     esp_codec_dev_close(g_spk);
     esp_codec_dev_open(g_spk, &fs); /* 交还语音的 16k/mono */
+    esp_codec_dev_open(g_mic, &fs); /* mic 恢复（采集任务随后继续读） */
+    s_media_owner = 0;
     ESP_LOGI(TAG, "media owner off");
 }

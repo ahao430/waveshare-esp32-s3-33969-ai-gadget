@@ -84,11 +84,13 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # 我们的消息都是小包（OTA JSON/WS hello/opus 帧）。
 CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
 
-# 内存策略（2026-11-17，官方 xiaozhi-esp32 S3 同款）：≤2KB 才优先内部
-# RAM，LVGL 控件/样式/键盘等小分配全部落到 PSRAM——配网面板一次拉起
-# 几百个小对象，16384 阈值下曾把内部 RAM 吃到 328B、largest_dma=0，
-# 刷屏 Draw bitmap NO_MEM。2048 后内部 RAM 留给 Wi-Fi/DMA/驱动。
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=2048
+# 内存策略（2026-11-18 音乐曲库实证）：该值是"小于它强制内部 RAM"的
+# 阈值，不是"大于它才用 PSRAM"。2048 时所有 <2KB 的 LVGL 对象/样式全在
+# 内部 RAM——曲库 23 行（≈90 对象）把 post-ui internal 打到 800B，连锁
+# TCB/DMA/I2S 分配失败崩溃。改 0 = 所有 malloc 优先 PSRAM：post-ui
+# internal 102→136KB，曲库+播放期间 ~80KB。代价 UI 对象占 PSRAM ~300KB，
+# tick largest_psram 1.44MB（TTS 768KB 连续块仍够）。
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0
 
 # FATFS API 用 UTF-8（2026-11-18 音乐曲库空根因）：默认 ANSI_OEM+437 码页
 # 下，中文文件名（UTF-16 LFN）经 opendir 转码失败变 '?'，stat/fopen 反查

@@ -76,7 +76,6 @@ void music_player_probe_id3(music_track_t *t);
 void music_player_scan(void)
 {
     char root[96];
-    ds_file_entry_t ents[MUSIC_LIST_MAX];
     int n = 0;
 
     s_n = 0;
@@ -91,11 +90,20 @@ void music_player_scan(void)
         return;
     }
     if (ds_sd_resolve(root, sizeof(root), "music") != 0) return;
+    /* 64 条 entry ≈7.7KB：放 PSRAM，不占 worker 栈（ui_worker 12KB
+     * 回落栈也安全；坑 #13/#26 同思路） */
+    ds_file_entry_t *ents = heap_caps_malloc(
+        MUSIC_LIST_MAX * sizeof(ds_file_entry_t), MALLOC_CAP_SPIRAM);
+    if (!ents) {
+        snprintf(s_scan_note, sizeof(s_scan_note), "内存不足，扫描失败");
+        return;
+    }
     if (ds_files_list(root, ents, MUSIC_LIST_MAX, &n) != 0) {
         /* opendir 失败：未插卡 / 无 music 目录（真机 FATFS） */
         MLOG("scan %s: opendir failed (no card?)", root);
         snprintf(s_scan_note, sizeof(s_scan_note),
                  "未检测到 TF 卡或 music/ 目录\n请插卡后重进曲库");
+        free(ents);
         return;
     }
 
@@ -129,6 +137,7 @@ void music_player_scan(void)
     }
     MLOG("scan %s: %d entries (%d dirs) -> %d tracks (%d by ext)",
          root, n, dirs, s_n, by_ext);
+    free(ents);
     if (s_n == 0) {
         if (dirs > 0 && dirs == n)
             snprintf(s_scan_note, sizeof(s_scan_note),
@@ -208,7 +217,9 @@ static void probe_id3(const char *path, char *title, int tcap,
         int ver = hdr[3];
         int tagsz = ((hdr[6] & 0x7F) << 21) | ((hdr[7] & 0x7F) << 14) |
                     ((hdr[8] & 0x7F) << 7) | hdr[9];
-        if (tagsz > (512 << 10)) tagsz = 512 << 10;
+        /* 只读标签头 64KB：TIT2/TPE1 通常在 APIC 前；上限 512KB 时
+         * 23 首带封面图的 MP3 在 1-bit SDMMC 上要扫十几秒 */
+        if (tagsz > (64 << 10)) tagsz = 64 << 10;
         uint8_t *buf = malloc(tagsz);
         if (buf) {
             int got = (int)fread(buf, 1, tagsz, f);
@@ -262,7 +273,12 @@ int music_player_play(int idx)
         s_state = MUSIC_STOPPED;
         return -1;
     }
-    if (s_ops && s_ops->start) s_ops->start();
+    if (s_ops && s_ops->start &&
+        s_ops->start() != 0) {
+        if (s_ops->stop) s_ops->stop(); /* 释放媒体 owner */
+        s_state = MUSIC_STOPPED;
+        return -1;
+    }
     s_cur = idx;
     s_state = MUSIC_PLAYING;
     return 0;

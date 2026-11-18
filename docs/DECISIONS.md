@@ -536,7 +536,7 @@ Wi-Fi RX 分配不足开机循环）——真因与缓解手段纠缠，一晚�
 
 ## ADR-016：本地音乐播放器（Hi-Fi 数字唱片机，WAV+MP3）
 
-**日期**：2026-11-18。**状态**：已实现（真机待用户验收）。
+**日期**：2026-11-18。**状态**：已实现（2026-11-18 晚真机播放跑通，23 首中文 MP3）。
 
 **背景**：用户拍板做本地音乐播放器（TF 卡 `music/` 目录），蓝紫霓虹风
 格与全局深色 AMOLED 统一；FLAC 明确不做（v1）。
@@ -572,7 +572,36 @@ Wi-Fi RX 分配不足开机循环）——真因与缓解手段纠缠，一晚�
 **验证**：模拟器 headless 截帧（播放页/信息行/频谱/进度弧/药丸全通，
 GADGET_SNAP + GADGET_DEMO_MUSIC_PLAY=1）；regress-sim 9 App 唯一画面
 PASS；固件 post-ui internal 64.7KB（>56KB 底线）、Wi-Fi 正常、心跳正常。
-真机播放/频谱/后台药丸待用户验收（TF 放 `music/` 目录 MP3/WAV）。
+
+**真机修复链（2026-11-18 晚，用户反馈"读 music 目录失败"排查）**：
+1. **曲库 busy 卡死**：退出 App 时在途扫描回调被代际丢弃但 `g_lib_busy`
+   未复位 → 下次进曲库 `lib_start` 直接 return，永远空白。on_exit 补
+   `g_gen++/g_lib_busy=0`（与阅读器同款）；进曲库先显示"正在扫描"；
+   ID3 只读 64KB；扫描 entry 表移 PSRAM（worker 栈 -7.7KB）。
+2. **点歌重启（assert）**：解码任务 TCB 放 PSRAM → `xPortCheckValidTCBMem`
+   断言。TCB 改内部 RAM，栈仍 32KB PSRAM。
+3. **解码器未注册**：esp_audio_codec 2.x 需 `esp_audio_dec_register_default()`
+   （+ simple 路径 `esp_audio_simple_dec_register_default()`）。
+4. **simple_dec ES parser 崩溃**：`esp_es_parse_frame → media_lib_free`
+   InstrFetchProhibited（16/32KB 栈、PSRAM/内部栈均复现）→ 改为自解析
+   MPEG 帧头 + `esp_audio_dec_open/process` 直解 MP3。
+5. **FFT 未初始化**：`dsps_fft2r_init_fc32` 缺失 → 首帧 LoadProhibited。
+6. **SDMMC DMA 分配失败**：23 行曲库把内部 RAM 打碎后
+   `allocate_dma_buf: not enough mem` → fopen 失败；挂卡后预分配 4KB
+   `host.dma_aligned_buffer` 复用。
+7. **内部 RAM 被 LVGL 对象吃光（根因）**：`ALWAYSINTERNAL=2048` 让
+   <2KB 对象全进内部 RAM，曲库打开后 internal 仅 800B → TCB/I2S/DMA
+   连锁失败。改 **0**（优先 PSRAM）后 post-ui internal 102→136KB、
+   曲库打开期间 ~80KB、I2S 48k 重配成功。PSRAM 代价 ~300KB，
+   largest_psram 1.44MB（TTS 768KB 仍够）。
+8. **I2S 采样率冲突**：共享 I2S 的 TX/RX 必须同率；播放期间关闭 mic，
+   spk 开到文件采样率，释放时 spk+mic 一起回 16k（PTT 在 owner 期间
+   本来就被拒绝）。
+
+真机验证：自检任务在设备端播放 "写给黄淮.mp3"（48kHz）进度 0→15s
+持续前进、无 assert/重启；`heap_int` 曲库+播放期间 ~79KB；Wi-Fi
+172.31.19.49 正常；check.sh 全绿 + regress 11/11。**音频主观听感
+（音质/音量）待用户验收。**
 
 **已知边界**：MP3 时长按码率估算（VBR 不准）；无 seek；GBK 编码 ID3
 标签显示回退文件名；PTT 自动暂停恢复未做。

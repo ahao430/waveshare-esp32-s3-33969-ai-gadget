@@ -176,13 +176,18 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     xiaozhi-esp32 S3 同款）+ `CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096`
     （默认 16384 的 in_buf 在对话页必 OOM）。此配置下 OTA 已真网跑通
     （bound=1）。
-20. **LVGL 控件内存默认吃内部 RAM——配网面板曾把 internal 吃到 328B
-    （2026-11-17）**：`LV_USE_CLIB_MALLOC` 下控件走 libc malloc，若
-    `SPIRAM_MALLOC_ALWAYSINTERNAL` 设大（曾 16384）则几百个小对象全
-    挤内部 RAM → `spicommon_dma_setup_priv_buffer` 失败 → Draw bitmap
-    NO_MEM 刷屏（屏幕无输出但 UI 逻辑正常）。**定值 2048（官方
-    xiaozhi-esp32 S3 同款）**：小分配去 PSRAM，内部 RAM 留给
-    Wi-Fi/DMA/驱动。配网列表/键盘是重灾区。
+20. **LVGL 控件内存默认吃内部 RAM——ALWAYSINTERNAL 必须 0（2026-11-18
+    音乐曲库 23 行实证）**：`LV_USE_CLIB_MALLOC` 下控件走 libc malloc；
+    `SPIRAM_MALLOC_ALWAYSINTERNAL` 的语义是"**小于该值强制内部 RAM**"。
+    2048 意味着所有 <2KB 的 LVGL 对象/样式全在内部 RAM——配网列表/键盘
+    是重灾区，更狠的是曲库：23 行 ≈90 个对象把 post-ui internal 从
+    50KB 打到 **800B**，随后连锁 `xTaskCreateStatic` TCB 分配失败、
+    SDMMC `allocate_dma_buf: not enough mem`（fopen 打不开）、I2S
+    `Failed to reconfig STD slot, ret:257`（48k 切不过去）→ 崩溃/重启。
+    改 **0**（所有 malloc 优先 PSRAM）后：post-ui internal 102→136KB、
+    曲库打开期间 internal 稳定 ~80KB、播放/切采样率全部正常；代价是
+    UI 对象占 PSRAM ~300KB（tick 时 largest_psram 1.44MB，TTS 768KB
+    连续块仍够）。**再看"内部 RAM 被谁吃了"先查这个阈值。**
 21. **SNTP 只能初始化一次（2026-11-17 配网重连 abort 实证）**：
     `net_task` 事件循环每次 GOT_IP（初连/重连/切网）都跑
     `esp_sntp_setoperatingmode` → lwIP assert "Operating mode must not
@@ -253,6 +258,7 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
     `ds_files_list` 打 stat-fail 计数、`music_player_scan` 打扫描汇总日志
     （`music` TAG）。
 29. **sdkconfig.defaults 只对 sdkconfig 中不存在的符号生效（2026-11-18 图片 App 实证）**：给 defaults 加 `CONFIG_LV_USE_LODEPNG=y` 后固件仍链不开——sdkconfig 里已存在的 `# CONFIG_LV_USE_LODEPNG is not set` 不会被 defaults 翻转（defaults 只填缺失符号）。**翻转已有符号必须直接改 firmware/sdkconfig**（两处同写防漂移）。另：新开 Kconfig 后首编会全量重跑 kconfgen，历史 build 日志里的老报错（如 DRAM overflow）会混进 grep——判错先 `ls -t build/log/` 取最新。
+30. **音乐播放真机链四连坑（2026-11-18 逐项实证，改音频/解码前必读）**：① `xTaskCreateStatic` 的 **TCB 必须内部 RAM**（`MALLOC_CAP_INTERNAL`），放 PSRAM 会 assert `xPortCheckValidTCBMem` → 点歌瞬间重启；栈可以放 PSRAM（ALLOW_STACK_EXTERNAL=y）。② esp_audio_codec 2.x 的 **simple_dec → MP3 ES parser 在真机不可用**：`esp_es_parse_frame → media_lib_free` InstrFetchProhibited（16/32KB 栈、PSRAM/内部栈均复现）。改为自己解析 MPEG 帧头（MPEG1 `144*bitrate/rate`，MPEG2/2.5 `72*...`）+ `esp_audio_dec_open/process` 直解 MP3；直解前要 `esp_audio_dec_register_default()`（simple 路径还要 `esp_audio_simple_dec_register_default()`）。③ esp-dsp FFT 必须先 `dsps_fft2r_init_fc32()`，否则首帧 `dsps_fft2r_fc32` LoadProhibited。④ 共享 I2S 的 TX/RX **必须同采样率**：只改 spk 到 44.1/48k 会报 `playback conflict` 且 TX 停在 16k；播放期间关闭 mic（PTT 已被 media owner 拒绝）、释放时 spk+mic 一起回 16k（audio_esp32.c）。另：SDMMC 按需分配的 DMA 中转缓冲在内部 RAM 紧张时失败（`allocate_dma_buf: not enough mem` → fopen 失败）；开机挂卡后预分配 4KB 挂 `bsp_sdcard->host.dma_aligned_buffer`（main.c probe_sdcard），全生命周期复用。
 
 ### 内存 / flash 账本（2026-11-18 实测，音乐播放器版）
 
@@ -273,16 +279,17 @@ cd web && npm run build && cd .. && rsync -a --delete web/dist/ bridge/webdist/
 |------|----------------------|
 | 开机显示前 | 143KB / 77.8KB |
 | 显示就绪 | 90.9KB / 31.7KB |
-| 桌面就绪（post-ui） | **70KB / 31.7KB（Wi-Fi init 前提，坑 #19）** |
-| 桌面稳态（tick） | **16.1KB / 8.7KB** |
-| 对话页打开 | 14.9KB / 7.7KB |
+| 桌面就绪（post-ui） | **136KB / 69.6KB（Wi-Fi init 前提，坑 #19；ALWAYSINTERNAL=0 口径）** |
+| 桌面稳态（tick） | **95.2KB / 31.7KB（largest_psram 1.44MB）** |
 - .bss 大项：语音任务静态栈 16KB（16384，picker/sync/apply/reset 共用）、绘制缓冲 19.2KB（480×10×2 双缓冲）、hangprobe 8KB。
 - **改任何 .bss/保留额度前先算 Wi-Fi 底线**：post-ui free 掉到 ~56KB 以下 `esp_wifi_init` 分不到 10 个 RX 缓冲 → 开机 abort 循环（坑 #19）。
 
 **PSRAM（8MB octal @80MHz）**：**堆池 2560K**（2026-11-18 精确账见坑 #27：8MB−rodata 4.18MB−text 1.34MB；
   "4416K"是 GB2312 全集并入前的老数，**坑 #25 机理 rodata↔池 1:1 实测精确成立**）——FETCH/RODATA=y 的虚拟地址窗口划分代价
   （这两开关 =n 时池可到 8192K，直连版实测，但会引爆坑 #14 崩溃，见下）。
-  2026-11-18 口径（池 2560K，坑 #27）：开机桌面已用 ~0.6MB（余 ~2.0MB）；
+  2026-11-18 口径（池 2560K，坑 #27；ALWAYSINTERNAL=0 后 UI 对象整体
+  搬入 PSRAM）：开机桌面已用 ~0.55MB（余 ~1.8MB）；曲库打开/播放期间
+  再多 ~0.3MB，tick 时 largest_psram **1.44MB**——TTS 768KB 连续块仍够；
   语音回合后 ~1.8MB used（TTS 768KB 常驻 + 录音 256KB + 回合临时），
   余 ~0.7MB。**给 PSRAM 大块分配留的余量上限 ~0.7MB**（音乐解码 28KB
   常驻后再扣一点；FLAC 若做需重新过账——89KB heap 但 esp_audio_codec

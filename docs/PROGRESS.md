@@ -200,3 +200,18 @@
 - 模拟器 `sdcard/` 测试数据同步改名；真机若还留着旧 `Pictures/`、
   `Books/`，把文件移进新目录即可（旧目录不再被 App 读取）。
 - 验证：两处编译 + regress 11 App。
+
+## 2026-11-18 晚：音乐播放器真机修复（曲库读取/点歌重启）
+
+- 用户反馈"音乐播放器读取 music/ 目录失败"。设备侧自检实读：
+  `music/` 23 首中文 MP3，stat 0 失败；曲库扫描/列表渲染正常 →
+  问题在**播放链路 + 内部 RAM 耗尽**（详见 ADR-016 真机修复链 8 条）。
+- 关键修复：曲库 busy 退出复位 + "正在扫描"提示 + ID3 64KB 上限；
+  解码任务 TCB 回内部 RAM；MP3 解码器注册 + 绕开 simple_dec ES parser
+  改自解析帧头直解；FFT `dsps_fft2r_init_fc32`；SDMMC 预分配 4KB DMA
+  中转；**`SPIRAM_MALLOC_ALWAYSINTERNAL` 2048→0**（LVGL 对象移 PSRAM，
+  内部 RAM 从 800B 恢复到 ~80KB）；共享 I2S 播放期间关 mic、释放回 16k。
+- 真机实测：48kHz MP3 播放进度 0→15s 连续推进、无重启；
+  post-ui internal 136KB、tick largest_psram 1.44MB；Wi-Fi 正常。
+- 验证：check.sh 全绿；regress 11/11；真机自检播放跑通。
+  音频主观听感（音质/音量/耳机）待用户验收。

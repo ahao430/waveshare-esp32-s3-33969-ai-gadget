@@ -6,6 +6,9 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 
 #include <lvgl.h>
 #include "app_manager.h"
@@ -105,21 +108,27 @@ static void show_view0_cb(lv_event_t *e);
 
 static void lib_async(void *arg)
 {
-    if ((int)(intptr_t)arg != g_gen || !g_lib_rows) return;
-    if (g_lib_rows) {
-        lv_obj_clean(g_lib_rows);
-        g_lib_busy = 0;
-        /* 文件管理器联动：曲库命中即切播（ADR-019） */
-        if (s_open_pending[0]) {
-            for (int i = 0; i < music_player_count(); i++) {
-                const music_track_t *tk = music_player_track(i);
-                if (tk && strstr(tk->path, s_open_pending)) {
-                    music_player_play(i);
-                    break;
-                }
+    int gen = (int)(intptr_t)arg;
+    if (gen != g_gen) return;            /* 页面已退出/重扫：丢弃 */
+    if (!g_lib_rows) {
+        g_lib_busy = 0;                  /* 防 busy 卡死导致之后永不再扫 */
+        return;
+    }
+    lv_obj_clean(g_lib_rows);
+    g_lib_busy = 0;
+#ifdef ESP_PLATFORM
+    ESP_LOGI("music", "lib view: %d tracks", music_player_count());
+#endif
+    /* 文件管理器联动：曲库命中即切播（ADR-019） */
+    if (s_open_pending[0]) {
+        for (int i = 0; i < music_player_count(); i++) {
+            const music_track_t *tk = music_player_track(i);
+            if (tk && strstr(tk->path, s_open_pending)) {
+                music_player_play(i);
+                break;
             }
-            s_open_pending[0] = 0;
         }
+        s_open_pending[0] = 0;
     }
     int n = music_player_count();
     if (n == 0) {
@@ -133,6 +142,7 @@ static void lib_async(void *arg)
         }
         return;
     }
+    if (g_lib_hint) lv_obj_add_flag(g_lib_hint, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < n; i++) {
         const music_track_t *t = music_player_track(i);
         lv_obj_t *row = lv_obj_create(g_lib_rows);
@@ -172,8 +182,21 @@ static void lib_start(void)
     g_lib_busy = 1;
     g_gen++;
     music_player_init();
+    /* 扫描要读 20+ 个文件的 ID3 头，真机上不是瞬时的：先给"扫描中"
+     * 提示，避免用户以为曲库读不出来 */
+    if (g_lib_hint) {
+        lv_obj_clear_flag(g_lib_hint, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(g_lib_hint, "正在扫描 music/ …");
+    }
     if (ui_worker_start(lib_worker, (void *)(intptr_t)g_gen, 16 * 1024) != 0) {
         g_lib_busy = 0;
+        /* 内部 RAM 碎片化时 pthread 栈可能建不出来（坑 #13）：明确提示，
+         * 不要留下一个永远空白的曲库（2026-11-18 用户反馈读目录失败） */
+        if (g_lib_hint) {
+            lv_obj_clear_flag(g_lib_hint, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(g_lib_hint,
+                              "内存紧张，曲库扫描未启动\n退出重进曲库再试");
+        }
     }
 }
 
@@ -535,12 +558,20 @@ void ui_music_build(lv_obj_t *scr, int app_id)
     build_player(g_vp);
     show_view(0);
     demo_hooks();
+    /* 文件管理器联动（ADR-019）：带曲目路径打开 → 立即扫描，命中后在
+     * lib_async 里切播（否则 pending 要等用户手动进曲库才消费） */
+    if (s_open_pending[0]) lib_start();
     if (!g_timer) g_timer = lv_timer_create(music_tick_cb, 200, NULL);
     /* 后台常驻 timer 不登记 app_manager（ADR-011 番茄钟模式） */
 }
 
 void ui_music_on_exit(void)
 {
+    /* 在途曲库扫描：代际 +1 丢弃回调，并复位 busy——否则 worker 回来时
+     * g_lib_rows 已 NULL，busy 永远卡 1，下次进曲库 lib_start 直接返回：
+     * 曲库永远空白（2026-11-18 真机反馈"读取 music 目录失败"根因） */
+    g_gen++;
+    g_lib_busy = 0;
     g_root = NULL;
     g_vp = g_vlib = NULL;
     g_vinyl = g_arc = g_dot = NULL;
@@ -557,4 +588,10 @@ void ui_music_on_exit(void)
 void ui_music_open_path(const char *rel)
 {
     snprintf(s_open_pending, sizeof(s_open_pending), "%s", rel ? rel : "");
+}
+
+/* 无触摸自检（GADGET_SELFTEST_MUSIC）：直接切曲库并触发扫描 */
+void ui_music_debug_lib(void)
+{
+    if (g_root) show_view(1);
 }

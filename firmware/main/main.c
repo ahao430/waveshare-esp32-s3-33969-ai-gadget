@@ -21,6 +21,7 @@
 #include "hal/gpio_ll.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
 #include "esp_system.h"
@@ -38,6 +39,7 @@
 #include "ui_keys.h"
 #include "app_manager.h" /* app_manager_current_id：Wi-Fi 省电自动档用 */
 #include "data_source.h"
+#include "music_player.h"
 #include "voice_session.h"
 
 #include <math.h>
@@ -136,6 +138,36 @@ static void net_probe_once(void)
 /* 开机 12s 自动扫一次打印结果（验证扫描链路用），平时保持 0 */
 #ifndef GADGET_SELFTEST_SCAN
 #define GADGET_SELFTEST_SCAN 0
+#endif
+/* 开机 12s 自动进音乐页并切曲库（验证曲库扫描/渲染/播放链路），平时保持 0 */
+#ifndef GADGET_SELFTEST_MUSIC
+#define GADGET_SELFTEST_MUSIC 0
+#endif
+#if GADGET_SELFTEST_MUSIC
+static void selftest_music_task(void *arg)
+{
+    (void)arg;
+    vTaskDelay(pdMS_TO_TICKS(12000)); /* 等 remote config/桌面重建落定 */
+    display_lock();
+    ui_open_app(UI_APP_MUSIC);
+    display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(2500));
+    display_lock();
+    ui_music_debug_lib(); /* 进曲库 → lib_start worker 扫描 */
+    display_unlock();
+    vTaskDelay(pdMS_TO_TICKS(8000));
+    ESP_LOGW(TAG, "SELFTEST music: tracks=%d note='%s' play(0)",
+             music_player_count(), music_player_scan_note());
+    music_player_play(0);
+    for (int i = 0; i < 30; i++) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        int cur = 0, tot = 0;
+        music_player_get_progress(&cur, &tot);
+        ESP_LOGW(TAG, "SELFTEST music: state=%d cur=%d %d/%ds",
+                 (int)music_player_state(), music_player_cur_idx(), cur, tot);
+    }
+    vTaskDelete(NULL);
+}
 #endif
 #if GADGET_SELFTEST_SCAN
 static void selftest_scan_task(void *arg)
@@ -353,6 +385,20 @@ static void probe_sdcard(void)
         return;
     }
     ESP_LOGI(TAG, "sdcard: mounted, cid.name=%s", bsp_sdcard->cid.name);
+    /* SDMMC 默认每次读写按需 heap_caps_malloc(MALLOC_CAP_DMA) 中转；
+     * 曲库 20+ 行 LVGL 对象把内部 RAM 打碎后该分配失败，fopen/read 直接
+     * 报 "allocate_dma_buf: not enough mem"（2026-11-18 真机点歌打不开
+     * 实证）。开机内存充裕时预分配 4KB 挂到 host，之后全部 TF 读写复用。 */
+    static void *s_sd_dma;
+    if (!s_sd_dma) {
+        s_sd_dma = heap_caps_malloc(4096, MALLOC_CAP_DMA);
+        if (s_sd_dma) {
+            bsp_sdcard->host.dma_aligned_buffer = s_sd_dma;
+            ESP_LOGI(TAG, "sdcard: dma buffer preallocated 4KB");
+        } else {
+            ESP_LOGW(TAG, "sdcard: dma buffer prealloc failed");
+        }
+    }
     ds_files_ensure_dirs(); /* backup/cache/appearance/downloads（ADR-010） */
 }
 
@@ -467,11 +513,13 @@ static void saver_exit(void)
 
 static void heap_report(const char *where)
 {
-    ESP_LOGI(TAG, "heap[%s]: total=%u internal=%u largest_int=%u largest_dma=%u",
+    ESP_LOGI(TAG, "heap[%s]: total=%u internal=%u largest_int=%u largest_dma=%u "
+             "largest_psram=%u",
              where, (unsigned)esp_get_free_heap_size(),
              (unsigned)esp_get_free_internal_heap_size(),
              (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
-             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
 }
 
 /* LVGL 心跳：本回调跑在 LVGL 任务里。看门狗用它判断"真卡死"还是
@@ -1095,6 +1143,9 @@ void app_main(void)
 #endif
 #if GADGET_SELFTEST_SCAN
     xTaskCreate(selftest_scan_task, "st_scan", 6144, NULL, 3, NULL);
+#endif
+#if GADGET_SELFTEST_MUSIC
+    xTaskCreate(selftest_music_task, "st_music", 12288, NULL, 3, NULL);
 #endif
 
     heap_report("post-display");
