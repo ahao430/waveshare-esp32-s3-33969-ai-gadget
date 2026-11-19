@@ -287,6 +287,9 @@ typedef struct {
     lv_obj_t *refresh_lbl; /* "刷新"按钮文字（拉取中转"刷新中…"） */
     int sub_idx;
     int arc_used; /* 当前 used%（-1=余额型不画弧；自绘渐变取色用） */
+    long cd_fired_at;    /* 已为哪个 reset_at 触发过「归零刷新」（防每秒重发） */
+    uint32_t cd_next_ms; /* 归零后的下次重试时刻（服务端窗口尚未滚动时） */
+    int cd_retries;      /* 归零后已发起的刷新次数（上限防刷屏） */
 } quota_refs_t;
 
 /* 每订阅一 tile，refs 按下标隔离（单 App 屏幕存活，静态数组足够） */
@@ -295,6 +298,7 @@ static lv_obj_t *g_q_dots[UI_DOTS_MAX];
 static lv_obj_t *g_q_tv;
 static lv_timer_t *g_q_cd_timer;
 static lv_timer_t *g_q_auto_timer;
+static uint32_t g_q_zero_last_ms; /* 归零刷新的页级节流（reset_at 抖动防抖） */
 static int g_q_app_id;
 
 /* 霓虹渐变弧（设计稿 2026-11-17）：LVGL 9.2 的 arc 不支持渐变描边
@@ -805,12 +809,22 @@ static void quota_build(lv_obj_t *scr, int app_id)
     }
 }
 
-/* 倒计时 tick：重算窗口型 tile 的环外大倒计时（cd_big；按 5h 或周窗口） */
+/* 倒计时 tick：重算窗口型 tile 的环外大倒计时（cd_big；按 5h 或周窗口）。
+ * 归零瞬间主动拉一次数据（用户反馈 2026-11-19：窗口倒计时走完页面仍
+ * 显示旧额度，要等自动刷新 tick 才更新）。服务端窗口可能因时钟偏差
+ * 还没滚到新周期——届时返回同一 reset_at，按 10s 间隔重试，最多
+ * QUOTA_ZERO_RETRY_MAX 次，之后交回自动刷新 timer。 */
+#define QUOTA_ZERO_RETRY_MS 10000u
+#define QUOTA_ZERO_RETRY_MAX 3
+/* 页级最小间隔：Bridge 若把 resetTime 按「剩余秒数」换算（每次拉取
+ * 都不同），归零后标记会反复变化——限制最多 5s 一次，防连环拉取。 */
+#define QUOTA_ZERO_MIN_INTERVAL_MS 5000u
 static void quota_countdown_cb(lv_timer_t *t)
 {
     (void)t;
     const gadget_state_t *s = ds_state();
     long now = (long)time(NULL);
+    bool zero_hit = false;
     for (int i = 0; i < s->sub_count && i < DS_SUB_MAX; i++) {
         quota_refs_t *r = &g_q[i];
         if (!r->cd_big) continue;
@@ -828,7 +842,37 @@ static void quota_countdown_cb(lv_timer_t *t)
         snprintf(buf, sizeof(buf), "%02ld:%02ld:%02ld",
                  remain / 3600, (remain % 3600) / 60, remain % 60);
         lv_label_set_text(r->cd_big, buf);
+
+        /* 归零触发：首次到零（含页面打开时已过期）立即拉；
+         * 同一 reset_at 未滚动则按 10s 重试，上限 3 次 */
+        if (reset_at <= 0 || remain > 0) continue;
+        bool fire = false;
+        if (r->cd_fired_at != reset_at) {
+            if (g_q_zero_last_ms == 0 ||
+                lv_tick_elaps(g_q_zero_last_ms) >= QUOTA_ZERO_MIN_INTERVAL_MS) {
+                r->cd_fired_at = reset_at;
+                r->cd_retries = 0;
+                r->cd_next_ms = lv_tick_get();
+                fire = true;
+            }
+        } else if (r->cd_retries < QUOTA_ZERO_RETRY_MAX &&
+                   lv_tick_elaps(r->cd_next_ms) >= QUOTA_ZERO_RETRY_MS) {
+            fire = true;
+        }
+        if (fire) {
+            r->cd_retries++;
+            r->cd_next_ms = lv_tick_get();
+            if (quota_fetch_start(g_q_app_id) == 0) {
+                g_q_zero_last_ms = lv_tick_get();
+                zero_hit = true;
+            } else {
+                /* 忙（上一轮在途）：下一 tick 再试，不消耗重试额度 */
+                r->cd_retries--;
+                r->cd_next_ms = lv_tick_get() - QUOTA_ZERO_RETRY_MS;
+            }
+        }
     }
+    if (zero_hit) UILOG("quota countdown zero: auto refresh");
 }
 
 /* 自动刷新（间隔由 Web「订阅自动刷新」下发，默认 15 分钟）：
