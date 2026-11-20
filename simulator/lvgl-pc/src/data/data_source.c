@@ -168,6 +168,17 @@ const char *ds_source_name(void)
     return g_impl->name;
 }
 
+void ds_power_update(int pct, int mv, bool present, bool usb, bool charging)
+{
+    /* 真机电源回填：mock/bridge 的 refresh 都不写电源字段（本就属于
+     * 设备本地数据），不回填就永远是出厂默认 82%（2026-11-20 勘误）。 */
+    if (pct >= 0 && pct <= 100) g_state.battery_pct = pct;
+    if (mv > 2500 && mv < 5000) g_state.battery_voltage_mv = mv;
+    g_state.battery_present = present;
+    g_state.usb_connected = usb;
+    g_state.charging = charging;
+}
+
 ds_prewarm_result_t ds_prewarm_zhipu(char *msg, int msg_len)
 {
     if (!g_impl) ds_init(NULL, NULL, NULL);

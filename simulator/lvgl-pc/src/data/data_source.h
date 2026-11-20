@@ -84,6 +84,13 @@ bool ds_refresh(void);
 /* 人读名称，如 "mock" / "bridge(http://127.0.0.1:8081/mock)" */
 const char *ds_source_name(void);
 
+/* 电源状态回填（真机：main.c 把 power_manager 轮询快照推进来；模拟器
+ * 不调用——mock/GADGET_DEMO_BATTERY 已覆盖。2026-11-20 勘误：此前真机
+ * 从未回填，状态栏电量一直是出厂默认 82%，电池耗尽 PMU 硬断电时用户
+ * 看到"80% 多却关机"。字段为 int/bool 直写，esp_timer 任务调用可接受；
+ * UI 侧 statusbar 5s timer 自行读 ds_state 刷新。 */
+void ds_power_update(int pct, int mv, bool present, bool usb, bool charging);
+
 /* 智谱预热（PLAN §5.6）：调用 Bridge POST /quota/zhipu/prewarm（幂等 Key
  * 由实现生成）。结果说明写入 msg（含 skipped_* 原因）。UI 必须二次确认
  * 后才可调用；预热不承诺重置 5 小时窗口。 */

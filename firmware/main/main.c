@@ -1130,6 +1130,18 @@ static void wifi_start(void)
     }
 }
 
+/* 电源快照 → UI 数据源（2026-11-20 勘误接线）：此前真机从未回填
+ * ds_state 电源字段，状态栏电量一直是出厂默认 82%（mock 初值），
+ * 电池耗尽 PMU 硬断电时用户看到"80% 多却关机"。power_manager 轮询
+ * （esp_timer 任务上下文，写字段无阻塞）推新值，statusbar 5s timer
+ * 读 ds_state 自然刷新；屏保页本就直接读 power_manager 快照。 */
+static void pm_feed_ui_cb(const battery_status_t *st, void *user)
+{
+    (void)user;
+    ds_power_update(st->battery_percent, st->battery_voltage_mv,
+                    st->battery_present, st->usb_connected, st->charging);
+}
+
 void app_main(void)
 {
     i2c_scan();
@@ -1139,6 +1151,7 @@ void app_main(void)
     if (pm_err != ESP_OK) {
         ESP_LOGW(TAG, "power_manager unavailable: %s", esp_err_to_name(pm_err));
     } else {
+        power_manager_subscribe(pm_feed_ui_cb, NULL);
         /* PWR 键：长按优雅关机 + 10s 硬关兜底（2026-11-16） */
         esp_err_t key_err = power_manager_keys_init();
         if (key_err != ESP_OK) {

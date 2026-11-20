@@ -85,6 +85,25 @@ static esp_err_t read_regs(uint8_t reg, uint8_t *val, size_t len)
     return err;
 }
 
+/* 电压→可用电量（保守 LiPo 曲线，放电方向）。AXP2101 无库仑计，
+ * 0xA4 本身也是电压估算——此表用于放电态的显示上限钳制。 */
+static int volt_pct(int mv)
+{
+    static const struct { int mv; int pct; } t[] = {
+        {4150, 100}, {4050, 90}, {3950, 78}, {3850, 62}, {3750, 45},
+        {3650, 30}, {3550, 20}, {3450, 12}, {3350, 6}, {3250, 2},
+    };
+    if (mv >= t[0].mv) return 100;
+    for (int i = 1; i < (int)(sizeof(t) / sizeof(t[0])); i++) {
+        if (mv >= t[i].mv) {
+            int span = t[i - 1].mv - t[i].mv;
+            int f = span ? (t[i - 1].mv - mv) * 100 / span : 0;
+            return t[i].pct + (t[i - 1].pct - t[i].pct) * f / 100;
+        }
+    }
+    return 0;
+}
+
 esp_err_t battery_get_status(battery_status_t *status)
 {
     if (status == NULL) return ESP_ERR_INVALID_ARG;
@@ -106,6 +125,16 @@ esp_err_t battery_get_status(battery_status_t *status)
 
     status->battery_voltage_mv = ((vb[0] & 0x3F) << 8) | vb[1];
     status->battery_percent = pct;
+
+    /* 显示电量钳制（2026-11-20）：0xA4 是 PMU 电压估算电量，负载重时
+     * 偏高（准开路电压），电池耗尽边沿出现过"显示 80%+ 欠压硬断电"。
+     * 放电态（无 USB 不充电）用电压曲线 +150mV 负载压降补偿做上限：
+     * 宁可偏低，不让用户在高位百分比下被断电打个措手不及；充电态
+     * 维持 0xA4 原值。 */
+    if (status->battery_present && !status->usb_connected && !status->charging) {
+        int cap = volt_pct(status->battery_voltage_mv + 150);
+        if (status->battery_percent > cap) status->battery_percent = cap;
+    }
 
     ESP_LOGD(TAG, "s0=%02X s1=%02X vb=%dmV pct=%d%% usb=%d bat=%d chg=%d",
              s0, s1, status->battery_voltage_mv, pct,

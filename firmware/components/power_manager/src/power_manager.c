@@ -12,6 +12,15 @@ static const char *TAG = "pwr";
 
 #define POLL_NORMAL_MS  (30 * 1000) /* 正常 30s（用户拍板） */
 #define POLL_CHARGING_MS (15 * 1000) /* 充电中 15s */
+#define POLL_LOWBATT_MS (5 * 1000)  /* 电池供电且 <3.55V：加密观测（2026-11-20） */
+
+/* 电压耗尽保护（2026-11-20）：AXP2101 无库仑计，0xA4 电量在电池
+ * 老化/重载下偏高，用户遇到"显示 80%+ 被 PMU 欠压硬断电、开机即断"。
+ * PMU 硬断电不给我们任何机会（文件系统/进度裸断）——在它断电之前
+ * 按电压提前优雅关机：3.35V 持续 2 次读数（5s 档 ≈10s）即软件关机。 */
+#define PM_EXHAUST_VMV 3350
+#define PM_EXHAUST_N   2
+#define PM_WARN_VMV    3450
 
 static battery_status_t g_last;
 static bool g_inited;
@@ -40,13 +49,39 @@ void power_manager_subscribe(power_manager_cb_t cb, void *user)
 static void apply_policy(const battery_status_t *st)
 {
     static int last_pct = -1;
-    static bool last_charging = false;
+    static bool last_charging = false, last_usb = false, last_present = false;
+    static int exhaust_cnt;
 
     bool changed = (st->battery_percent != last_pct) ||
-                   (st->charging != last_charging);
+                   (st->charging != last_charging) ||
+                   (st->usb_connected != last_usb) ||
+                   (st->battery_present != last_present);
     if (changed) {
         last_pct = st->battery_percent;
         last_charging = st->charging;
+        last_usb = st->usb_connected;
+        last_present = st->battery_present;
+    }
+
+    bool on_batt = st->battery_present && !st->usb_connected && !st->charging;
+
+    /* 电压耗尽：提前于 PMU 硬断电优雅关机（文件系统/进度不裸断） */
+    if (on_batt && st->battery_voltage_mv > 2500 &&
+        st->battery_voltage_mv <= PM_EXHAUST_VMV) {
+        if (++exhaust_cnt >= PM_EXHAUST_N) {
+            ESP_LOGW(TAG, "battery exhausted (%dmV %d%%) - graceful power off",
+                     st->battery_voltage_mv, st->battery_percent);
+            (void)battery_power_off();
+            return;
+        }
+        ESP_LOGW(TAG, "battery near exhaustion (%dmV %d%%)",
+                 st->battery_voltage_mv, st->battery_percent);
+    } else {
+        exhaust_cnt = 0;
+        if (on_batt && st->battery_voltage_mv <= PM_WARN_VMV) {
+            ESP_LOGW(TAG, "battery low voltage (%dmV %d%%) - charge soon",
+                     st->battery_voltage_mv, st->battery_percent);
+        }
     }
 
     if (st->battery_present && st->battery_percent < PM_CRITICAL_BATTERY_PCT) {
@@ -67,13 +102,26 @@ static void poll_timer_cb(void *arg)
     battery_status_t st;
     if (battery_get_status(&st) == ESP_OK) {
         g_last = st;
+        /* 每轮一行观测（30/15s 一条；低电压档 5s 一条）：电压/电量
+         * 关系是校准钳制曲线的依据，真机排障靠它（2026-11-20） */
+        ESP_LOGI(TAG, "battery: %dmV %d%% usb=%d chg=%d",
+                 st.battery_voltage_mv, st.battery_percent,
+                 st.usb_connected, st.charging);
         apply_policy(&st);
     } else {
         ESP_LOGD(TAG, "battery read failed; keep last snapshot");
     }
 
-    /* 充电态提高轮询频率（15s），否则 30s。esp_timer 周期单位是 µs。 */
-    uint64_t period_ms = g_last.charging ? POLL_CHARGING_MS : POLL_NORMAL_MS;
+    /* 轮询频率：充电 15s；电池供电且 <3.55V 5s（耗尽确认要 10s 内完成）；
+     * 其余 30s。esp_timer 周期单位是 µs。 */
+    uint64_t period_ms = POLL_NORMAL_MS;
+    if (g_last.charging) {
+        period_ms = POLL_CHARGING_MS;
+    } else if (g_last.battery_present && !g_last.usb_connected &&
+               g_last.battery_voltage_mv > 2500 &&
+               g_last.battery_voltage_mv <= 3550) {
+        period_ms = POLL_LOWBATT_MS;
+    }
     esp_timer_stop(g_timer);
     esp_timer_start_periodic(g_timer, period_ms * 1000ULL);
 }
